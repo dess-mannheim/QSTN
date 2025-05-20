@@ -1,5 +1,5 @@
 
-from typing import List
+from typing import List, Dict
 
 from utilities.survey_classes.survey_objects import SurveyQuestion, SurveyOptions
 
@@ -12,6 +12,7 @@ import pandas as pd
 import yaml
 
 class LLMAnswerParser:
+#TODO This is a static class atm. Not needed in python. Just put it in a file.
 
     DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
     DEFAULT_PROMPT: str = "Your task is to parse the correct answer option from an open text answer a LLM has given to survey questions. You will be provided with the possible answer options and the full text answer. Answer ONLY and EXACTLY with one of the possible answer options or 'INVALID', if the provided answer does give on of the options."
@@ -136,7 +137,20 @@ Answer of the LLM: '{answers[i + j]}'"""
         return survey_answers
 
     @staticmethod
-    def json_parser(answer:str) -> pd.DataFrame:
+    def json_parser(answer:str) -> Dict[str, str]:
         result_json = yaml.safe_load(answer)
 
-        return pd.DataFrame(result_json)
+        return result_json
+    
+    @staticmethod
+    def json_parse_all(survey_answers: Dict[int, List[str]]) -> pd.DataFrame:
+        #TODO @Jens, If you use this for the whole survey prompt, we cannot link the question ID to the answer, if it is randomized. You have to be aware of that.
+        answers = []
+        for key, value in survey_answers.items():
+            for i in range(len(value)):
+                parsed_answer = LLMAnswerParser.json_parser(value[i])
+                answers.append((key, i, *parsed_answer.values()))
+        df = pd.DataFrame(answers, columns=["question_id", "batch", *parsed_answer.keys()])
+        
+
+        return df.sort_values(by=['batch', 'question_id'])

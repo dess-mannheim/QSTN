@@ -17,6 +17,7 @@ import pandas as pd
 import random
 
 class SurveyOptionGenerator:
+    #TODO This probably should be its own file instead. My Java programming took over :D
     """
     A class responsible for preparing optional answers for the LLM.
     """
@@ -72,10 +73,13 @@ class LLMSurvey:
 
     def load_survey(self, survey_path: str) -> List[SurveyQuestion]:
         """
-        Loads a prepared survey by ID.
+        Loads a prepared survey in csv format from a path.
+
+        Currently csv files need to have the structure:
+        question_id, survey_question
+        1, question1
 
         :param survey_path: Path to the survey to load.
-        :param survey_id: How the survey should be accessed for further calls.
         :return: List of Survey Questions
         """
         survey_questions: List[SurveyQuestion] = []
@@ -105,6 +109,14 @@ class LLMSurvey:
     def prepare_survey(self, prompt: Optional[Union[str, List[str]]] = "Do you see yourself as someone who...", 
                        options: Optional[Union[SurveyOptions, Dict[int, SurveyOptions]]] = None, 
                        prefilled_answers: Optional[Dict[int, str]] = None) -> List[SurveyQuestion]:
+        """
+        Prepares a survey with additional prompts for each question, answer options and prefilled answers.
+
+        :param prompt: Either one prompt for each question, or a list of different questions. Needs to have the same amount of prompts as the survey questions.
+        :param options: Either the same Survey Options for all questions, or a dictionary linking the question id to the desired survey options.
+        :para, prefilled_answers Linking survey question id to a prefilled answer.
+        :return: List of updated Survey Questions
+        """
         survey_questions = self._survey
 
         prompt_list = isinstance(prompt, list)
@@ -153,6 +165,12 @@ class LLMSurvey:
         return updated_questions
 
     def generate_survey_prompt(self, survey_question: SurveyQuestion) -> str:
+        """
+        Returns the string of how a survey question would be prompted to the model.
+
+        :param survey_question: Survey question to prompt.
+        :return: Prompt that will be given to the model for this question.
+        """
         if survey_question.options:
             options_prompt = survey_question.options.create_options_str()
         else:
@@ -162,18 +180,25 @@ class LLMSurvey:
 {options_prompt}"""
         return survey_prompt
 
-    def conduct_survey_in_context(self, model:LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> List[str]:
+    def conduct_survey_in_context(self, model:LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> Dict[int, List[str]]:
         """
-        Conducts the entire survey in a single LLM context window.
+        Conducts the entire survey multiple prompts but within the same context window.
 
-        :param survey_id: Identifier of the survey to conduct.
-        :return: Mapping of question IDs to answers.
+        :param model: LLM instance of vllm.
+        :param system_prompt: The system prompt of the model.
+        :param task_instruction: The task instructio the model will be prompted with.
+        :param json_structured_output: If json_structured output should be used.
+        :param json_structure: The structure the final ouput should have.
+        :param batch_size: How many inferences should run in parallel.
+        :param print_conversation: If True, the whole conversation will be printed.
+        :param generation_kwargs: All keywords needed for SamplingParams.
+        :return: Generated text by the LLM in double list format
         """
         survey_questions = self._survey
         
         default_prompt = f"""{task_instruction}"""
 
-        answers = []
+        answers = {}
 
         assistant_messages: List[List[str]] = [[]]
         while len(assistant_messages) <= batch_size:
@@ -195,7 +220,7 @@ class LLMSurvey:
                 for i in range(batch_size):
                     assistant_messages[i].append(survey_question.prefilled_answer)
                     batch_prefilled_answers.append(survey_question.prefilled_answer)
-                answers.append(batch_prefilled_answers)
+                answers[survey_question.question_id] = batch_prefilled_answers
                 continue
 
             if json_structured_output:
@@ -219,18 +244,25 @@ class LLMSurvey:
             for i in range(len(output)):
                 assistant_messages[i].append(output[i])
 
-            answers.append(output)
+            answers[survey_question.question_id] = output
 
         #model.shutdown()
 
         return answers
 
-    def conduct_survey_question_by_question(self, model: LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> List[List[str]]:
+    def conduct_survey_question_by_question(self, model: LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> Dict[int, List[str]]:
         """
-        Conducts the survey one question at a time, each with a fresh LLM context.
+        Conducts the survey with each question in a new context.
 
-        :param survey_id: Identifier of the survey to conduct.
-        :return: Mapping of question IDs to answers.
+        :param model: LLM instance of vllm.
+        :param system_prompt: The system prompt of the model.
+        :param task_instruction: The task instructio the model will be prompted with.
+        :param json_structured_output: If json_structured output should be used.
+        :param json_structure: The structure the final ouput should have.
+        :param batch_size: How many inferences should run in parallel.
+        :param print_conversation: If True, the whole conversation will be printed.
+        :param generation_kwargs: All keywords needed for SamplingParams.
+        :return: Generated text by the LLM in double list format
         """
         survey_questions = self._survey
         
@@ -240,7 +272,7 @@ class LLMSurvey:
 
         #model = BasicLLama(model_id)
 
-        answers = []
+        answers = {}
 
         for survey_question in survey_questions:
             #print(survey_question)
@@ -267,17 +299,24 @@ class LLMSurvey:
                 output = batch_generation(model=model, system_messages=[json_system_prompt]*batch_size, prompts=[full_prompt]*batch_size, guided_decoding_params=[guided_decoding]*batch_size, verbose=print_conversation, **generation_kwargs)
             else:
                 output = batch_generation(model=model, system_messages=[system_prompt]*batch_size, prompts=[full_prompt]*batch_size, verbose=print_conversation, **generation_kwargs)
-            answers.append(output)
+            answers[survey_question.question_id] = output
         
         #model.shutdown()
         return answers
 
-    def conduct_whole_survey_one_prompt(self, model: LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str=DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> List[str]:
+    def conduct_whole_survey_one_prompt(self, model: LLM, system_prompt:str=DEFAULT_SYSTEM_PROMPT, task_instruction: str=DEFAULT_TASK_INSTRUCTION, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, batch_size:int=1, print_conversation:bool=False, **generation_kwargs: Any) -> Dict[int, List[str]]:
         """
-        Conducts a survey in one prompt.
+        Conducts the entire survey in one single LLM prompt.
 
-        :param survey_id: Identifier of the survey to conduct.
-        :return: Updated mapping of all question IDs to answers.
+        :param model: LLM instance of vllm.
+        :param system_prompt: The system prompt of the model.
+        :param task_instruction: The task instructio the model will be prompted with.
+        :param json_structured_output: If json_structured output should be used.
+        :param json_structure: The structure the final ouput should have.
+        :param batch_size: How many inferences should run in parallel.
+        :param print_conversation: If True, the whole conversation will be printed.
+        :param generation_kwargs: All keywords needed for SamplingParams.
+        :return: Generated text by the LLM in double list format
         """
         survey_questions = self._survey
         
@@ -305,6 +344,8 @@ class LLMSurvey:
     	
         #print(full_prompt)
 
+        answers = {}
+
         if json_structured_output:
             creator = PromptCreation()
 
@@ -323,7 +364,9 @@ class LLMSurvey:
         else:
             output = batch_generation(model=model, system_messages=[system_prompt]*batch_size, prompts=[full_prompt]*batch_size, verbose=print_conversation, **generation_kwargs)
 
-        return output
+        #For consistency with other methods.
+        answers["all"] = output
+        return answers
 
 if __name__ == "__main__":
     pass
