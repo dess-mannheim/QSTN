@@ -7,6 +7,10 @@ from inference.survey_inference import batch_generation
 
 from vllm import LLM
 
+import pandas as pd
+
+import yaml
+
 class LLMAnswerParser:
 
     DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
@@ -35,14 +39,13 @@ Answer of the LLM: '{answers[i + j]}'"""
                 j += 1
             #print(structured_output_options)
             if use_structured_ouput:
-                output = batch_generation(system_messages=[system_prompt]*len(survey_prompts), prompts=survey_prompts, structured_ouput_options=structured_output_options, temperature=0)
+                output = batch_generation(model=model, system_messages=[system_prompt]*len(survey_prompts), prompts=survey_prompts, structured_ouput_options=structured_output_options, temperature=0)
             else:
                 print("No structured Output!")
                 print(survey_prompts)
-                output = batch_generation(system_messages=[system_prompt]*len(survey_prompts), prompts=survey_prompts, temperature=0)
+                output = batch_generation(model=model, system_messages=[system_prompt]*len(survey_prompts), prompts=survey_prompts, temperature=0)
             #print(output)
             results.extend(output)
-        model.shutdown()
         return results
 
     @staticmethod
@@ -131,3 +134,9 @@ Answer of the LLM: '{answers[i + j]}'"""
                                 break
 
         return survey_answers
+
+    @staticmethod
+    def json_parser(answer:str) -> pd.DataFrame:
+        result_json = yaml.safe_load(answer)
+
+        return pd.DataFrame(result_json)

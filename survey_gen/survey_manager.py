@@ -99,11 +99,11 @@ class LLMSurvey:
 
     @overload
     def prepare_survey(self, prompt: Optional[List[str]] = ["Do you see yourself as someone who..."], 
-                       options: Optional[List[SurveyOptions]] = None, 
+                       options: Optional[Dict[int, SurveyOptions]] = None, 
                        prefilled_answers: Optional[Dict[int, str]] = None) -> List[SurveyQuestion]: ...
     
     def prepare_survey(self, prompt: Optional[Union[str, List[str]]] = "Do you see yourself as someone who...", 
-                       options: Optional[Union[SurveyOptions, List[SurveyOptions]]] = None, 
+                       options: Optional[Union[SurveyOptions, Dict[int, SurveyOptions]]] = None, 
                        prefilled_answers: Optional[Dict[int, str]] = None) -> List[SurveyQuestion]:
         survey_questions = self._survey
 
@@ -111,15 +111,12 @@ class LLMSurvey:
         if prompt_list:
             assert len(prompt) == len(survey_questions), "If a list of prompts is given, length of prompt and survey questions have to be the same" 
         
-        options_double_list = False
+        options_dict = False
 
         if isinstance(options, SurveyOptions):
-            options_double_list = False
-        elif isinstance(options, list):
-            options_double_list = True
-    
-        if options_double_list:
-            assert len(options) == len(survey_questions), "If a list of options is given, length of options and survey questions have to be the same" 
+            options_dict = False
+        elif isinstance(options, Dict):
+            options_dict = True
 
         updated_questions = []
 
@@ -128,27 +125,27 @@ class LLMSurvey:
             #for survey_question in survey_questions:
                 #prefilled_answers[survey_question.question_id] = None
 
-        if not prompt_list and not options_double_list:            
+        if not prompt_list and not options_dict:            
             updated_questions = []
             for i in range(len(survey_questions)):
                 new_survey_question = replace(survey_questions[i], prompt = prompt, options = options, 
                                               prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
                 updated_questions.append(new_survey_question)
 
-        elif not prompt_list and options_double_list:
+        elif not prompt_list and options_dict:
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt, options = options[i], 
+                new_survey_question = replace(survey_questions[i], prompt = prompt, options = options.get(survey_questions[i].question_id), 
                                               prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
                 updated_questions.append(new_survey_question)
 
-        elif prompt_list and not options_double_list:
+        elif prompt_list and not options_dict:
             for i in range(len(survey_questions)):
                 new_survey_question = replace(survey_questions[i], prompt = prompt[i], options = options, 
                                               prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
                 updated_questions.append(new_survey_question)
-        elif prompt_list and options_double_list:
+        elif prompt_list and options_dict:
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt[i], options = options[i], 
+                new_survey_question = replace(survey_questions[i], prompt = prompt[i], options = options.get(survey_questions[i].question_id), 
                                               prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
                 updated_questions.append(new_survey_question)
                     
@@ -156,7 +153,10 @@ class LLMSurvey:
         return updated_questions
 
     def generate_survey_prompt(self, survey_question: SurveyQuestion) -> str:
-        options_prompt = survey_question.options.create_options_str()
+        if survey_question.options:
+            options_prompt = survey_question.options.create_options_str()
+        else:
+            options_prompt = ""
 
         survey_prompt = f"""{survey_question.prompt} {survey_question.survey_question}
 {options_prompt}"""
@@ -172,8 +172,6 @@ class LLMSurvey:
         survey_questions = self._survey
         
         default_prompt = f"""{task_instruction}"""
-
-        #model = BasicLLama(model_id)
 
         answers = []
 
@@ -207,9 +205,10 @@ class LLMSurvey:
 
                 json_system_prompt = f"""{system_prompt}
 {json_appendix}"""
+                constraints = {}
+                if survey_question.options:
+                    constraints = {json_structure[-1]: survey_question.options.option_descriptions}
                 
-                #print(json_system_prompt)
-                constraints = {"answer": survey_question.options.option_descriptions}
                 pydantic_model = generate_pydantic_model(fields=json_structure, constraints=constraints)
                 json_schema = pydantic_model.model_json_schema()
                 guided_decoding = GuidedDecodingParams(json=json_schema)
@@ -258,8 +257,10 @@ class LLMSurvey:
 
                 json_system_prompt = f"""{system_prompt}
 {json_appendix}"""
-                
-                constraints = {"answer": survey_question.options.option_descriptions}
+                constraints = {}
+                if survey_question.options:
+                    constraints = {json_structure[-1]: survey_question.options.option_descriptions}
+    
                 pydantic_model = generate_pydantic_model(fields=json_structure, constraints=constraints)
                 json_schema = pydantic_model.model_json_schema()
                 guided_decoding = GuidedDecodingParams(json=json_schema)
@@ -292,8 +293,9 @@ class LLMSurvey:
             if json_structured_output:
                 for element in json_structure:
                     extended_json_structure.append(f"{element}{i}")
-                    if element == "answer":
-                        constraints[f"{element}{i}"] = survey_questions[i].options.option_descriptions
+                    if element == json_structure[-1]:
+                        if survey_questions[i].options:
+                            constraints[f"{element}{i}"] = survey_questions[i].options.option_descriptions
 
             all_questions_prompt = all_questions_prompt + "\n" + survey_prompt
             #print(full_prompt, flush=True)

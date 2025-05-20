@@ -12,6 +12,7 @@ class SurveyOptions:
         self.from_to_scale = from_to_scale
 
     def create_options_str(self) -> str:
+        #TODO ADD a number of predefined string options. Give the user the ability to dynamically adjust them.
         if not self.from_to_scale:
             options_prompt = f"""Options are: {', '.join(self.option_descriptions)}"""
         else:
