@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "survey_gen"
+version = "0.1.0"
+description = "Survey generation tool"
+authors = [
+    { name = "Maximilian Kreutner", email = "maximilian.kreutner@uni-mannheim.de" }
+]
+readme = "README.md"
+requires-python = ">=3.7"
+    dependencies = [
+    pandas>=2.2.3
+    pydantic>=2.11.4
+    torch>=2.6.0
+    transformers>=4.51.3
+    vllm>=0.8.5
+    flashinfer-python>=0.2.5
+] 
