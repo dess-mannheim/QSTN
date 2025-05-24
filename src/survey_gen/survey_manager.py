@@ -29,7 +29,12 @@ class SurveyOptionGenerator:
     LIKTERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
 
     @staticmethod
-    def generate_likert_options(n: int, descriptions: Optional[List[str]], only_from_to_scale:bool = False, start_idx: int = 1) -> SurveyOptions:
+    def generate_likert_options(n: int, descriptions: Optional[List[str]], 
+                                only_from_to_scale:bool = False, 
+                                random_order:bool = False, 
+                                reversed_order:bool = False,
+                                even_order:bool = False,
+                                start_idx: int = 1) -> SurveyOptions:
         
         if only_from_to_scale:
             assert len(descriptions) == 2, "If from to scale, provide exactly two descriptions"
@@ -49,6 +54,18 @@ class SurveyOptionGenerator:
             elif descriptions:
                 answer_option = f"{option_number}: {descriptions[i]}"
             answer_options.append(answer_option)
+
+        if random_order:
+            assert len(answer_option) >= 2, "There must be at least two answer options to reorder randomly."
+            random.shuffle(answer_options) # no asignment needed because shuffles already inplace
+        if reversed_order:
+            assert len(answer_option) >= 2, "There must be at least two answer options to reverse options."
+            answer_options = answer_options[::-1]
+        if even_order:
+            assert len(answer_option) % 2 != 0, "There must be a odd number of options!"
+            middle_index = len(answer_option) // 2
+            answer_option.pop(middle_index)
+
 
         survey_option = SurveyOptions(answer_options, from_to_scale=only_from_to_scale)
         #print(survey_option)
