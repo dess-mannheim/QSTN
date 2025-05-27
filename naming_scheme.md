@@ -5,7 +5,7 @@
 - Item Stem (Questions related to a specific category e.g. "What is your opinion of ...") -> item_stem
 - Item Statement (e.g. _Is talkative_ in "Do you think this statement fits to you is talkative") -> item_statement
 - Item = Item Statement + Item Stem (doesn't have to be composite, can be single question) -> item
-- Item Key (im01, im02, (identifier for item)) -> item_key
+- Item ID (im01, im02, (identifier for item)) -> item_id
 - Answer Code (1: ..., 2: ..., can also be characters) -> answer_code
 - Answer Text (e.g. "Agree", "Disagree", ...) -> answer_text
     - randomized
