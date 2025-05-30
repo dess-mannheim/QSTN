@@ -1,5 +1,6 @@
-from typing import List, Dict, Optional, Union, Any, overload, Tuple, NamedTuple, Self
+from typing import List, Dict, Optional, Union, Any, overload, Tuple, NamedTuple, Self, Literal
 from dataclasses import dataclass, replace
+from string import ascii_lowercase, ascii_uppercase
 
 from .utilities.prompt_creation import PromptCreation
 from .utilities.survey_classes.survey_objects import SurveyOptions, SurveyQuestion, QuestionAnswerTuple
@@ -28,50 +29,171 @@ class SurveyOptionGenerator:
     LIKERT_NO_MIDDLE: List[str] = ["disagree strongly", "disagree a little", "agree a little", "agree strongly"]
 
     LIKERT_IMPORTANCE_FROM_TO: List[str] = ["Not at all important", "Very Important"]
-    LIKTERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
+    LIKERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
+    _IDX_TYPES = Literal["char_low", "char_upper", "integer"]
 
     @staticmethod
-    def generate_likert_options(n: int, descriptions: Optional[List[str]], 
+    def generate_likert_options(n: int, descriptions: Optional[List[str]], # update naming of description
                                 only_from_to_scale:bool = False, 
                                 random_order:bool = False, 
                                 reversed_order:bool = False,
                                 even_order:bool = False,
-                                start_idx: int = 1) -> SurveyOptions:
+                                start_idx: int = 1,
+                                idx_type: _IDX_TYPES="integer") -> SurveyOptions:
         
         if only_from_to_scale:
             assert len(descriptions) == 2, "If from to scale, provide exactly two descriptions"
+            assert idx_type == "integer", "Index type must be integer, not lower/uppercase characters."
         else:
             if descriptions:
                 assert len(descriptions) == n, "Description list must be the same length as options"
-
-        answer_options = []
-        for i in range(n):
-            option_number = i + start_idx
-            answer_option = f"{option_number}"
-            if only_from_to_scale:
-                if i == 0:
-                    answer_option = f"{option_number}: {descriptions[0]}"
-                elif i == (n-1):
-                    answer_option = f"{option_number}: {descriptions[1]}"
-            elif descriptions:
-                answer_option = f"{option_number}: {descriptions[i]}"
-            answer_options.append(answer_option)
-
+        if even_order:
+                assert n % 2 != 0, "There must be a odd number of options!"
+                middle_index = n // 2
+                descriptions = descriptions[:middle_index] + descriptions[middle_index+1:]
+                n = n-1
         if random_order:
-            assert len(answer_option) >= 2, "There must be at least two answer options to reorder randomly."
-            random.shuffle(answer_options) # no asignment needed because shuffles already inplace
+            assert len(descriptions) >= 2, "There must be at least two answer options to reorder randomly."
+            random.shuffle(descriptions) # no assignment needed because shuffles already inplace
         if reversed_order:
             assert len(answer_option) >= 2, "There must be at least two answer options to reverse options."
             answer_options = answer_options[::-1]
-        if even_order:
-            assert len(answer_option) % 2 != 0, "There must be a odd number of options!"
-            middle_index = len(answer_option) // 2
-            answer_option.pop(middle_index)
+             
+
+        answer_options = []
+        if idx_type == "integer":
+            for i in range(n):
+                option_number = i + start_idx #rename answer options
+                answer_option = f"{option_number}"
+                if only_from_to_scale:
+                    if i == 0:
+                        answer_option = f"{option_number}: {descriptions[0]}"
+                    elif i == (n-1):
+                        answer_option = f"{option_number}: {descriptions[1]}"
+                elif descriptions:
+                    answer_option = f"{option_number}: {descriptions[i]}"
+                answer_options.append(answer_option)
+        else:
+            if idx_type == "char_low":
+                for i in range(n):
+                    answer_option = f"{ascii_lowercase[i]}: {descriptions[i]}"
+                    answer_options.append(answer_option)
+            elif idx_type == "char_upper":
+                for i in range(n):
+                    answer_option = f"{ascii_uppercase[i]}: {descriptions[i]}"
+                    answer_options.append(answer_option)
 
 
         survey_option = SurveyOptions(answer_options, from_to_scale=only_from_to_scale)
         #print(survey_option)
         return survey_option
+    
+    # @staticmethod
+    # def generate_interval_options(
+    #         answer_options: List[str],
+    #         only_from_to_scale:bool = False, 
+    #         random_order:bool = False, 
+    #         reversed_order:bool = False,
+    #         even_order:bool = False,
+
+    # ):
+        
+    
+    @staticmethod
+    def generate_generic_options(
+                descriptions: Dict,
+                only_from_to_scale:bool = False, 
+                random_order:bool = False, 
+                reversed_order:bool = False,
+                even_order:bool = False,
+                to_lowercase:bool = False,
+                to_uppercase:bool = False,
+                to_integer:bool = False,
+                ):
+            
+            n = len(descriptions.values())
+            answer_codes = descriptions.keys()
+            answer_texts = descriptions.values()
+            #answer_options = descriptions
+
+            if to_lowercase:
+                if all(isinstance(item, int) for item in answer_codes):
+                    new_codes = []
+                    for i in answer_codes:
+                        code = ascii_lowercase[i-1]
+                        new_codes.append(code)
+                    answer_codes = new_codes 
+                else:
+                    answer_codes = [s.lower() for s in answer_codes]
+            if to_uppercase:
+                if all(isinstance(item, int) for item in answer_codes):
+                    new_codes = []
+                    for i in answer_codes:
+                        code = ascii_uppercase[i-1]
+                        new_codes.append(code)
+                    answer_codes = new_codes 
+                else:
+                    answer_codes = [s.upper() for s in answer_codes]
+            if to_integer:
+                answer_codes = range(1,len(answer_codes)+1)
+            
+            answer_options = dict(zip(answer_codes, answer_texts))
+
+            if only_from_to_scale:
+                assert all(isinstance(item, int) for item in answer_codes), "To use from-to scale you must have integer answer codes."
+                    
+            if random_order:
+                assert n >= 2, "There must be at least two answer options to reorder randomly."
+                temp = list(answer_texts)
+                random.shuffle(temp)
+                # reassigning to keys
+                answer_options = dict(zip(answer_codes, temp))
+            if reversed_order:
+                assert n >= 2, "There must be at least two answer options to reverse options."
+                reversed_values = list(answer_texts)[::-1]
+                answer_options = dict(zip(answer_codes, reversed_values))
+            if even_order:
+                assert n % 2 != 0, "There must be a odd number of options!"
+                middle_index = n // 2
+                # Get the key of the item to be removed
+                key_to_remove = list(answer_codes)[middle_index]
+                # Create a new dictionary, excluding the item with key_to_remove
+                # This uses a dictionary comprehension.
+                answer_options = {key: value for key, value in answer_options.items() if key != key_to_remove}
+                if all(isinstance(element, int) for element in list(answer_codes)):
+                    first_part = list(answer_codes)[:middle_index]
+                    last_part = list(answer_codes)[middle_index+1:]
+                    last_part = [x - 1 for x in last_part]            
+                    answer_options = dict(zip(first_part + last_part, answer_options.values()))
+                elif set(list(answer_codes)).issubset(list(ascii_lowercase)):
+                    first_part = list(answer_codes)[:middle_index]
+                    #print("First part:", first_part)
+                    last_part = list(answer_codes)[middle_index+1:]
+                    #print("Last part:", last_part)
+                    last_parts = []
+                    for i in range(middle_index+1,len(list(answer_codes))):
+                        part = list(ascii_lowercase)[i-1]
+                        last_parts.append(part) 
+                        #print("Last parts:", last_parts)           
+                    answer_options = dict(zip(first_part + last_parts, answer_options.values()))
+                elif set(list(answer_codes)).issubset(list(ascii_uppercase)):
+                    first_part = list(answer_codes)[:middle_index]
+                    #print("First part:", first_part)
+                    last_part = list(answer_codes)[middle_index+1:]
+                    #print("Last part:", last_part)
+                    last_parts = []
+                    for i in range(middle_index+1,len(list(answer_codes))):
+                        part = list(ascii_uppercase)[i-1]
+                        last_parts.append(part) 
+                        #print("Last parts:", last_parts)           
+                    answer_options = dict(zip(first_part + last_parts, answer_options.values()))
+
+            answer_options = [f"{key}: {val}" for key, val in answer_options.items()]        
+            print(answer_options)   
+
+            survey_option = SurveyOptions(answer_options, from_to_scale=only_from_to_scale)
+            #print(survey_option)
+            return survey_option
 
 @dataclass
 class InferenceOptions:
