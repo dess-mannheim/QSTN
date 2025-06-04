@@ -4,7 +4,7 @@
 
 - Question Stem (Questions related to a specific category e.g. "What is your opinion of ...") -> question_stem
 - Question Content (e.g. _Is talkative_ in "Do you think this statement fits to you is talkative") -> question_content
-- Question = Statement + Question Stem (doesn't have to be composite, can be single question) -> question
+- Question = Question Stem + Question Content (doesn't have to be composite, can be single question) -> question
 - Answer Code (1: ..., 2: ..., can also be characters) -> answer_code
 - Answer Text (e.g. "Agree", "Disagree", ...) -> answer_text
     - randomized
