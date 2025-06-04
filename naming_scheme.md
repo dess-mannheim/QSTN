@@ -2,17 +2,18 @@
 
 ## Mikro-Level Naming Scheme (Q&A Level)
 
-- Item Stem (Questions related to a specific category e.g. "What is your opinion of ...") -> item_stem
-- Item Statement (e.g. _Is talkative_ in "Do you think this statement fits to you is talkative") -> item_statement
-- Item = Item Statement + Item Stem (doesn't have to be composite, can be single question) -> item
+- Question Stem (Questions related to a specific category e.g. "What is your opinion of ...") -> question_stem
+- Statement (e.g. _Is talkative_ in "Do you think this statement fits to you is talkative") -> statement
+- Question = Statement + Question Stem (doesn't have to be composite, can be single question) -> question
 - Item ID (im01, im02, (identifier for item)) -> item_id
 - Answer Code (1: ..., 2: ..., can also be characters) -> answer_code
 - Answer Text (e.g. "Agree", "Disagree", ...) -> answer_text
     - randomized
     - reversed
     - odd vs. even scaling
+    - Refusal (non-substantive responses like "Don't know", etc.)
 - Answer option = Answer Code + Answer Text -> answer_option
-- Refusal (non-substantive responses like "Don't know", etc.)
+- Item = Question + Answer Option -> item
 
 **Scale Types**
 
