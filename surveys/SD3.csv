@@ -1,4 +1,4 @@
-question_id,survey_question
+survey_item_id,question_content
 1,It’s not wise to tell your secrets.
 2,I like to use clever manipulation to get my way.
 3,"Whatever it takes, you must get the important people on your side"

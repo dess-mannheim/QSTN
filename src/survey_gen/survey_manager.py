@@ -3,7 +3,8 @@ from dataclasses import dataclass, replace
 from string import ascii_lowercase, ascii_uppercase
 
 from .utilities.prompt_creation import PromptCreation
-from .utilities.survey_classes.survey_objects import SurveyOptions, SurveyQuestion, QuestionAnswerTuple
+from .utilities.survey_objects import AnswerOptions, SurveyItem, QuestionLLMResponseTuple
+from .utilities import constants
 
 from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
 from .inference.dynamic_pydantic import generate_pydantic_model
@@ -39,7 +40,7 @@ class SurveyOptionGenerator:
                                 reversed_order:bool = False,
                                 even_order:bool = False,
                                 start_idx: int = 1,
-                                idx_type: _IDX_TYPES="integer") -> SurveyOptions:
+                                idx_type: _IDX_TYPES="integer") -> AnswerOptions:
         
         if only_from_to_scale:
             assert len(descriptions) == 2, "If from to scale, provide exactly two descriptions"
@@ -84,7 +85,7 @@ class SurveyOptionGenerator:
                     answer_options.append(answer_option)
 
 
-        survey_option = SurveyOptions(answer_options, from_to_scale=only_from_to_scale)
+        survey_option = AnswerOptions(answer_options, from_to_scale=only_from_to_scale)
         #print(survey_option)
         return survey_option
     
@@ -191,7 +192,7 @@ class SurveyOptionGenerator:
             answer_options = [f"{key}: {val}" for key, val in answer_options.items()]        
             print(answer_options)   
 
-            survey_option = SurveyOptions(answer_options, from_to_scale=only_from_to_scale)
+            survey_option = AnswerOptions(answer_options, from_to_scale=only_from_to_scale)
             #print(survey_option)
             return survey_option
 
@@ -207,15 +208,18 @@ class InferenceOptions:
     order: List[int]
 
     def create_single_question(self, question_id: int) -> str:
-        return f"{self.task_instruction} {self.question_prompts[question_id]}".strip()
+        return f"""{self.task_instruction} 
+{self.question_prompts[question_id]}""".strip()
     
     def create_all_questions(self) -> str:
         default_prompt = f"{self.task_instruction}"
         all_questions_prompt = ""
         for question_prompt in self.question_prompts.values():
             all_questions_prompt = f"{all_questions_prompt}\n{question_prompt}"
-        
-        all_prompt = default_prompt.strip() + all_questions_prompt.strip()
+        if len(default_prompt) > 0:
+            all_prompt = f"{default_prompt.strip()}\n{all_questions_prompt.strip()}"
+        else:
+            all_prompt = all_questions_prompt.strip()
         return all_prompt
 
     def json_system_prompt(self, json_options:List[str]) -> str:
@@ -244,15 +248,17 @@ class LLMSurvey:
 
     DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
 
-    def __init__(self, survey_path: str, survey_name:str = DEFAULT_SURVEY_ID,  system_prompt: str = DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, verbose=False):
-        #random.seed(seed)
+    def __init__(self, survey_path: str, survey_name:str = DEFAULT_SURVEY_ID,  system_prompt: str = DEFAULT_SYSTEM_PROMPT, task_instruction: str = DEFAULT_TASK_INSTRUCTION, verbose=False, seed:int = 42):
+        random.seed(seed)
         self.load_survey(survey_path=survey_path)
-        self.verbose = verbose
+        self.verbose: bool = verbose
 
-        self.survey_name = survey_name
+        self.survey_name: str = survey_name
 
         self.system_prompt: str = system_prompt 
         self.task_instruction: str = task_instruction
+
+        self._global_options: AnswerOptions = None
 
     def duplicate(self):
         return copy.deepcopy(self)
@@ -271,33 +277,35 @@ class LLMSurvey:
         :param survey_path: Path to the survey to load.
         :return: List of Survey Questions
         """
-        survey_questions: List[SurveyQuestion] = []
+        survey_questions: List[SurveyItem] = []
 
         df = pd.read_csv(survey_path)
 
         for _ , row in df.iterrows():
-            question_id = row["question_id"]
-            survey_question = row["survey_question"]
+            survey_item_id = row[constants.SURVEY_ITEM_ID]
+            survey_question_content = row[constants.QUESTION_CONTENT]
 
-            generated_survey_question = SurveyQuestion(question_id=question_id, survey_question=survey_question)
+            generated_survey_question = SurveyItem(item_id=survey_item_id, question_content=survey_question_content)
             survey_questions.append(generated_survey_question)
 
         self._questions = survey_questions
         return self
     
+
+    #TODO Item order could be given by ids
     @overload
-    def prepare_survey(self, prompt: Optional[str] = "Do you see yourself as someone who...", 
-                       options: Optional[SurveyOptions] = None, 
-                       prefilled_answers: Optional[Dict[int, str]] = None) -> Self: ...
+    def prepare_survey(self, question_stem: Optional[str] = "Do you see yourself as someone who...", 
+                       answer_options: Optional[AnswerOptions] = None, global_options:bool = False,
+                       prefilled_responses: Optional[Dict[int, str]] = None, randomized_item_order:bool = False) -> Self: ...
 
     @overload
-    def prepare_survey(self, prompt: Optional[List[str]] = ["Do you see yourself as someone who..."], 
-                       options: Optional[Dict[int, SurveyOptions]] = None, 
-                       prefilled_answers: Optional[Dict[int, str]] = None) -> Self: ...
+    def prepare_survey(self, question_stem: Optional[List[str]] = ["Do you see yourself as someone who..."], 
+                       answer_options: Optional[Dict[int, AnswerOptions]] = None, global_options:bool = False,
+                       prefilled_responses: Optional[Dict[int, str]] = None, randomized_item_order:bool = False) -> Self: ...
     
-    def prepare_survey(self, prompt: Optional[Union[str, List[str]]] = "Do you see yourself as someone who...", 
-                       options: Optional[Union[SurveyOptions, Dict[int, SurveyOptions]]] = None, 
-                       prefilled_answers: Optional[Dict[int, str]] = None) -> Self:
+    def prepare_survey(self, question_stem: Optional[Union[str, List[str]]] = "Do you see yourself as someone who...", 
+                       answer_options: Optional[Union[AnswerOptions, Dict[int, AnswerOptions]]] = None, global_options:bool = False,
+                       prefilled_responses: Optional[Dict[int, str]] = None, randomized_item_order:bool = False) -> Self:
         """
         Prepares a survey with additional prompts for each question, answer options and prefilled answers.
 
@@ -306,73 +314,87 @@ class LLMSurvey:
         :para, prefilled_answers Linking survey question id to a prefilled answer.
         :return: List of updated Survey Questions
         """
-        survey_questions = self._questions
+        survey_questions: List[SurveyItem] = self._questions
 
-        prompt_list = isinstance(prompt, list)
+        prompt_list = isinstance(question_stem, list)
         if prompt_list:
-            assert len(prompt) == len(survey_questions), "If a list of prompts is given, length of prompt and survey questions have to be the same" 
+            assert len(question_stem) == len(survey_questions), "If a list of question stems is given, length of prompt and survey questions have to be the same" 
         
         options_dict = False
 
-        if isinstance(options, SurveyOptions):
+        if isinstance(answer_options, AnswerOptions):
             options_dict = False
-        elif isinstance(options, Dict):
+            if global_options:
+                self._global_options = answer_options
+        elif isinstance(answer_options, Dict):
             options_dict = True
 
-        updated_questions = []
+        updated_questions: List[SurveyItem] = []
 
-        if not prefilled_answers:
-            prefilled_answers = {}
+        if not prefilled_responses:
+            prefilled_responses = {}
             #for survey_question in survey_questions:
                 #prefilled_answers[survey_question.question_id] = None
 
         if not prompt_list and not options_dict:            
             updated_questions = []
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt, options = options, 
-                                              prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
+                new_survey_question = replace(survey_questions[i], question_stem = question_stem, answer_options = answer_options if not self._global_options else None, 
+                                              prefilled_response=prefilled_responses.get(survey_questions[i].item_id)) 
                 updated_questions.append(new_survey_question)
 
         elif not prompt_list and options_dict:
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt, options = options.get(survey_questions[i].question_id), 
-                                              prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
+                new_survey_question = replace(survey_questions[i], question_stem = question_stem, answer_options = answer_options.get(survey_questions[i].item_id), 
+                                              prefilled_response=prefilled_responses.get(survey_questions[i].item_id)) 
                 updated_questions.append(new_survey_question)
 
         elif prompt_list and not options_dict:
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt[i], options = options, 
-                                              prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
+                new_survey_question = replace(survey_questions[i], question_stem = question_stem[i], answer_options = answer_options if not self._global_options else None, 
+                                              prefilled_response=prefilled_responses.get(survey_questions[i].item_id)) 
                 updated_questions.append(new_survey_question)
         elif prompt_list and options_dict:
             for i in range(len(survey_questions)):
-                new_survey_question = replace(survey_questions[i], prompt = prompt[i], options = options.get(survey_questions[i].question_id), 
-                                              prefilled_answer=prefilled_answers.get(survey_questions[i].question_id)) 
+                new_survey_question = replace(survey_questions[i], question_stem = question_stem[i], answer_options = answer_options.get(survey_questions[i].item_id), 
+                                              prefilled_response=prefilled_responses.get(survey_questions[i].item_id)) 
                 updated_questions.append(new_survey_question)
-                    
+        
+        if randomized_item_order:
+            random.shuffle(updated_questions)
+
         self._questions = updated_questions
         return self
 
-    def generate_question_prompt(self, survey_question: SurveyQuestion) -> str:
+    def generate_question_prompt(self, survey_question: SurveyItem) -> str:
         """
         Returns the string of how a survey question would be prompted to the model.
 
         :param survey_question: Survey question to prompt.
         :return: Prompt that will be given to the model for this question.
         """
-        if survey_question.options:
-            options_prompt = survey_question.options.create_options_str()
-        else:
-            options_prompt = ""
-
-        survey_prompt = f"""{survey_question.prompt} {survey_question.survey_question}
+        #TODO allow for customization of placement
+        if survey_question.answer_options:
+            options_prompt = survey_question.answer_options.create_options_str()
+            question_prompt = f"""{survey_question.question_stem} {survey_question.question_content} 
 {options_prompt}"""
-        return survey_prompt
+        else:
+            question_prompt = f"""{survey_question.question_stem} {survey_question.question_content}"""
+
+        return question_prompt
     
     def _generate_inference_options(self, json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE):
         survey_questions = self._questions
 
         default_prompt = f"""{self.task_instruction}"""
+
+        if self._global_options:
+            options_prompt = self._global_options.create_options_str()
+            if len(default_prompt) > 0:
+                default_prompt = f"""{default_prompt} 
+{options_prompt}"""
+            else:
+                default_prompt = options_prompt
 
         question_prompts = {}
 
@@ -387,17 +409,15 @@ class LLMSurvey:
             extended_json_structure = []
             json_list = json_structure
 
-
         full_guided_decoding_params = None
-
 
         constraints: Dict[str, List[str]] =  {}
 
         for i, survey_question in enumerate(survey_questions):
             question_prompt = self.generate_question_prompt(survey_question=survey_question)
-            question_prompts[survey_question.question_id] = question_prompt
+            question_prompts[survey_question.item_id] = question_prompt
 
-            order.append(survey_question.question_id)
+            order.append(survey_question.item_id)
             
             guided_decoding = None
             if json_structured_output:
@@ -405,17 +425,17 @@ class LLMSurvey:
                 for element in json_structure:
                     extended_json_structure.append(f"{element}{i+1}")
                     if element == json_structure[-1]:
-                        if survey_question.options:
-                            constraints[f"{element}{i+1}"] = survey_question.options.option_descriptions
+                        if survey_question.answer_options:
+                            constraints[f"{element}{i+1}"] = survey_question.answer_options.answer_text
 
                 single_constraints = {}
-                if survey_question.options:
-                    single_constraints = {json_structure[-1]: survey_question.options.option_descriptions}
+                if survey_question.answer_options:
+                    single_constraints = {json_structure[-1]: survey_question.answer_options.answer_text}
     
                 pydantic_model = generate_pydantic_model(fields=json_structure, constraints=single_constraints)
                 json_schema = pydantic_model.model_json_schema()
                 guided_decoding = GuidedDecodingParams(json=json_schema)
-                guided_decoding_params[survey_question.question_id] = guided_decoding
+                guided_decoding_params[survey_question.item_id] = guided_decoding
         
         if json_structured_output:
             pydantic_model = generate_pydantic_model(fields=extended_json_structure, constraints=constraints)
@@ -431,13 +451,13 @@ class LLMSurvey:
 @dataclass
 class SurveyResult():
     survey: LLMSurvey
-    results: Dict[int, QuestionAnswerTuple]
+    results: Dict[int, QuestionLLMResponseTuple]
 
     def to_dataframe(self) -> pd.DataFrame:
         answers = []
-        for item_id, question_answer_tuple in self.results.items():
-            answers.append((item_id, *question_answer_tuple))
-        return pd.DataFrame(answers, columns=["item_id", *question_answer_tuple._fields])
+        for item_id, question_llm_response_tuple in self.results.items():
+            answers.append((item_id, *question_llm_response_tuple))
+        return pd.DataFrame(answers, columns=[constants.SURVEY_ITEM_ID, *question_llm_response_tuple._fields])
 
 
 def conduct_survey_question_by_question(model: LLM, surveys: List[LLMSurvey], json_structured_output:bool=False, json_structure: List[str] = DEFAULT_JSON_STRUCTURE, print_conversation:bool=False, print_progress: bool = True, seed:int = 42, **generation_kwargs: Any) -> List[SurveyResult]:
@@ -458,7 +478,7 @@ def conduct_survey_question_by_question(model: LLM, surveys: List[LLMSurvey], js
 
     max_survey_length: int = 0
     
-    question_answer_pairs: List[Dict[int, QuestionAnswerTuple]] = []
+    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
     
     for survey in surveys:
         inference_option = survey._generate_inference_options(json_structured_output, json_structure)
@@ -467,7 +487,7 @@ def conduct_survey_question_by_question(model: LLM, surveys: List[LLMSurvey], js
         if survey_length > max_survey_length:
             max_survey_length = survey_length
 
-        question_answer_pairs.append({})
+        question_llm_response_pairs.append({})
 
     survey_results: List[SurveyResult] = []
 
@@ -491,10 +511,10 @@ def conduct_survey_question_by_question(model: LLM, surveys: List[LLMSurvey], js
                                     **generation_kwargs)
         
         for survey_id, prompt, answer, item in zip(range(len(current_batch)), prompts, output, current_batch):
-            question_answer_pairs[survey_id].update({item.order[i]: QuestionAnswerTuple(prompt, answer)})
+            question_llm_response_pairs[survey_id].update({item.order[i]: QuestionLLMResponseTuple(prompt, answer)})
         
     for i, survey in enumerate(surveys):
-        survey_results.append(SurveyResult(survey, question_answer_pairs[i]))
+        survey_results.append(SurveyResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
 
@@ -514,15 +534,16 @@ def conduct_whole_survey_one_prompt(model: LLM, surveys: List[LLMSurvey], json_s
     """
     inference_options: List[InferenceOptions] = []
 
+    #We always conduct the survey in one prompt
     max_survey_length: int = 1
     
-    question_answer_pairs: List[Dict[int, QuestionAnswerTuple]] = []
+    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
     
     for survey in surveys:
         inference_option = survey._generate_inference_options(json_structured_output, json_structure)
         inference_options.append(inference_option)
 
-        question_answer_pairs.append({})
+        question_llm_response_pairs.append({})
 
     survey_results: List[SurveyResult] = []
 
@@ -548,10 +569,10 @@ def conduct_whole_survey_one_prompt(model: LLM, surveys: List[LLMSurvey], json_s
                                     **generation_kwargs)
         
         for survey_id, prompt, answer in zip(range(len(current_batch)), prompts, output):
-            question_answer_pairs[survey_id].update({-1: QuestionAnswerTuple(prompt, answer)})
+            question_llm_response_pairs[survey_id].update({-1: QuestionLLMResponseTuple(prompt, answer)})
         
     for i, survey in enumerate(surveys):
-        survey_results.append(SurveyResult(survey, question_answer_pairs[i]))
+        survey_results.append(SurveyResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
 
@@ -574,7 +595,7 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
 
     max_survey_length: int = 0
     
-    question_answer_pairs: List[Dict[int, QuestionAnswerTuple]] = []
+    question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
     
     for survey in surveys:
         inference_option = survey._generate_inference_options(json_structured_output, json_structure)
@@ -583,7 +604,7 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
         if survey_length > max_survey_length:
             max_survey_length = survey_length
 
-        question_answer_pairs.append({})
+        question_llm_response.append({})
 
     survey_results: List[SurveyResult] = []
 
@@ -607,7 +628,7 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
         missing_indeces = []
 
         for index, surv in enumerate(current_surveys):
-            prefilled_answer = surv._questions[i].prefilled_answer
+            prefilled_answer = surv._questions[i].prefilled_response
             if prefilled_answer:                
                 current_assistant_messages.append(prefilled_answer)
                 missing_indeces.append(index)
@@ -617,8 +638,8 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
         if len(current_batch) == 0:
             for c in range(len(current_surveys)):
                 assistant_messages[c].append(current_assistant_messages[c])
-            for survey_id, prompt, answer, item in zip(range(len(current_surveys)), prompts, current_assistant_messages, current_surveys):
-                question_answer_pairs[survey_id].update({item._questions[i].question_id: QuestionAnswerTuple(prompt, answer)})
+            for survey_id, prompt, llm_response, item in zip(range(len(current_surveys)), prompts, current_assistant_messages, current_surveys):
+                question_llm_response[survey_id].update({item._questions[i].item_id: QuestionLLMResponseTuple(prompt, llm_response)})
             continue    
         if json_structured_output:
             system_messages = [inference.json_system_prompt(json_options=json_structure) for inference in current_batch]
@@ -639,12 +660,12 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
         
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
-        for survey_id, prompt, answer, item in zip(range(len(current_surveys)), prompts, output, current_surveys):
-            question_answer_pairs[survey_id].update({item._questions[i].question_id: QuestionAnswerTuple(prompt, answer)})
+        for survey_id, prompt, llm_response, item in zip(range(len(current_surveys)), prompts, output, current_surveys):
+            question_llm_response[survey_id].update({item._questions[i].item_id: QuestionLLMResponseTuple(prompt, llm_response)})
         assistant_messages.append(output)    
         
     for i, survey in enumerate(surveys):
-        survey_results.append(SurveyResult(survey, question_answer_pairs[i]))
+        survey_results.append(SurveyResult(survey, question_llm_response[i]))
 
     return survey_results
 

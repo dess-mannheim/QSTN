@@ -5,6 +5,8 @@ from ..survey_manager import SurveyResult, LLMSurvey
 
 from ..inference.survey_inference import batch_generation
 
+from ..utilities import constants
+
 from vllm import LLM
 
 import pandas as pd
@@ -32,13 +34,13 @@ def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.Dat
         answers = []
         for key, value in survey_result.results.items():
             #value:QuestionAnswerTuple
-            parsed_answer = json_parser_str(value.answer)
-            if parsed_answer:
-                answer_format = parsed_answer.keys()
-                answers.append((key, value.question, *parsed_answer.values()))
+            parsed_llm_response = json_parser_str(value.llm_response)
+            if parsed_llm_response:
+                answer_format = parsed_llm_response.keys()
+                answers.append((key, value.question, *parsed_llm_response.values()))
             else:
                 answers.append((key, value, "ERROR: Parsing"))
-        df = pd.DataFrame(answers, columns=["question_id", "question", *answer_format]).sort_values(by="question_id")
+        df = pd.DataFrame(answers, columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, *answer_format]).sort_values(by=constants.QUESTION)
         final_result[survey_result.survey] = df
 
     return final_result
@@ -51,16 +53,16 @@ def json_parse_whole_survey_all(survey_results:List[SurveyResult], json_structur
     for survey, df in parsed_results.items():
         long_df = pd.wide_to_long(df, 
                                 stubnames=json_structure, 
-                                i=["question_id"],
-                                j='actual_question_id', 
+                                i=[constants.SURVEY_ITEM_ID],
+                                j='new_survey_item_id', 
                                 sep='', 
                                 suffix='\\d+').reset_index()
         
         num_rows_to_update = len(long_df)
         
-        long_df.loc[0:num_rows_to_update, 'question_id'] = [survey_question.question_id for survey_question in survey._questions[0:num_rows_to_update]]
-        long_df.loc[0:num_rows_to_update, 'question'] = [survey.generate_question_prompt(survey_question) for survey_question in survey._questions[0:num_rows_to_update]]
-        long_df = long_df.drop(columns='question_id').rename(columns={'actual_question_id': 'question_id'})
+        long_df.loc[0:num_rows_to_update, constants.SURVEY_ITEM_ID] = [survey_question.item_id for survey_question in survey._questions[0:num_rows_to_update]]
+        long_df.loc[0:num_rows_to_update, constants.QUESTION] = [survey.generate_question_prompt(survey_question) for survey_question in survey._questions[0:num_rows_to_update]]
+        long_df = long_df.drop(columns=constants.SURVEY_ITEM_ID).rename(columns={'new_survey_item_id': constants.SURVEY_ITEM_ID})
         all_results[survey] = long_df
     
     return all_results
@@ -80,14 +82,14 @@ def llm_parse_all(model:LLM, survey_results:List[SurveyResult], system_prompt:st
         ids = []
         questions = []
         answers = []
-        for item_id, question_answer_tuple in survey_result.results.items():
+        for item_id, question_llm_response_tuple in survey_result.results.items():
             ids.append(item_id)
-            questions.append(question_answer_tuple.question)
-            answers.append(question_answer_tuple.answer)
-            prompts.append(f"{prompt} \nQuestion: {question_answer_tuple.question} \nLLManswer: {question_answer_tuple.answer}")
+            questions.append(question_llm_response_tuple.question)
+            answers.append(question_llm_response_tuple.llm_response)
+            prompts.append(f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}")
         llm_parsed_results = batch_generation(model, system_messages=[system_prompt] * len(prompts), prompts=prompts, seed=seed, **generation_kwargs)
 
 
-        all_results[survey_result.survey] = pd.DataFrame(zip(ids, questions, answers, llm_parsed_results), columns=["item_id", "item", "full_answer", "parsed_result"])
+        all_results[survey_result.survey] = pd.DataFrame(zip(ids, questions, answers, llm_parsed_results), columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, constants.PARSED_RESPONSE])
 
     return all_results
