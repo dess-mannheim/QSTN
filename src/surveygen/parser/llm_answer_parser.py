@@ -13,8 +13,6 @@ import pandas as pd
 
 import yaml
 
-from survey_gen.survey_manager import SurveyResult, LLMSurvey
-
 
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
 DEFAULT_PROMPT: str = "Your task is to parse the correct answer option from an open text answer a LLM has given to survey questions. You will be provided with the survey question, possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible answer options or 'INVALID', if the provided LLM answer does give one of the options."

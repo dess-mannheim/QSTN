@@ -174,4 +174,4 @@ cython_debug/
 .pypirc
 
 # Own Files
-src/survey_gen/survey_prompting.ipynb
+src/surveygen/survey_prompting.ipynb
