@@ -13,6 +13,8 @@ import pandas as pd
 
 import yaml
 
+from collections import defaultdict
+
 
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
 DEFAULT_PROMPT: str = "Your task is to parse the correct answer option from an open text answer a LLM has given to survey questions. You will be provided with the survey question, possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible answer options or 'INVALID', if the provided LLM answer does give one of the options."
@@ -72,22 +74,72 @@ def raw_responses(survey_results:List[SurveyResult])-> Dict[LLMSurvey, pd.DataFr
     return all_results
 
 
+# def llm_parse_all(model:LLM, survey_results:List[SurveyResult], system_prompt:str = DEFAULT_SYSTEM_PROMPT, prompt:str = DEFAULT_PROMPT, use_structured_ouput:bool = False, seed = 42, **generation_kwargs) -> Dict[LLMSurvey, pd.DataFrame]:
+#     #TODO LLM Parser in batches, same output as json parser
+#     all_results = {}
+#     for survey_result in survey_results:
+#         prompts = []
+#         ids = []
+#         questions = []
+#         answers = []
+#         for item_id, question_llm_response_tuple in survey_result.results.items():
+#             ids.append(item_id)
+#             questions.append(question_llm_response_tuple.question)
+#             answers.append(question_llm_response_tuple.llm_response)
+#             prompts.append(f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}")
+#         llm_parsed_results = batch_generation(model, system_messages=[system_prompt] * len(prompts), prompts=prompts, seed=seed, **generation_kwargs)
+
+
+#         all_results[survey_result.survey] = pd.DataFrame(zip(ids, questions, answers, llm_parsed_results), columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, constants.PARSED_RESPONSE])
+
+#     return all_results
+
+
 def llm_parse_all(model:LLM, survey_results:List[SurveyResult], system_prompt:str = DEFAULT_SYSTEM_PROMPT, prompt:str = DEFAULT_PROMPT, use_structured_ouput:bool = False, seed = 42, **generation_kwargs) -> Dict[LLMSurvey, pd.DataFrame]:
-    #TODO LLM Parser in batches, same output as json parser
-    all_results = {}
+    all_items_to_process = []
     for survey_result in survey_results:
-        prompts = []
-        ids = []
-        questions = []
-        answers = []
         for item_id, question_llm_response_tuple in survey_result.results.items():
-            ids.append(item_id)
-            questions.append(question_llm_response_tuple.question)
-            answers.append(question_llm_response_tuple.llm_response)
-            prompts.append(f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}")
-        llm_parsed_results = batch_generation(model, system_messages=[system_prompt] * len(prompts), prompts=prompts, seed=seed, **generation_kwargs)
+            all_items_to_process.append({
+                constants.SURVEY_NAME: survey_result.survey,
+                constants.SURVEY_ITEM_ID: item_id,
+                constants.QUESTION: question_llm_response_tuple.question,
+                constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
+                'prompt': f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}"
+            })
 
+    if not all_items_to_process:
+        all_results = {}
+    # or handle as you see fit, e.g., return {}
+    else:
+        # 2. BATCH: Prepare prompts for a single batch generation call.
+        all_prompts = [item['prompt'] for item in all_items_to_process]
+        system_messages = [system_prompt] * len(all_prompts)
 
-        all_results[survey_result.survey] = pd.DataFrame(zip(ids, questions, answers, llm_parsed_results), columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, constants.PARSED_RESPONSE])
+        # Perform the single, efficient batch inference.
+        llm_parsed_results = batch_generation(
+            model,
+            system_messages=system_messages,
+            prompts=all_prompts,
+            seed=seed,
+            **generation_kwargs
+        )
+
+    for item, parsed_result in zip(all_items_to_process, llm_parsed_results):
+        item[constants.PARSED_RESPONSE] = parsed_result
+
+    # Group the results by survey_name to build the final DataFrames.
+    # defaultdict is perfect for this task.
+    grouped_data = defaultdict(list)
+    for item in all_items_to_process:
+        grouped_data[item[constants.SURVEY_NAME]].append({
+            constants.SURVEY_ITEM_ID: item[constants.SURVEY_ITEM_ID],
+            constants.QUESTION: item[constants.QUESTION],
+            constants.LLM_RESPONSE: item[constants.LLM_RESPONSE],
+            constants.PARSED_RESPONSE: item[constants.PARSED_RESPONSE]
+        })
+    all_results = {
+        survey_name: pd.DataFrame(data_list)
+        for survey_name, data_list in grouped_data.items()
+    }
 
     return all_results

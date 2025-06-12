@@ -12,12 +12,12 @@ import torch
 
 import gc
 
-def default_model_init(model_id: str, seed=42) -> LLM:
+def default_model_init(model_id: str, seed:int=42, **model_keywords) -> LLM:
     random.seed(seed)
     torch.manual_seed(seed)
     print("Device_count: " + str(torch.cuda.device_count()))
 
-    return LLM(model=model_id, tensor_parallel_size=torch.cuda.device_count(), seed=seed, max_model_len=2000, enable_prefix_caching=True)
+    return LLM(model=model_id, tensor_parallel_size=torch.cuda.device_count(), seed=seed, enable_prefix_caching=True, **model_keywords)
 
 def shutdown_model(model: LLM) -> None:
     del model
