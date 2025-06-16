@@ -46,7 +46,7 @@ def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.Dat
             df = pd.DataFrame(answers, columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, *answer_format])
         except:
             print(answers)
-            df = pd.DataFrame(answers, columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, "error_col"])
+            df = pd.DataFrame(answers, columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, "error_col"])
         final_result[survey_result.survey] = df
 
     return final_result
