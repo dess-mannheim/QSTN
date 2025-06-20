@@ -665,7 +665,10 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
             output.insert(index, current_assistant_messages[num])
         for survey_id, prompt, llm_response, item in zip(range(len(current_surveys)), prompts, output, current_surveys):
             question_llm_response[survey_id].update({item._questions[i].item_id: QuestionLLMResponseTuple(prompt, llm_response)})
-        assistant_messages.append(output)    
+
+        for o in range(len(output)):
+            assistant_messages[o].append(output[o])    
+        #assistant_messages.append(output)    
         
     for i, survey in enumerate(surveys):
         survey_results.append(SurveyResult(survey, question_llm_response[i]))

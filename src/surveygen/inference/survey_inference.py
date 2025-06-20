@@ -73,6 +73,9 @@ def batch_turn_by_turn_generation(model:LLM, system_messages:List[str]=["You are
         num_user_msgs = len(prompts[i])
         num_assistant_msgs = len(assistant_messages[i])
 
+        print(assistant_messages, flush=True)
+        print(num_assistant_msgs, flush=True)
+
         #TODO this implementation is wrong, because assistant messages supports a dict, so they can be anywhere and not just at the beginning
         for j in range(num_user_msgs):
             messages.append({"role": "user", "content": prompts[i][j]})

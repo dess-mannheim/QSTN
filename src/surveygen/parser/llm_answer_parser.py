@@ -57,6 +57,11 @@ def json_parse_whole_survey_all(survey_results:List[SurveyResult]) -> Dict[LLMSu
     all_results = {}
 
     for survey, df in parsed_results.items():
+
+        if "error_col" in df.columns:
+            all_results[survey] = df
+            continue
+
         pattern = re.compile(r"^([a-zA-Z_]+)(\d+)$")
         matched = [pattern.match(col) for col in df.columns]
 
