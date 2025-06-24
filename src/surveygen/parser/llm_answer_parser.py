@@ -13,6 +13,8 @@ import pandas as pd
 
 import json
 
+import json_repair
+
 import re
 
 from collections import defaultdict
@@ -25,7 +27,10 @@ def json_parser_str(answer:str) -> Dict[str, str]:
     try:
         result_json = json.loads(answer)
     except:
-        return None
+        try:
+            result_json = json_repair.loads(answer)
+        except:
+            return None
 
     return result_json
 
