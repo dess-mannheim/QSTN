@@ -2,7 +2,9 @@ from typing import Optional, Dict, Any, Union, Final
 from enum import Enum
 import random
 
-JSON_START_STRING: Final[str] = """
+JSON_START_STRING: Final[
+    str
+] = """
 Respond only in the following JSON Format:
 ```json
 {
@@ -12,20 +14,35 @@ FORCED_OPTION_STRING: Final[str] = "Respond only with one of these options:"
 
 COT_STRING: Final[str] = "Think step by step."
 
+
 class PersonaCall(Enum):
     YOU = "You are"
     I = "I am"
     ACT = "Act as"
     FREETEXT = ""
 
+
 class Persona:
-    def __init__(self, name: Optional[str] = None, attributes: Optional[Dict[str, Any]] = None, description: Optional[str] = None, persona_call: PersonaCall = PersonaCall.YOU, persona_call_freetext: Optional[str] = None):
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None,
+        persona_call: PersonaCall = PersonaCall.YOU,
+        persona_call_freetext: Optional[str] = None,
+    ):
         self.name = name
         self.attributes = attributes or {}
         self.description = description or ""
-        self.persona_call_text = self.set_persona_call(persona_call, persona_call_freetext)
+        self.persona_call_text = self.set_persona_call(
+            persona_call, persona_call_freetext
+        )
 
-    def set_persona_call(self, persona_call: PersonaCall = PersonaCall.YOU, persona_call_freetext: Optional[str] = None) -> None:
+    def set_persona_call(
+        self,
+        persona_call: PersonaCall = PersonaCall.YOU,
+        persona_call_freetext: Optional[str] = None,
+    ) -> None:
         persona_str = ""
         if persona_call:
             persona_str = persona_call.value
@@ -50,36 +67,52 @@ class Persona:
     #     attr_str = ", ".join(f"{k}: {v}" for k, v in self.attributes.items())
     #     return f"Persona(Name: {self.name}, Attributes: {attr_str}, Description: {self.description})"
 
+
 class OutputForm:
 
     def __init__(self):
         self.output_prompt = ""
-        
+
     def get_output_prompt(self) -> str:
         return self.output_prompt
 
-    def single_answer(self, forced_options: list[str], start_string: str = FORCED_OPTION_STRING, randomize: bool = False) -> None:
+    def single_answer(
+        self,
+        forced_options: list[str],
+        start_string: str = FORCED_OPTION_STRING,
+        randomize: bool = False,
+    ) -> None:
         if randomize:
             random.shuffle(forced_options)
-        
+
         option_string = "|".join(forced_options)
 
         self.output_prompt = f"{start_string} {option_string}."
-    
-    def json(self, json_attributes: list[str], json_explanation: Optional[list[str]], start_string: str = JSON_START_STRING, randomize: bool = False) -> None:
+
+    def json(
+        self,
+        json_attributes: list[str],
+        json_explanation: Optional[list[str]],
+        start_string: str = JSON_START_STRING,
+        randomize: bool = False,
+    ) -> None:
         if json_explanation:
-            assert len(json_attributes) == len(json_explanation), "Length of attributes and explanation is not the same!"
+            assert len(json_attributes) == len(
+                json_explanation
+            ), "Length of attributes and explanation is not the same!"
         assert start_string, "The start string cannot be None"
-        
+
         self.output_prompt = start_string
 
         if randomize:
             if json_explanation is not None:
                 combined = list(zip(json_attributes, json_explanation))
                 random.shuffle(combined)
-            
+
                 json_attributes, json_explanation = zip(*combined)
-                json_attributes, json_explanation = list(json_attributes), list(json_explanation)
+                json_attributes, json_explanation = list(json_attributes), list(
+                    json_explanation
+                )
             else:
                 random.shuffle(json_attributes)
 
@@ -100,31 +133,52 @@ class OutputForm:
         self.output_prompt = ""
 
 
-
 class PromptCreation:
     def __init__(self):
         self._persona: Optional[Persona] = None
         self._task_instruction: Optional[str] = None
         self._output_form: Optional[OutputForm] = None
 
-    def create_persona(self, name: Optional[str] = None, attributes: Optional[Dict[str, Any]] = None, description: Optional[str] = None, persona_call: PersonaCall = PersonaCall.YOU, persona_call_freetext: Optional[str] = None) -> Persona:
+    def create_persona(
+        self,
+        name: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        description: Optional[str] = None,
+        persona_call: PersonaCall = PersonaCall.YOU,
+        persona_call_freetext: Optional[str] = None,
+    ) -> Persona:
         """Creates a persona with a name, attributes, and an optional description."""
-        self._persona = Persona(name, attributes, description, persona_call, persona_call_freetext)
+        self._persona = Persona(
+            name, attributes, description, persona_call, persona_call_freetext
+        )
         return self._persona
 
     def set_task_instruction(self, instruction: str) -> None:
         """Sets the task instruction."""
         self._task_instruction = instruction
 
-    def set_output_format_closed_answer(self, forced_options: Optional[list[str]], start_string: str = FORCED_OPTION_STRING, randomize: bool = False) -> None:
+    def set_output_format_closed_answer(
+        self,
+        forced_options: Optional[list[str]],
+        start_string: str = FORCED_OPTION_STRING,
+        randomize: bool = False,
+    ) -> None:
         """Sets the desired output format for the LLM."""
         self._output_form = OutputForm()
         self._output_form.single_answer(forced_options, start_string, randomize)
 
-    def set_ouput_format_json(self, json_attributes: list[str], json_explanation: Optional[list[str]], start_string: str = JSON_START_STRING, randomize: bool = False) -> None:
+    def set_ouput_format_json(
+        self,
+        json_attributes: list[str],
+        json_explanation: Optional[list[str]],
+        start_string: str = JSON_START_STRING,
+        randomize: bool = False,
+    ) -> None:
         """Sets the desired output format for the LLM."""
         self._output_form = OutputForm()
-        self._output_form.json(json_attributes, json_explanation, start_string, randomize)
+        self._output_form.json(
+            json_attributes, json_explanation, start_string, randomize
+        )
 
     def set_output_format_cot(self, start_string: str = COT_STRING) -> None:
         self._output_form.chain_of_thought(start_string)
@@ -156,6 +210,7 @@ class PromptCreation:
 
         return prompt
 
+
 # Example usage
 if __name__ == "__main__":
     creator = PromptCreation()
@@ -170,9 +225,12 @@ if __name__ == "__main__":
     # Set task instruction
     creator.set_task_instruction("Explain the concept of gravity")
     # Set output format
-    creator.set_ouput_format_json(["reasoning", "answer"], ["First think about your response here.", "Give your final answer here."])
+    creator.set_ouput_format_json(
+        ["reasoning", "answer"],
+        ["First think about your response here.", "Give your final answer here."],
+    )
 
-    #creator.set_single_answer_output_format(["Yes", "No"])
+    # creator.set_single_answer_output_format(["Yes", "No"])
     # Generate and print the prompt
     prompt = creator.generate_prompt()
     print(prompt)

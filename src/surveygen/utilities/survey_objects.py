@@ -4,9 +4,16 @@ from ..utilities import prompt_templates
 
 from dataclasses import dataclass
 
+
 class AnswerOptions:
 
-    def __init__(self, answer_text: List[str], from_to_scale:bool, list_prompt_template:str = prompt_templates.LIST_OPTIONS_DEFAULT, scale_prompt_template:str = prompt_templates.SCALE_OPTIONS_DEFAULT):
+    def __init__(
+        self,
+        answer_text: List[str],
+        from_to_scale: bool,
+        list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
+        scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+    ):
         """
         Initializes the AnswerOptions object.
 
@@ -18,14 +25,14 @@ class AnswerOptions:
             scale_prompt_template (str): A format string for scale-based options.
                                          Must contain '{start}' and '{end}' placeholders.
         """
-        self.answer_text:List[str] = answer_text
+        self.answer_text: List[str] = answer_text
         self.from_to_scale: bool = from_to_scale
-        self.list_prompt_template:str = list_prompt_template
-        self.scale_prompt_template:str = scale_prompt_template
+        self.list_prompt_template: str = list_prompt_template
+        self.scale_prompt_template: str = scale_prompt_template
 
     def create_options_str(self) -> str:
         if not self.from_to_scale:
-            joined_options = ', '.join(self.answer_text)
+            joined_options = ", ".join(self.answer_text)
             return self.list_prompt_template.format(options=joined_options)
         else:
             if len(self.answer_text) < 2:
@@ -34,13 +41,16 @@ class AnswerOptions:
             end_option = self.answer_text[-1]
             return self.scale_prompt_template.format(start=start_option, end=end_option)
 
+
 class QuestionLLMResponseTuple(NamedTuple):
     question: str
     llm_response: str
 
+
 @dataclass
 class SurveyItem:
     """Represents a single survey question."""
+
     item_id: int
     question_content: str
     question_stem: Optional[str] = None
