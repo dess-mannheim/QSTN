@@ -492,8 +492,10 @@ def conduct_survey_question_by_question(model: LLM, surveys: List[LLMSurvey], js
     
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
     
-    for survey in surveys:
-        inference_option = survey._generate_inference_options(json_structured_output, json_structure)
+    if print_progress:
+        print("Constructing prompts")
+    for i in (tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys))):
+        inference_option = surveys[i]._generate_inference_options(json_structured_output, json_structure)
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
@@ -552,8 +554,10 @@ def conduct_whole_survey_one_prompt(model: LLM, surveys: List[LLMSurvey], json_s
     
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
     
-    for survey in surveys:
-        inference_option = survey._generate_inference_options(json_structured_output, json_structure)
+    if print_progress:
+        print("Constructing prompts")
+    for i in (tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys))):
+        inference_option = surveys[i]._generate_inference_options(json_structured_output, json_structure)
         inference_options.append(inference_option)
 
         question_llm_response_pairs.append({})
@@ -609,8 +613,10 @@ def conduct_survey_in_context(model:LLM, surveys: List[LLMSurvey], json_structur
     
     question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
     
-    for survey in surveys:
-        inference_option = survey._generate_inference_options(json_structured_output, json_structure)
+    if print_progress:
+        print("Constructing prompts")
+    for i in (tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys))):
+        inference_option = surveys[i]._generate_inference_options(json_structured_output, json_structure)
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
