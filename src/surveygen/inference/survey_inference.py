@@ -10,8 +10,6 @@ from vllm.outputs import RequestOutput
 
 import torch
 
-import gc
-
 def default_model_init(model_id: str, seed:int=42, **model_keywords) -> LLM:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -46,15 +44,13 @@ def batch_generation(model = LLM, system_messages:list[str]=["You are a helpful 
     outputs:List[RequestOutput] = model.chat(batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress)
     result = [output.outputs[0].text for output in outputs]
 
+    #TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
     if print_conversation:
+        conversation_print = "Conversation:"
         print("Conversation:")
         for system_message, prompt, answer in zip(system_messages, prompts, result):
-            print("System Message")
-            print(system_message)
-            print("User Message")
-            print(prompt)
-            print("Generated Message")
-            print(answer)
+            round_print = f"{conversation_print}\nSystem Message:\n{system_message}\nUser Message:\n{prompt}\nGenerated Message\n{answer}"
+            print(round_print, flush=True)
 
     return result
 
@@ -99,20 +95,18 @@ def batch_turn_by_turn_generation(model:LLM, system_messages:List[str]=["You are
     outputs: List[RequestOutput] = model.chat(batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress)
     result = [output.outputs[0].text for output in outputs]
     
+    #TODO add argurment to specify how many conversations should be printed
     if print_conversation:
-        print("Conversation:")
+        conversation_print = "Conversation:"
         for system_message, prompt_list, assistant_list, answer in zip(system_messages, prompts, assistant_messages, result):
-            print("System Prompt:")
-            print(system_message)
+            round_print = f"{conversation_print}\nSystem Prompt:\n{system_message}"            
             for j in range(len(prompt_list)):
-                print("User Message:")
-                print(prompt_list[j])
+                round_print = f"{round_print}\nUser Message:\n{prompt_list[j]}"
                 if j < len(assistant_list):
                     prefill = assistant_list[j]
                     if prefill:
-                        print("Assistant Message")
-                        print(assistant_list[j])
-            print("Generated Answer")
-            print(answer)
+                        round_print = f"{round_print}\nAssistant Message:\n{assistant_list[j]}"
+            round_print = f"{round_print}\nGenerated Answer:\{answer}"
+            print(round_print, flush=True)
 
     return result

@@ -24,7 +24,6 @@ import copy
 import tqdm
 
 class SurveyOptionGenerator:
-    #TODO This probably should be its own file instead. My Java programming took over :D
     """
     A class responsible for preparing optional answers for the LLM.
     """
@@ -38,30 +37,73 @@ class SurveyOptionGenerator:
 
 
     @staticmethod
-    def generate_likert_options(n: int, descriptions: Optional[List[str]], # update naming of description
-                                only_from_to_scale:bool = False, 
-                                random_order:bool = False, 
-                                reversed_order:bool = False,
-                                even_order:bool = False,
-                                start_idx: int = 1,
-                                list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
-                                scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
-                                idx_type: _IDX_TYPES="integer") -> AnswerOptions:
-        
+    def generate_likert_options(
+        n: int, 
+        answer_texts: Optional[List[str]],
+        only_from_to_scale:bool = False, 
+        random_order:bool = False, 
+        reversed_order:bool = False,
+        even_order:bool = False,
+        start_idx: int = 1,
+        list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
+        scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+        idx_type: _IDX_TYPES="integer"
+    ) -> AnswerOptions:
+        """Generates a set of options and a prompt for a Likert-style scale.
+
+        This function creates a numeric or alphabetic scale of a specified size (n),
+        optionally attaching textual labels to the scale. It provides
+        extensive control over ordering, formatting, and the final prompt string.
+
+        :param n: The number of points on the scale (e.g., 5 for a 1-5 scale).
+        :type n: int
+        :param answer_texts: A list of strings to use as labels for points on the scale.
+                             For example, ["Agree", "Disagree", "Neither"] for a 3-point scale.
+        :type answer_texts: Optional[List[str]]
+        :param only_from_to_scale: If True, forces a 'range' style prompt (e.g., "from 1 to 5")
+                                using `scale_prompt_template`.
+        :type only_from_to_scale: bool
+        :param random_order: If True, shuffles the final list of generated options.
+                            Mutually exclusive with `reversed_order`.
+        :type random_order: bool
+        :param reversed_order: If True, reverses the natural order of the scale (e.g., 5, 4, 3, 2, 1).
+                            Mutually exclusive with `random_order`.
+        :type reversed_order: bool
+        :param even_order: Removes the middle answer option of the scale, if the scale is odd.
+        :type even_order: bool
+        :param start_idx: The starting number for an integer-based scale (e.g., 1 or 0).
+        :type start_idx: int
+        :param list_prompt_template: The format string for a list-style prompt. Must contain `{options}`.
+        :type list_prompt_template: str
+        :param scale_prompt_template: The format string for a range-style prompt. Must contain `{start}`
+                                    and `{end}`.
+        :type scale_prompt_template: str
+        :param idx_type: The type of index for the scale: "char_low", "char_upper" or "integer".
+        :type idx_type: _IDX_TYPES
+
+        :raises ValueError: If `n` is less than 2, if `random_order` and `reversed_order` are both True,
+                            or if `len(anchor_labels)` > `n`.
+
+        :return: An object containing `options` (the final list of option strings) and `prompt`
+                (the formatted prompt string).
+        :rtype: AnswerOptions"""
+
+
+        #@TODO @Jens Instead of assertions we should probably raise Value errors
         if only_from_to_scale:
-            assert len(descriptions) == 2, "If from to scale, provide exactly two descriptions"
+            assert len(answer_texts) == 2, "If from to scale, provide exactly two descriptions"
             assert idx_type == "integer", "Index type must be integer, not lower/uppercase characters."
         else:
-            if descriptions:
-                assert len(descriptions) == n, "Description list must be the same length as options"
+            if answer_texts:
+                assert len(answer_texts) == n, "Description list must be the same length as options"
         if even_order:
                 assert n % 2 != 0, "There must be a odd number of options!"
                 middle_index = n // 2
-                descriptions = descriptions[:middle_index] + descriptions[middle_index+1:]
+                answer_texts = answer_texts[:middle_index] + answer_texts[middle_index+1:]
                 n = n-1
         if random_order:
-            assert len(descriptions) >= 2, "There must be at least two answer options to reorder randomly."
-            random.shuffle(descriptions) # no assignment needed because shuffles already inplace
+            assert len(answer_texts) >= 2, "There must be at least two answer options to reorder randomly."
+            random.shuffle(answer_texts) # no assignment needed because shuffles already inplace
         if reversed_order:
             assert len(answer_option) >= 2, "There must be at least two answer options to reverse options."
             answer_options = answer_options[::-1]
@@ -70,30 +112,30 @@ class SurveyOptionGenerator:
         answer_options = []
         if idx_type == "integer":
             for i in range(n):
-                option_number = i + start_idx #rename answer options
-                answer_option = f"{option_number}"
+                answer_code = i + start_idx
+                answer_option = f"{answer_code}"
                 if only_from_to_scale:
                     if i == 0:
-                        answer_option = f"{option_number}: {descriptions[0]}"
+                        answer_option = f"{answer_code}: {answer_texts[0]}"
                     elif i == (n-1):
-                        answer_option = f"{option_number}: {descriptions[1]}"
-                elif descriptions:
-                    answer_option = f"{option_number}: {descriptions[i]}"
+                        answer_option = f"{answer_code}: {answer_texts[1]}"
+                elif answer_texts:
+                    answer_option = f"{answer_code}: {answer_texts[i]}"
                 answer_options.append(answer_option)
         else:
             #TODO @Jens add these to constants.py
             if idx_type == "char_low":
                 for i in range(n):
-                    answer_option = f"{ascii_lowercase[i]}: {descriptions[i]}"
+                    answer_option = f"{ascii_lowercase[i]}: {answer_texts[i]}"
                     answer_options.append(answer_option)
             elif idx_type == "char_upper":
                 for i in range(n):
-                    answer_option = f"{ascii_uppercase[i]}: {descriptions[i]}"
+                    answer_option = f"{ascii_uppercase[i]}: {answer_texts[i]}"
                     answer_options.append(answer_option)
 
 
         survey_option = AnswerOptions(answer_options, from_to_scale=only_from_to_scale, list_prompt_template=list_prompt_template, scale_prompt_template=scale_prompt_template)
-        #print(survey_option)
+
         return survey_option
     
     # @staticmethod
@@ -109,7 +151,7 @@ class SurveyOptionGenerator:
     
     @staticmethod
     def generate_generic_options(
-                descriptions: Dict,
+                answer_texts: Dict,
                 only_from_to_scale:bool = False, 
                 random_order:bool = False, 
                 reversed_order:bool = False,
@@ -119,9 +161,9 @@ class SurveyOptionGenerator:
                 to_integer:bool = False,
                 ):
             
-            n = len(descriptions.values())
-            answer_codes = descriptions.keys()
-            answer_texts = descriptions.values()
+            n = len(answer_texts.values())
+            answer_codes = answer_texts.keys()
+            answer_texts = answer_texts.values()
             #answer_options = descriptions
 
             if to_lowercase:
@@ -269,6 +311,14 @@ class LLMSurvey:
 
     def duplicate(self):
         return copy.deepcopy(self)
+
+    def get_prompt_structure(self)-> str:
+        whole_prompt = \
+f"""{self.system_prompt}
+{self.DEFAULT_TASK_INSTRUCTION}
+{self.generate_question_prompt(self._questions[0])}
+"""
+        return whole_prompt
 
     def get_survey_questions(self) -> str:
         return self._questions
