@@ -1,15 +1,14 @@
 from vllm import LLM, SamplingParams
-
 from vllm.sampling_params import GuidedDecodingParams
-
-from typing import Any, List, Optional
-
-import random
-
 from vllm.outputs import RequestOutput
 
 import torch
 
+from openai import OpenAI
+
+from typing import Any, List, Optional, Union
+
+import random
 
 def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
     random.seed(seed)
@@ -25,7 +24,7 @@ def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
 
 
 def batch_generation(
-    model: LLM,
+    model: Union[LLM, OpenAI],
     system_messages: list[str] = ["You are a helpful assistant."],
     prompts: list[str] = ["Hi there! What is your name?"],
     guided_decoding_params: Optional[List[GuidedDecodingParams]] = None,
@@ -48,27 +47,29 @@ def batch_generation(
     batch_size = len(system_messages)
 
     seeds = [random.randint(0, 2**32 - 1) for _ in range(batch_size)]
+    if isinstance(model, LLM):
+        if guided_decoding_params:
+            sampling_params_list = [
+                SamplingParams(
+                    seed=seeds[i],
+                    guided_decoding=guided_decoding_params[i],
+                    **generation_kwargs,
+                )
+                for i in range(batch_size)
+            ]
+        else:
+            sampling_params_list = [
+                SamplingParams(seed=seeds[i], **generation_kwargs)
+                for i in range(batch_size)
+            ]
 
-    if guided_decoding_params:
-        sampling_params_list = [
-            SamplingParams(
-                seed=seeds[i],
-                guided_decoding=guided_decoding_params[i],
-                **generation_kwargs,
-            )
-            for i in range(batch_size)
-        ]
-    else:
-        sampling_params_list = [
-            SamplingParams(seed=seeds[i], **generation_kwargs)
-            for i in range(batch_size)
-        ]
-
-    outputs: List[RequestOutput] = model.chat(
-        batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress
-    )
-    result = [output.outputs[0].text for output in outputs]
-
+        outputs: List[RequestOutput] = model.chat(
+            batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress
+        )
+        result = [output.outputs[0].text for output in outputs]
+    #TODO OPENAI Implementation. There are multiple problems with this: Structured Output, batching, how to specify the model.   
+    # # elif isinstance(model, OpenAI):
+    #     completion = model.chat.completions.create()
     # TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
     if print_conversation:
         conversation_print = "Conversation:"
@@ -76,6 +77,7 @@ def batch_generation(
         for system_message, prompt, answer in zip(system_messages, prompts, result):
             round_print = f"{conversation_print}\nSystem Message:\n{system_message}\nUser Message:\n{prompt}\nGenerated Message\n{answer}"
             print(round_print, flush=True)
+            break
 
     return result
 
@@ -155,5 +157,6 @@ def batch_turn_by_turn_generation(
                         )
             round_print = f"{round_print}\nGenerated Answer:\{answer}"
             print(round_print, flush=True)
+            break
 
     return result

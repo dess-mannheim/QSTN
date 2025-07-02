@@ -5,8 +5,6 @@ from typing import (
     Union,
     Any,
     overload,
-    Tuple,
-    NamedTuple,
     Self,
     Literal,
     Final,
@@ -77,6 +75,7 @@ class SurveyOptionGenerator:
         start_idx: int = 1,
         list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
         scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+        options_separator: str = ", ",
         idx_type: _IDX_TYPES = "integer",
     ) -> AnswerOptions:
         """Generates a set of options and a prompt for a Likert-style scale.
@@ -180,6 +179,7 @@ class SurveyOptionGenerator:
             from_to_scale=only_from_to_scale,
             list_prompt_template=list_prompt_template,
             scale_prompt_template=scale_prompt_template,
+            options_seperator=options_separator,
         )
 
         return survey_option
@@ -411,9 +411,18 @@ FIRST QUESTION:
 """
         return whole_prompt
 
-    def calculate_token_estimate(
+    def calculate_input_token_estimate(
         self, model_id: str, survey_type: SurveyTypes = SurveyTypes.QUESTION
     ) -> int:
+        """
+        Calculates the input token estimate for different survey types. Remember that the model needs to 
+        have enough context length to also fit the output tokens. For SurveyType.CONTEXT the total input token estimate
+        is just a very rough estimation. It depends on how many tokens the model produces in each response.
+
+        :param model_id: The huggingface model id of the model you want to use.
+        :param survey_type: The survey type you will be running.
+        :return: Estimated number of input tokens needed for the survey
+        """
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         if survey_type == SurveyTypes.QUESTION:
 
@@ -842,7 +851,7 @@ def conduct_survey_question_by_question(
 
 def conduct_whole_survey_one_prompt(
     model: LLM,
-    surveys: List[LLMSurvey],
+    surveys: Union[LLMSurvey, List[LLMSurvey]],
     json_structured_output: bool = False,
     json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
     print_conversation: bool = False,
@@ -863,6 +872,8 @@ def conduct_whole_survey_one_prompt(
     :param generation_kwargs: All keywords needed for SamplingParams.
     :return: Generated text by the LLM in double list format
     """
+    if isinstance(surveys, LLMSurvey):
+        surveys = [surveys]
     inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
@@ -934,7 +945,7 @@ def conduct_whole_survey_one_prompt(
 
 def conduct_survey_in_context(
     model: LLM,
-    surveys: List[LLMSurvey],
+    surveys: Union[LLMSurvey, List[LLMSurvey]],
     json_structured_output: bool = False,
     json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
     print_conversation: bool = False,
@@ -955,6 +966,8 @@ def conduct_survey_in_context(
     :param generation_kwargs: All keywords needed for SamplingParams.
     :return: Generated text by the LLM in double list format
     """
+    if isinstance(surveys, LLMSurvey):
+        surveys = [surveys]
 
     inference_options: List[InferenceOptions] = []
 
