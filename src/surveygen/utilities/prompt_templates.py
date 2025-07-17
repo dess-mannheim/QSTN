@@ -17,6 +17,7 @@ LIST_OPTIONS_QUESTION: Final[str] = "Which of the following is correct? {options
 LIST_OPTIONS_MINIMAL: Final[str] = "{options}"
 
 
+
 # --- Scale Option Templates (for ranges) ---
 # Placeholders: {start}, {end}
 

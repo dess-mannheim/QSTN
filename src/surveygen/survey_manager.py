@@ -30,6 +30,8 @@ from .inference.dynamic_pydantic import generate_pydantic_model
 from vllm import LLM
 from vllm.sampling_params import GuidedDecodingParams
 
+from openai import AsyncOpenAI
+
 from transformers import AutoTokenizer
 
 import pandas as pd
@@ -318,10 +320,11 @@ class InferenceOptions:
     system_prompt: str
     task_instruction: str
     question_prompts: Dict[int, str]
-    guided_decodings: Optional[Dict[int, GuidedDecodingParams]]
-    full_guided_decoding: Optional[GuidedDecodingParams]
-    json_structure: Optional[List[str]]
-    full_json_structure: Optional[List[str]]
+    answer_options: List[AnswerOptions]
+    # guided_decodings: Optional[Dict[int, GuidedDecodingParams]]
+    # full_guided_decoding: Optional[GuidedDecodingParams]
+    # json_structure: Optional[List[str]]
+    # full_json_structure: Optional[List[str]]
     order: List[int]
 
     def create_single_question(
@@ -362,6 +365,8 @@ DEFAULT_SYSTEM_PROMPT: str = (
 DEFAULT_TASK_INSTRUCTION: str = ""
 
 DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
+
+DEFAULT_CONSTRAINTS: Dict[str, List[str]] = {"answer": constants.OPTIONS_ADJUST}
 
 DEFAULT_SURVEY_ID: str = "Survey"
 
@@ -415,7 +420,7 @@ FIRST QUESTION:
         self, model_id: str, survey_type: SurveyTypes = SurveyTypes.QUESTION
     ) -> int:
         """
-        Calculates the input token estimate for different survey types. Remember that the model needs to 
+        Calculates the input token estimate for different survey types. Remember that the model needs to
         have enough context length to also fit the output tokens. For SurveyType.CONTEXT the total input token estimate
         is just a very rough estimation. It depends on how many tokens the model produces in each response.
 
@@ -641,8 +646,9 @@ FIRST QUESTION:
 
     def _generate_inference_options(
         self,
-        json_structured_output: bool = False,
-        json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
+        # json_structured_output: bool = False,
+        # json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
+        # json_force_answer: bool = False,
     ):
         survey_questions = self._questions
 
@@ -658,76 +664,79 @@ FIRST QUESTION:
 
         question_prompts = {}
 
-        guided_decoding_params = None
-        extended_json_structure: List[str] = None
-        json_list: List[str] = None
+        # guided_decoding_params = None
+        # extended_json_structure: List[str] = None
+        # json_list: List[str] = None
 
         order = []
 
-        if json_structured_output:
-            guided_decoding_params = {}
-            extended_json_structure = []
-            json_list = json_structure
+        # if json_structured_output:
+        #     guided_decoding_params = {}
+        #     extended_json_structure = []
+        #     json_list = json_structure
 
-        full_guided_decoding_params = None
+        # full_guided_decoding_params = None
 
-        constraints: Dict[str, List[str]] = {}
+        # constraints: Dict[str, List[str]] = {}
 
+        answer_options = []
         for i, survey_question in enumerate(survey_questions):
             question_prompt = self.generate_question_prompt(
                 survey_question=survey_question
             )
             question_prompts[survey_question.item_id] = question_prompt
-
+            answer_options.append(survey_question.answer_options)
             order.append(survey_question.item_id)
 
-            guided_decoding = None
-            if json_structured_output:
+            # guided_decoding = None
+            # if json_structured_output:
 
-                for element in json_structure:
-                    extended_json_structure.append(f"{element}{i+1}")
-                    if element == json_structure[-1]:
-                        if survey_question.answer_options:
-                            constraints[f"{element}{i+1}"] = (
-                                survey_question.answer_options.answer_text
-                            )
-                        elif self._global_options:
-                            constraints[f"{element}{i+1}"] = (
-                                self._global_options.answer_text
-                            )
+            #     for element in json_structure:
+            #         extended_json_structure.append(f"{element}{i+1}")
+            #         if element == json_structure[-1]:
+            #             if survey_question.answer_options:
+            #                 constraints[f"{element}{i+1}"] = (
+            #                     survey_question.answer_options.answer_text
+            #                 )
+            #             elif self._global_options:
+            #                 constraints[f"{element}{i+1}"] = (
+            #                     self._global_options.answer_text
+            #                 )
 
-                single_constraints = {}
-                if survey_question.answer_options:
-                    single_constraints = {
-                        json_structure[-1]: survey_question.answer_options.answer_text
-                    }
-                elif self._global_options:
-                    single_constraints = {
-                        json_structure[-1]: self._global_options.answer_text
-                    }
-                pydantic_model = generate_pydantic_model(
-                    fields=json_structure, constraints=single_constraints
-                )
-                json_schema = pydantic_model.model_json_schema()
-                guided_decoding = GuidedDecodingParams(json=json_schema)
-                guided_decoding_params[survey_question.item_id] = guided_decoding
+            #     single_constraints = {}
+            #     if survey_question.answer_options:
+            #         single_constraints = {
+            #             json_structure[-1]: survey_question.answer_options.answer_text
+            #         }
+            #     elif self._global_options:
+            #         single_constraints = {
+            #             json_structure[-1]: self._global_options.answer_text
+            #         }
+            #     pydantic_model = generate_pydantic_model(
+            #         fields=json_structure, constraints=single_constraints
+            #     )
+            #     json_schema = pydantic_model.model_json_schema()
+            #     guided_decoding = GuidedDecodingParams(json=json_schema)
+            #     guided_decoding_params[survey_question.item_id] = guided_decoding
 
-        if json_structured_output:
-            pydantic_model = generate_pydantic_model(
-                fields=extended_json_structure, constraints=constraints
-            )
-            full_json_schema = pydantic_model.model_json_schema()
-            full_guided_decoding_params = GuidedDecodingParams(json=full_json_schema)
+        # if json_structured_output:
+        #     pydantic_model = generate_pydantic_model(
+        #         fields=extended_json_structure,
+        #         constraints=constraints if json_force_answer else None,
+        #     )
+        #     full_json_schema = pydantic_model.model_json_schema()
+        #     full_guided_decoding_params = GuidedDecodingParams(json=full_json_schema)
 
         return InferenceOptions(
-            self.system_prompt,
-            default_prompt,
-            question_prompts,
-            guided_decoding_params,
-            full_guided_decoding_params,
-            json_list,
-            extended_json_structure,
-            order,
+            system_prompt=self.system_prompt,
+            task_instruction=default_prompt,
+            question_prompts=question_prompts,
+            # guided_decoding_params,
+            # full_guided_decoding_params,
+            # json_list,
+            # extended_json_structure,
+            answer_options=answer_options,
+            order=order,
         )
 
 
@@ -747,10 +756,13 @@ class SurveyResult:
 
 
 def conduct_survey_question_by_question(
-    model: LLM,
+    model: Union[LLM, AsyncOpenAI],
     surveys: Union[LLMSurvey, List[LLMSurvey]],
     json_structured_output: bool = False,
-    json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
+    json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
+    constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
+    client_model_name: Optional[str] = None,
+    api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
@@ -781,9 +793,7 @@ def conduct_survey_question_by_question(
     if print_progress:
         print("Constructing prompts")
     for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options(
-            json_structured_output, json_structure
-        )
+        inference_option = surveys[i]._generate_inference_options()
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
@@ -792,6 +802,12 @@ def conduct_survey_question_by_question(
         question_llm_response_pairs.append({})
 
     survey_results: List[SurveyResult] = []
+
+    #TODO allow for different answer option constraints between surveys
+    if constraints:
+        for json_element in constraints.keys():
+            if constraints[json_element] == constants.OPTIONS_ADJUST:
+                constraints[json_element] = inference_options[0].answer_options[0].answer_text
 
     for i in (
         tqdm.tqdm(range(max_survey_length))
@@ -809,6 +825,7 @@ def conduct_survey_question_by_question(
                 inference.json_system_prompt(json_options=json_structure)
                 for inference in current_batch
             ]
+
         else:
             system_messages = [inference.system_prompt for inference in current_batch]
         prompts = [
@@ -819,17 +836,16 @@ def conduct_survey_question_by_question(
             inference.create_single_question(inference.order[i], task_instruction=False)
             for inference in current_batch
         ]
-        guided_decoding_params = [
-            inference.guided_decodings[inference.order[i]]
-            for inference in current_batch
-            if inference.guided_decodings
-        ]
 
         output = batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            guided_decoding_params=guided_decoding_params,
+            guided_decoding_options= "json" if json_structured_output else None,
+            json_fields=json_structure,
+            constraints=constraints,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
@@ -850,10 +866,13 @@ def conduct_survey_question_by_question(
 
 
 def conduct_whole_survey_one_prompt(
-    model: LLM,
+    model: Union[LLM, AsyncOpenAI],
     surveys: Union[LLMSurvey, List[LLMSurvey]],
     json_structured_output: bool = False,
-    json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
+    json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
+    constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
+    client_model_name: Optional[str] = None,
+    api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
@@ -884,9 +903,7 @@ def conduct_whole_survey_one_prompt(
     if print_progress:
         print("Constructing prompts")
     for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options(
-            json_structured_output, json_structure
-        )
+        inference_option = surveys[i]._generate_inference_options()
         inference_options.append(inference_option)
 
         question_llm_response_pairs.append({})
@@ -905,25 +922,40 @@ def conduct_whole_survey_one_prompt(
         ]
 
         if json_structured_output:
+            all_json_structures = []
+            for inference_option in current_batch:
+                full_json_structure = []
+                full_constraints = []
+                for i in range(len(inference_option.answer_options)):
+                    for json_element in json_structure:
+                        new_element = f"{json_element}{i}"
+                        new_constraints = {}
+                        if constraints:
+                            if constraints[json_element] == constants.OPTIONS_ADJUST:
+                                new_constraints[new_element] = inference_option.answer_options[i].answer_text
+                        full_constraints.append(new_constraints)
+                        full_json_structure.append(new_element)
+                all_json_structures.append(full_json_structure)
+                    
             system_messages = [
-                inference.json_system_prompt(inference.full_json_structure)
-                for inference in current_batch
+                inference.json_system_prompt(all_json_structures[num])
+                for num, inference in enumerate(current_batch)
             ]
+
         else:
             system_messages = [inference.system_prompt for inference in current_batch]
         prompts = [inference.create_all_questions() for inference in current_batch]
 
-        guided_decoding_params = [
-            inference.full_guided_decoding
-            for inference in current_batch
-            if inference.full_guided_decoding
-        ]
 
         output = batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            guided_decoding_params=guided_decoding_params,
+            guided_decoding_options= "json" if json_structured_output else None,
+            json_fields=full_json_structure,
+            constraints=full_constraints if constraints else None,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
@@ -944,10 +976,13 @@ def conduct_whole_survey_one_prompt(
 
 
 def conduct_survey_in_context(
-    model: LLM,
+    model: Union[LLM, AsyncOpenAI],
     surveys: Union[LLMSurvey, List[LLMSurvey]],
     json_structured_output: bool = False,
-    json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
+    json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
+    constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
+    client_model_name: Optional[str] = None,
+    api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
@@ -978,9 +1013,7 @@ def conduct_survey_in_context(
     if print_progress:
         print("Constructing prompts")
     for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options(
-            json_structured_output, json_structure
-        )
+        inference_option = surveys[i]._generate_inference_options()
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
@@ -992,6 +1025,11 @@ def conduct_survey_in_context(
 
     all_prompts: List[List[str]] = []
     assistant_messages: List[List[str]] = []
+
+    if constraints:
+        for json_element in constraints.keys():
+            if constraints[json_element] == constants.OPTIONS_ADJUST:
+                constraints[json_element] = inference_options[0].answer_options[0].answer_text
 
     for i in range(len(surveys)):
         assistant_messages.append([])
@@ -1063,18 +1101,16 @@ def conduct_survey_in_context(
         else:
             system_messages = [inference.system_prompt for inference in current_batch]
 
-        guided_decoding_params = [
-            inference.guided_decodings[inference.order[i]]
-            for inference in current_batch
-            if inference.guided_decodings
-        ]
-
         output = batch_turn_by_turn_generation(
             model=model,
             system_messages=system_messages,
             prompts=all_prompts,
             assistant_messages=assistant_messages,
-            guided_decoding_params=guided_decoding_params,
+            guided_decoding_options= "json" if json_structured_output else None,
+            json_fields=json_structure,
+            constraints=constraints,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,

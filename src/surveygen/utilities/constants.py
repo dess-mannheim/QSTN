@@ -1,4 +1,4 @@
-from typing import Final
+from typing import Final, List
 
 # Survey Item
 SURVEY_ITEM_ID: Final[str] = "survey_item_id"
@@ -19,3 +19,6 @@ ANSWER_OPTION: Final[str] = "answer_option"
 # LLM Response
 LLM_RESPONSE: Final[str] = "llm_response"
 PARSED_RESPONSE: Final[str] = "parsed_response"
+
+#Structured Output constraints
+OPTIONS_ADJUST: List[str] = ["OPTIONS_ADJUST"]
