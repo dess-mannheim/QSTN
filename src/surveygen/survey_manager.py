@@ -17,7 +17,7 @@ from string import ascii_lowercase, ascii_uppercase
 from .utilities.prompt_creation import PromptCreation
 from .utilities.survey_objects import (
     AnswerOptions,
-    SurveyItem,
+    InterviewItem,
     QuestionLLMResponseTuple,
 )
 from .utilities import prompt_templates
@@ -176,7 +176,7 @@ class SurveyOptionGenerator:
                     answer_option = f"{ascii_uppercase[i]}: {answer_texts[i]}"
                     answer_options.append(answer_option)
 
-        survey_option = AnswerOptions(
+        interview_option = AnswerOptions(
             answer_options,
             from_to_scale=only_from_to_scale,
             list_prompt_template=list_prompt_template,
@@ -184,17 +184,7 @@ class SurveyOptionGenerator:
             options_seperator=options_separator,
         )
 
-        return survey_option
-
-    # @staticmethod
-    # def generate_interval_options(
-    #         answer_options: List[str],
-    #         only_from_to_scale:bool = False,
-    #         random_order:bool = False,
-    #         reversed_order:bool = False,
-    #         even_order:bool = False,
-
-    # ):
+        return interview_option
 
     @staticmethod
     def generate_generic_options(
@@ -206,6 +196,9 @@ class SurveyOptionGenerator:
         to_lowercase: bool = False,
         to_uppercase: bool = False,
         to_integer: bool = False,
+        list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
+        scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+        options_separator: str = ", ",
     ):
 
         n = len(answer_texts.values())
@@ -304,15 +297,21 @@ class SurveyOptionGenerator:
         answer_options = [f"{key}: {val}" for key, val in answer_options.items()]
         print(answer_options)
 
-        survey_option = AnswerOptions(answer_options, from_to_scale=only_from_to_scale)
-        # print(survey_option)
-        return survey_option
+        interview_option = AnswerOptions(
+            answer_options,
+            from_to_scale=only_from_to_scale,
+            list_prompt_template=list_prompt_template,
+            scale_prompt_template=scale_prompt_template,
+            options_seperator=options_separator,
+        )
+
+        return interview_option
 
 
-class SurveyTypes(Enum):
-    QUESTION: Final[str] = "survey_type_question"
-    CONTEXT: Final[str] = "survey_type_context"
-    ONE_PROMPT: Final[str] = "survey_type_one_prompt"
+class InterviewType(Enum):
+    QUESTION: Final[str] = "interview_type_question"
+    CONTEXT: Final[str] = "interview_type_context"
+    ONE_PROMPT: Final[str] = "interview_type_one_prompt"
 
 
 @dataclass
@@ -368,10 +367,10 @@ DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
 
 DEFAULT_CONSTRAINTS: Dict[str, List[str]] = {"answer": constants.OPTIONS_ADJUST}
 
-DEFAULT_SURVEY_ID: str = "Survey"
+DEFAULT_INTERVIEW_ID: str = "Interview"
 
 
-class LLMSurvey:
+class LLMInterview:
     """
     A class responsible for preparing and conducting surveys on LLMs.
     """
@@ -385,21 +384,21 @@ class LLMSurvey:
 
     def __init__(
         self,
-        survey_path: str,
-        survey_name: str = DEFAULT_SURVEY_ID,
+        interview_path: str,
+        interview_name: str = DEFAULT_INTERVIEW_ID,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        survey_instruction: str = DEFAULT_TASK_INSTRUCTION,
+        interview_instruction: str = DEFAULT_TASK_INSTRUCTION,
         verbose=False,
         seed: int = 42,
     ):
         random.seed(seed)
-        self.load_survey(survey_path=survey_path)
+        self.load_interview_format(interview_path=interview_path)
         self.verbose: bool = verbose
 
-        self.survey_name: str = survey_name
+        self.interview_name: str = interview_name
 
         self.system_prompt: str = system_prompt
-        self.survey_instruction: str = survey_instruction
+        self.interview_instruction: str = interview_instruction
 
         self._global_options: AnswerOptions = None
 
@@ -409,15 +408,15 @@ class LLMSurvey:
     def get_prompt_structure(self) -> str:
         whole_prompt = f"""SYSTEM PROMPT:
 {self.system_prompt}
-SURVEY INSTRUCTIONS:
-{self.survey_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
+INTERVIEW INSTRUCTIONS:
+{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
 FIRST QUESTION:
 {self.generate_question_prompt(self._questions[0])}
 """
         return whole_prompt
 
     def calculate_input_token_estimate(
-        self, model_id: str, survey_type: SurveyTypes = SurveyTypes.QUESTION
+        self, model_id: str, interview_type: InterviewType = InterviewType.QUESTION
     ) -> int:
         """
         Calculates the input token estimate for different survey types. Remember that the model needs to
@@ -429,29 +428,29 @@ FIRST QUESTION:
         :return: Estimated number of input tokens needed for the survey
         """
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        if survey_type == SurveyTypes.QUESTION:
+        if interview_type == InterviewType.QUESTION:
 
             whole_prompt = f"""{self.system_prompt}
-{self.survey_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
+{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
 {self.generate_question_prompt(self._questions[0])}
     """
         elif (
-            survey_type == SurveyTypes.ONE_PROMPT or survey_type == SurveyTypes.CONTEXT
+            interview_type == InterviewType.ONE_PROMPT or interview_type == InterviewType.CONTEXT
         ):
             questions: str = "\n".join(
                 self.generate_question_prompt(question) for question in self._questions
             )
             whole_prompt = f"""{self.system_prompt}
-{self.survey_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
+{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
 {questions}"""
         tokens = tokenizer.encode(whole_prompt)
 
-        return len(tokens) if survey_type != SurveyTypes.CONTEXT else len(tokens) * 3
+        return len(tokens) if interview_type != InterviewType.CONTEXT else len(tokens) * 3
 
     def get_survey_questions(self) -> str:
         return self._questions
 
-    def load_survey(self, survey_path: str) -> Self:
+    def load_interview_format(self, interview_path: str) -> Self:
         """
         Loads a prepared survey in csv format from a path.
 
@@ -462,37 +461,37 @@ FIRST QUESTION:
         :param survey_path: Path to the survey to load.
         :return: List of Survey Questions
         """
-        survey_questions: List[SurveyItem] = []
+        interview_questions: List[InterviewItem] = []
 
-        df = pd.read_csv(survey_path)
+        df = pd.read_csv(interview_path)
 
         for _, row in df.iterrows():
-            survey_item_id = row[constants.SURVEY_ITEM_ID]
+            interview_item_id = row[constants.INTERVIEW_ITEM_ID]
             # if constants.QUESTION in df.columns:
             #     question = row[constants.QUESTION]
             if constants.QUESTION_CONTENT in df.columns:
-                survey_question_content = row[constants.QUESTION_CONTENT]
+                interview_question_content = row[constants.QUESTION_CONTENT]
             else:
-                survey_question_content = None
+                interview_question_content = None
 
             if constants.QUESTION_STEM in df.columns:
-                survey_question_stem = row[constants.QUESTION_STEM]
+                interview_question_stem = row[constants.QUESTION_STEM]
             else:
-                survey_question_stem = None
+                interview_question_stem = None
 
-            generated_survey_question = SurveyItem(
-                item_id=survey_item_id,
-                question_content=survey_question_content,
-                question_stem=survey_question_stem,
+            generated_interview_question = InterviewItem(
+                item_id=interview_item_id,
+                question_content=interview_question_content,
+                question_stem=interview_question_stem,
             )
-            survey_questions.append(generated_survey_question)
+            interview_questions.append(generated_interview_question)
 
-        self._questions = survey_questions
+        self._questions = interview_questions
         return self
 
     # TODO Item order could be given by ids
     @overload
-    def prepare_survey(
+    def prepare_interview(
         self,
         question_stem: Optional[str] = None,
         answer_options: Optional[AnswerOptions] = None,
@@ -502,7 +501,7 @@ FIRST QUESTION:
     ) -> Self: ...
 
     @overload
-    def prepare_survey(
+    def prepare_interview(
         self,
         question_stem: Optional[List[str]] = None,
         answer_options: Optional[Dict[int, AnswerOptions]] = None,
@@ -511,7 +510,7 @@ FIRST QUESTION:
         randomized_item_order: bool = False,
     ) -> Self: ...
 
-    def prepare_survey(
+    def prepare_interview(
         self,
         question_stem: Optional[Union[str, List[str]]] = None,
         answer_options: Optional[Union[AnswerOptions, Dict[int, AnswerOptions]]] = None,
@@ -527,12 +526,12 @@ FIRST QUESTION:
         :para, prefilled_answers Linking survey question id to a prefilled answer.
         :return: List of updated Survey Questions
         """
-        survey_questions: List[SurveyItem] = self._questions
+        interview_questions: List[InterviewItem] = self._questions
 
         prompt_list = isinstance(question_stem, list)
         if prompt_list:
             assert len(question_stem) == len(
-                survey_questions
+                interview_questions
             ), "If a list of question stems is given, length of prompt and survey questions have to be the same"
 
         options_dict = False
@@ -544,7 +543,7 @@ FIRST QUESTION:
         elif isinstance(answer_options, Dict):
             options_dict = True
 
-        updated_questions: List[SurveyItem] = []
+        updated_questions: List[InterviewItem] = []
 
         if not prefilled_responses:
             prefilled_responses = {}
@@ -553,67 +552,67 @@ FIRST QUESTION:
 
         if not prompt_list and not options_dict:
             updated_questions = []
-            for i in range(len(survey_questions)):
-                new_survey_question = replace(
-                    survey_questions[i],
+            for i in range(len(interview_questions)):
+                new_interview_question = replace(
+                    interview_questions[i],
                     question_stem=(
                         question_stem
                         if question_stem
-                        else survey_questions[i].question_stem
+                        else interview_questions[i].question_stem
                     ),
                     answer_options=answer_options if not self._global_options else None,
                     prefilled_response=prefilled_responses.get(
-                        survey_questions[i].item_id
+                        interview_questions[i].item_id
                     ),
                 )
-                updated_questions.append(new_survey_question)
+                updated_questions.append(new_interview_question)
 
         elif not prompt_list and options_dict:
-            for i in range(len(survey_questions)):
-                new_survey_question = replace(
-                    survey_questions[i],
+            for i in range(len(interview_questions)):
+                new_interview_question = replace(
+                    interview_questions[i],
                     question_stem=(
                         question_stem
                         if question_stem
-                        else survey_questions[i].question_stem
+                        else interview_questions[i].question_stem
                     ),
-                    answer_options=answer_options.get(survey_questions[i].item_id),
+                    answer_options=answer_options.get(interview_questions[i].item_id),
                     prefilled_response=prefilled_responses.get(
-                        survey_questions[i].item_id
+                        interview_questions[i].item_id
                     ),
                 )
-                updated_questions.append(new_survey_question)
+                updated_questions.append(new_interview_question)
 
         elif prompt_list and not options_dict:
-            for i in range(len(survey_questions)):
-                new_survey_question = replace(
-                    survey_questions[i],
+            for i in range(len(interview_questions)):
+                new_interview_question = replace(
+                    interview_questions[i],
                     question_stem=(
                         question_stem[i]
                         if question_stem
-                        else survey_questions[i].question_stem
+                        else interview_questions[i].question_stem
                     ),
                     answer_options=answer_options if not self._global_options else None,
                     prefilled_response=prefilled_responses.get(
-                        survey_questions[i].item_id
+                        interview_questions[i].item_id
                     ),
                 )
-                updated_questions.append(new_survey_question)
+                updated_questions.append(new_interview_question)
         elif prompt_list and options_dict:
-            for i in range(len(survey_questions)):
-                new_survey_question = replace(
-                    survey_questions[i],
+            for i in range(len(interview_questions)):
+                new_interview_question = replace(
+                    interview_questions[i],
                     question_stem=(
                         question_stem[i]
                         if question_stem
-                        else survey_questions[i].question_stem
+                        else interview_questions[i].question_stem
                     ),
-                    answer_options=answer_options.get(survey_questions[i].item_id),
+                    answer_options=answer_options.get(interview_questions[i].item_id),
                     prefilled_response=prefilled_responses.get(
-                        survey_questions[i].item_id
+                        interview_questions[i].item_id
                     ),
                 )
-                updated_questions.append(new_survey_question)
+                updated_questions.append(new_interview_question)
 
         if randomized_item_order:
             random.shuffle(updated_questions)
@@ -621,24 +620,24 @@ FIRST QUESTION:
         self._questions = updated_questions
         return self
 
-    def generate_question_prompt(self, survey_question: SurveyItem) -> str:
+    def generate_question_prompt(self, interview_question: InterviewItem) -> str:
         """
         Returns the string of how a survey question would be prompted to the model.
 
         :param survey_question: Survey question to prompt.
         :return: Prompt that will be given to the model for this question.
         """
-        if constants.QUESTION_CONTENT_PLACEHOLDER in survey_question.question_stem:
-            question_prompt = survey_question.question_stem.format(
+        if constants.QUESTION_CONTENT_PLACEHOLDER in interview_question.question_stem:
+            question_prompt = interview_question.question_stem.format(
                 **{
-                    constants.QUESTION_CONTENT_PLACEHOLDER: survey_question.question_content
+                    constants.QUESTION_CONTENT_PLACEHOLDER: interview_question.question_content
                 }
             )
         else:
-            question_prompt = f"""{survey_question.question_stem} {survey_question.question_content}"""
+            question_prompt = f"""{interview_question.question_stem} {interview_question.question_content}"""
 
-        if survey_question.answer_options:
-            options_prompt = survey_question.answer_options.create_options_str()
+        if interview_question.answer_options:
+            options_prompt = interview_question.answer_options.create_options_str()
             question_prompt = f"""{question_prompt} 
 {options_prompt}"""
 
@@ -650,9 +649,9 @@ FIRST QUESTION:
         # json_structure: List[str] = DEFAULT_JSON_STRUCTURE,
         # json_force_answer: bool = False,
     ):
-        survey_questions = self._questions
+        interview_questions = self._questions
 
-        default_prompt = f"""{self.survey_instruction}"""
+        default_prompt = f"""{self.interview_instruction}"""
 
         if self._global_options:
             options_prompt = self._global_options.create_options_str()
@@ -680,13 +679,13 @@ FIRST QUESTION:
         # constraints: Dict[str, List[str]] = {}
 
         answer_options = []
-        for i, survey_question in enumerate(survey_questions):
+        for i, interview_question in enumerate(interview_questions):
             question_prompt = self.generate_question_prompt(
-                survey_question=survey_question
+                interview_question=interview_question
             )
-            question_prompts[survey_question.item_id] = question_prompt
-            answer_options.append(survey_question.answer_options)
-            order.append(survey_question.item_id)
+            question_prompts[interview_question.item_id] = question_prompt
+            answer_options.append(interview_question.answer_options)
+            order.append(interview_question.item_id)
 
             # guided_decoding = None
             # if json_structured_output:
@@ -742,7 +741,7 @@ FIRST QUESTION:
 
 @dataclass
 class SurveyResult:
-    survey: LLMSurvey
+    survey: LLMInterview
     results: Dict[int, QuestionLLMResponseTuple]
 
     def to_dataframe(self) -> pd.DataFrame:
@@ -751,13 +750,13 @@ class SurveyResult:
             answers.append((item_id, *question_llm_response_tuple))
         return pd.DataFrame(
             answers,
-            columns=[constants.SURVEY_ITEM_ID, *question_llm_response_tuple._fields],
+            columns=[constants.INTERVIEW_ITEM_ID, *question_llm_response_tuple._fields],
         )
 
 
 def conduct_survey_question_by_question(
     model: Union[LLM, AsyncOpenAI],
-    surveys: Union[LLMSurvey, List[LLMSurvey]],
+    interviews: Union[LLMInterview, List[LLMInterview]],
     json_structured_output: bool = False,
     json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
     constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
@@ -781,8 +780,8 @@ def conduct_survey_question_by_question(
     :param generation_kwargs: All keywords needed for SamplingParams.
     :return: Generated text by the LLM in double list format
     """
-    if isinstance(surveys, LLMSurvey):
-        surveys = [surveys]
+    if isinstance(interviews, LLMInterview):
+        interviews = [interviews]
 
     inference_options: List[InferenceOptions] = []
 
@@ -790,10 +789,10 @@ def conduct_survey_question_by_question(
 
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    if print_progress:
-        print("Constructing prompts")
-    for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options()
+    # if print_progress:
+    #     print("Constructing prompts")
+    for i in range(len(interviews)):
+        inference_option = interviews[i]._generate_inference_options()
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
@@ -859,7 +858,7 @@ def conduct_survey_question_by_question(
                 {item.order[i]: QuestionLLMResponseTuple(question, answer)}
             )
 
-    for i, survey in enumerate(surveys):
+    for i, survey in enumerate(interviews):
         survey_results.append(SurveyResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
@@ -867,7 +866,7 @@ def conduct_survey_question_by_question(
 
 def conduct_whole_survey_one_prompt(
     model: Union[LLM, AsyncOpenAI],
-    surveys: Union[LLMSurvey, List[LLMSurvey]],
+    interviews: Union[LLMInterview, List[LLMInterview]],
     json_structured_output: bool = False,
     json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
     constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
@@ -891,8 +890,8 @@ def conduct_whole_survey_one_prompt(
     :param generation_kwargs: All keywords needed for SamplingParams.
     :return: Generated text by the LLM in double list format
     """
-    if isinstance(surveys, LLMSurvey):
-        surveys = [surveys]
+    if isinstance(interviews, LLMInterview):
+        interviews = [interviews]
     inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
@@ -900,10 +899,10 @@ def conduct_whole_survey_one_prompt(
 
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    if print_progress:
-        print("Constructing prompts")
-    for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options()
+    # if print_progress:
+    #     print("Constructing prompts")
+    for i in range(len(interviews)):
+        inference_option = interviews[i]._generate_inference_options()
         inference_options.append(inference_option)
 
         question_llm_response_pairs.append({})
@@ -971,7 +970,7 @@ def conduct_whole_survey_one_prompt(
                 {-1: QuestionLLMResponseTuple(prompt, answer)}
             )
 
-    for i, survey in enumerate(surveys):
+    for i, survey in enumerate(interviews):
         survey_results.append(SurveyResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
@@ -979,7 +978,7 @@ def conduct_whole_survey_one_prompt(
 
 def conduct_survey_in_context(
     model: Union[LLM, AsyncOpenAI],
-    surveys: Union[LLMSurvey, List[LLMSurvey]],
+    interviews: Union[LLMInterview, List[LLMInterview]],
     json_structured_output: bool = False,
     json_structure: Optional[List[str]] = DEFAULT_JSON_STRUCTURE,
     constraints: Optional[Dict[str, List[str]]] = DEFAULT_CONSTRAINTS,
@@ -1003,8 +1002,8 @@ def conduct_survey_in_context(
     :param generation_kwargs: All keywords needed for SamplingParams.
     :return: Generated text by the LLM in double list format
     """
-    if isinstance(surveys, LLMSurvey):
-        surveys = [surveys]
+    if isinstance(interviews, LLMInterview):
+        interviews = [interviews]
 
     inference_options: List[InferenceOptions] = []
 
@@ -1012,10 +1011,10 @@ def conduct_survey_in_context(
 
     question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    if print_progress:
-        print("Constructing prompts")
-    for i in tqdm.tqdm(range(len(surveys))) if print_progress else range(len(surveys)):
-        inference_option = surveys[i]._generate_inference_options()
+    # if print_progress:
+    #     print("Constructing prompts")
+    for i in range(len(interviews)):
+        inference_option = interviews[i]._generate_inference_options()
         inference_options.append(inference_option)
         survey_length = len(inference_option.order)
         if survey_length > max_survey_length:
@@ -1033,7 +1032,7 @@ def conduct_survey_in_context(
             if constraints[json_element] == constants.OPTIONS_ADJUST:
                 constraints[json_element] = inference_options[0].answer_options[0].answer_text
 
-    for i in range(len(surveys)):
+    for i in range(len(interviews)):
         assistant_messages.append([])
         all_prompts.append([])
 
@@ -1047,7 +1046,7 @@ def conduct_survey_in_context(
             for inference_option in inference_options
             if len(inference_option.order) > i
         ]
-        current_surveys = [surv for surv in surveys if len(surv._questions) > i]
+        current_surveys = [surv for surv in interviews if len(surv._questions) > i]
 
         first_question: bool = i == 0
 
@@ -1136,7 +1135,7 @@ def conduct_survey_in_context(
             assistant_messages[o].append(output[o])
         # assistant_messages.append(output)
 
-    for i, survey in enumerate(surveys):
+    for i, survey in enumerate(interviews):
         survey_results.append(SurveyResult(survey, question_llm_response[i]))
 
     return survey_results

@@ -1,9 +1,9 @@
 from typing import Final, List
 
 # Survey Item
-SURVEY_ITEM_ID: Final[str] = "survey_item_id"
-SURVEY_ITEM: Final[str] = "survey_item"
-SURVEY_NAME: Final[str] = "survey_name"
+INTERVIEW_ITEM_ID: Final[str] = "interview_item_id"
+INTERVIEW_ITEM: Final[str] = "interview_item"
+INTERVIEW_NAME: Final[str] = "interview_name"
 
 # Question
 QUESTION_STEM: Final[str] = "question_stem"

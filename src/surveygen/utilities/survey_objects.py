@@ -51,7 +51,7 @@ class QuestionLLMResponseTuple(NamedTuple):
 
 
 @dataclass
-class SurveyItem:
+class InterviewItem:
     """Represents a single survey question."""
 
     item_id: int

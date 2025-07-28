@@ -1,4 +1,4 @@
-survey_item_id,question_stem,question_content
+interview_item_id,question_stem,question_content
 1,Does the following statement fit to you?, Is talkative
 2,Does the following statement fit to you?,Tends to find fault with others
 3,Does the following statement fit to you?,Does a thorough job

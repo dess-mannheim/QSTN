@@ -4,6 +4,8 @@ from vllm.outputs import RequestOutput
 
 import torch
 
+import numpy as np
+
 import asyncio
 import threading
 
@@ -13,6 +15,8 @@ from openai.types.chat import ChatCompletion
 from typing import Any, List, Optional, Union, Dict, Literal
 
 from .dynamic_pydantic import generate_pydantic_model
+
+import json
 
 import random
 
@@ -29,15 +33,21 @@ def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
         **model_keywords,
     )
 
-#TODO Structured output for API calls
+def _generate_seeds(seed: int, batch_size: int) -> List[int]:
+    rng = np.random.default_rng(seed)
+    return rng.integers(low=0, high=2**32, size=batch_size).tolist()
+
+# TODO Structured output for API calls
 def batch_generation(
     model: Union[LLM, AsyncOpenAI],
     system_messages: List[str] = ["You are a helpful assistant."],
     prompts: List[str] = ["Hi there! What is your name?"],
-    #guided_decoding_params: Optional[List[GuidedDecodingParams]] = None,
+    # guided_decoding_params: Optional[List[GuidedDecodingParams]] = None,
     guided_decoding_options: Optional[Literal["json"]] = None,
     json_fields: Optional[Union[List[str], List[List[str]]]] = None,
-    constraints: Optional[Union[List[Dict[str, List[str]]], Dict[str, List[str]]]] = None,
+    constraints: Optional[
+        Union[Dict[str, List[str]], List[Dict[str, List[str]]]]
+    ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
@@ -46,7 +56,6 @@ def batch_generation(
     **generation_kwargs: Any,
 ):
     random.seed(seed)
-
 
     # Prepare batch of messages
     batch_messages: List[List[Dict[str, str]]] = [
@@ -59,10 +68,17 @@ def batch_generation(
 
     batch_size: int = len(system_messages)
 
-    seeds = [random.randint(0, 2**32 - 1) for _ in range(batch_size)]
+    seeds = _generate_seeds(seed, batch_size=batch_size)
+
     if isinstance(model, LLM):
         if guided_decoding_options == "json":
-            sampling_params_list = _create_sampling_params(batch_size=batch_size, seeds=seeds, json_fields=json_fields, constraints=constraints, **generation_kwargs)
+            sampling_params_list = _create_sampling_params(
+                batch_size=batch_size,
+                seeds=seeds,
+                json_fields=json_fields,
+                constraints=constraints,
+                **generation_kwargs,
+            )
         else:
             sampling_params_list = [
                 SamplingParams(seed=seeds[i], **generation_kwargs)
@@ -70,12 +86,24 @@ def batch_generation(
             ]
 
         outputs: List[RequestOutput] = model.chat(
-            batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress
+            batch_messages,
+            sampling_params=sampling_params_list,
+            use_tqdm=print_progress,
         )
         result = [output.outputs[0].text for output in outputs]
-    
+
     else:
-        result = _run_async_in_thread(client=model, client_model_name=client_model_name, batch_messages=batch_messages, seeds=seeds, concurrency_limit=api_concurrency, **generation_kwargs)
+        result = _run_async_in_thread(
+            client=model,
+            client_model_name=client_model_name,
+            batch_messages=batch_messages,
+            seeds=seeds,
+            concurrency_limit=api_concurrency,
+            guided_decoding_options=guided_decoding_options,
+            json_fields=json_fields,
+            constraints=constraints,
+            **generation_kwargs,
+        )
 
     # TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
     if print_conversation:
@@ -88,32 +116,52 @@ def batch_generation(
 
     return result
 
-def _create_sampling_params(batch_size: int, seeds: List[int],
-        json_fields: Optional[Union[List[str], List[List[str]]]] = None,  
-                            constraints: Optional[List[Dict[str, List[str]]]] = None, 
-                            **generation_kwargs: Any) -> List[SamplingParams]:
+
+def _make_cache_key(fields: Any, constraints: Any) -> str:
+    return json.dumps({"fields": fields, "constraints": constraints}, sort_keys=False)
+
+
+def _create_sampling_params(
+    batch_size: int,
+    seeds: List[int],
+    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
+    constraints: Optional[List[Dict[str, List[str]]]] = None,
+    **generation_kwargs: Any,
+) -> List[SamplingParams]:
     if isinstance(json_fields[0], str):
-        pydantic_model = generate_pydantic_model(fields=json_fields, constraints=constraints)
+        pydantic_model = generate_pydantic_model(
+            fields=json_fields, constraints=constraints
+        )
         json_schema = pydantic_model.model_json_schema()
         global_guided_decoding = GuidedDecodingParams(json=json_schema)
         guided_decodings = [global_guided_decoding] * batch_size
     elif isinstance(json_fields[0], list):
         guided_decodings = []
+        cache: Dict[str, GuidedDecodingParams] = {}
+
         for i in range(batch_size):
-            pydantic_model = generate_pydantic_model(
-                        fields=json_fields[i], constraints=constraints[i]
-                    )
-            json_schema = pydantic_model.model_json_schema()
-            guided_decodings.append(GuidedDecodingParams(json=json_schema))
+            fields = json_fields[i]
+            cons = constraints[i]
+
+            key = _make_cache_key(fields, cons)
+
+            if key not in cache:
+                pydantic_model = generate_pydantic_model(
+                    fields=fields, constraints=cons
+                )
+                json_schema = pydantic_model.model_json_schema()
+                cache[key] = GuidedDecodingParams(json=json_schema)
+
+            guided_decodings.append(cache[key])
 
     sampling_params_list = [
-                SamplingParams(
-                    seed=seeds[i],
-                    guided_decoding=guided_decodings[i],
-                    **generation_kwargs,
-                )
-                for i in range(batch_size)
-            ]
+        SamplingParams(
+            seed=seeds[i],
+            guided_decoding=guided_decodings[i],
+            **generation_kwargs,
+        )
+        for i in range(batch_size)
+    ]
     return sampling_params_list
 
 
@@ -155,11 +203,17 @@ def batch_turn_by_turn_generation(
 
         batch_messages.append(messages)
 
-    seeds = [random.randint(0, 2**32 - 1) for _ in range(batch_size)]
-    
+    seeds = _generate_seeds(seed, batch_size=batch_size)
+
     if isinstance(model, LLM):
         if guided_decoding_options == "json":
-            sampling_params_list = _create_sampling_params(batch_size=batch_size, seeds=seeds, json_fields=json_fields, constraints=constraints, **generation_kwargs)
+            sampling_params_list = _create_sampling_params(
+                batch_size=batch_size,
+                seeds=seeds,
+                json_fields=json_fields,
+                constraints=constraints,
+                **generation_kwargs,
+            )
         else:
             sampling_params_list = [
                 SamplingParams(seed=seeds[i], **generation_kwargs)
@@ -167,11 +221,23 @@ def batch_turn_by_turn_generation(
             ]
 
         outputs: List[RequestOutput] = model.chat(
-            batch_messages, sampling_params=sampling_params_list, use_tqdm=print_progress
+            batch_messages,
+            sampling_params=sampling_params_list,
+            use_tqdm=print_progress,
         )
         result = [output.outputs[0].text for output in outputs]
     else:
-        result = _run_async_in_thread(client=model, client_model_name=client_model_name, batch_messages=batch_messages, seeds=seeds, concurrency_limit=api_concurrency, **generation_kwargs)
+        result = _run_async_in_thread(
+            client=model,
+            client_model_name=client_model_name,
+            batch_messages=batch_messages,
+            seeds=seeds,
+            concurrency_limit=api_concurrency,
+            guided_decoding_options=guided_decoding_options,
+            json_fields=json_fields,
+            constraints=constraints,
+            **generation_kwargs,
+        )
 
     # TODO add argurment to specify how many conversations should be printed
     if print_conversation:
@@ -194,49 +260,126 @@ def batch_turn_by_turn_generation(
 
     return result
 
-def _run_async_in_thread(client: AsyncOpenAI, client_model_name: str, batch_messages:List[List[Dict[str, str]]], seeds:List[int], concurrency_limit:int = 10, **generation_kwargs):
+
+def _run_async_in_thread(
+    client: AsyncOpenAI,
+    client_model_name: str,
+    batch_messages: List[List[Dict[str, str]]],
+    seeds: List[int],
+    concurrency_limit: int = 10,
+    guided_decoding_options: Optional[Literal["json"]] = None,
+    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
+    constraints: Optional[List[Dict[str, List[str]]]] = None,
+    **generation_kwargs,
+):
     result_container = {}
+
+    guided_decodings: List[Dict[str, Any]] = []
+    if guided_decoding_options == "json":
+        if isinstance(json_fields[0], str):
+            pydantic_model = generate_pydantic_model(
+                fields=json_fields, constraints=constraints
+            )
+            global_json_schema = pydantic_model.model_json_schema()
+            guided_decodings = [global_json_schema] * len(batch_messages)
+    elif isinstance(json_fields[0], list):
+        cache: Dict[str, GuidedDecodingParams] = {}
+
+        for i in range(len(batch_messages)):
+            fields = json_fields[i]
+            cons = constraints[i]
+
+            key = _make_cache_key(fields, cons)
+
+            if key not in cache:
+                pydantic_model = generate_pydantic_model(
+                    fields=fields, constraints=cons
+                )
+                json_schema = pydantic_model.model_json_schema()
+                cache[key] = json_schema
+
+            guided_decodings.append(cache[key])
 
     def thread_target():
         try:
-            res = asyncio.run(_run_api_batch_async(client=client, client_model_name=client_model_name, batch_messages=batch_messages, seeds=seeds, concurrency_limit=concurrency_limit, **generation_kwargs))
-            result_container['result'] = res
+            res = asyncio.run(
+                _run_api_batch_async(
+                    client=client,
+                    client_model_name=client_model_name,
+                    batch_messages=batch_messages,
+                    seeds=seeds,
+                    concurrency_limit=concurrency_limit,
+                    guided_decodings=guided_decodings,
+                    **generation_kwargs,
+                )
+            )
+            result_container["result"] = res
         except Exception as e:
-            result_container['error'] = e
+            result_container["error"] = e
 
     thread = threading.Thread(target=thread_target)
     thread.start()
     thread.join()
 
-    if 'error' in result_container:
-        raise result_container['error']
+    if "error" in result_container:
+        raise result_container["error"]
+
+    return result_container.get("result")
+
+
+async def _run_api_batch_async(
+    client: AsyncOpenAI,
+    client_model_name: str,
+    batch_messages: List[List[Dict[str, str]]],
+    seeds: List[int],
+    concurrency_limit: int = 10,
+    guided_decodings: List[Dict[str, Any]] = [],
+    **generation_kwargs,
+) -> List[str]:
+    semaphore = asyncio.Semaphore(concurrency_limit)
     
-    return result_container.get('result')
+    async def get_completion(
+        messages: list,
+        seed: int,
+        guided_decoding: Optional[Dict[str, Any]] = None,
+        **generation_kwargs
+    ) -> ChatCompletion:
+        async with semaphore:
+            request_kwargs = {
+                "model": client_model_name,
+                "messages": messages,
+                "seed": seed,
+                **generation_kwargs,
+            }
 
-async def _run_api_batch_async(client: AsyncOpenAI, client_model_name: str, batch_messages:List[List[Dict[str, str]]], seeds:List[int], concurrency_limit:int = 10, **generation_kwargs) -> List[str]:
-        semaphore = asyncio.Semaphore(concurrency_limit)
+            if guided_decoding is not None:
+                request_kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "json_schema",
+                        "schema": guided_decoding,
+                    }
+                }
 
-        async def get_completion(messages, seed) -> ChatCompletion:
-            async with semaphore:
-                # The semaphore ensures we don't send too many requests at once.
-                # If a rate limit error *still* occurs, the client's
-                # max_retries will have to be specified.
-                return await client.chat.completions.create(
-                    model=client_model_name,
-                    messages=messages,
-                    seed=seed,
-                    **generation_kwargs
-                )
+            return await client.chat.completions.create(**request_kwargs)
+    
 
-        tasks = [get_completion(messages, seed) for messages, seed in zip(batch_messages, seeds)]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+    if len(guided_decodings) > 0:
+        tasks = [
+            get_completion(messages, seed, guided_decoding, **generation_kwargs) for messages, seed, guided_decoding in zip(batch_messages, seeds, guided_decodings)
+        ]
+    else:
+        tasks = [
+            get_completion(messages, seed, **generation_kwargs) for messages, seed in zip(batch_messages, seeds)
+        ]
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        final_results = []
-        for res in responses:
-            if isinstance(res, Exception):
-                print(f"A request failed permanently after all retries: {res}")
-                final_results.append(f"Error: {res}")
-            else:
-                final_results.append(res.choices[0].message.content)
-        
-        return final_results
+    final_results = []
+    for res in responses:
+        if isinstance(res, Exception):
+            print(f"A request failed permanently after all retries: {res}")
+            final_results.append(f"Error: {res}")
+        else:
+            final_results.append(res.choices[0].message.content)
+
+    return final_results

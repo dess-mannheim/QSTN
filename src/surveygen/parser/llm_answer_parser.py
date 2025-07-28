@@ -1,6 +1,6 @@
 from typing import List, Dict
 
-from ..survey_manager import SurveyResult, LLMSurvey
+from ..survey_manager import SurveyResult, LLMInterview
 
 from ..inference.survey_inference import batch_generation
 
@@ -37,7 +37,7 @@ def json_parser_str(answer: str) -> Dict[str, str]:
     return result_json
 
 
-def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.DataFrame]:
+def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.DataFrame]:
     final_result = {}
 
     for survey_result in survey_results:
@@ -55,14 +55,14 @@ def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.Dat
         try:
             df = pd.DataFrame(
                 answers,
-                columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, *answer_format],
+                columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
             )
         except:
             print(answers)
             df = pd.DataFrame(
                 answers,
                 columns=[
-                    constants.SURVEY_ITEM_ID,
+                    constants.INTERVIEW_ITEM_ID,
                     constants.QUESTION,
                     constants.LLM_RESPONSE,
                     "error_col",
@@ -75,7 +75,7 @@ def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.Dat
 
 def json_parse_whole_survey_all(
     survey_results: List[SurveyResult],
-) -> Dict[LLMSurvey, pd.DataFrame]:
+) -> Dict[LLMInterview, pd.DataFrame]:
     parsed_results = json_parse_all(survey_results)
 
     all_results = {}
@@ -108,7 +108,7 @@ def json_parse_whole_survey_all(
         long_df = pd.wide_to_long(
             df,
             stubnames=stubnames,
-            i=[constants.SURVEY_ITEM_ID],
+            i=[constants.INTERVIEW_ITEM_ID],
             j="new_survey_item_id",
             sep="",
             suffix="\\d+",
@@ -116,7 +116,7 @@ def json_parse_whole_survey_all(
 
         num_rows_to_update = len(long_df)
 
-        long_df.loc[0:num_rows_to_update, constants.SURVEY_ITEM_ID] = [
+        long_df.loc[0:num_rows_to_update, constants.INTERVIEW_ITEM_ID] = [
             survey_question.item_id
             for survey_question in survey._questions[0:num_rows_to_update]
         ]
@@ -124,15 +124,15 @@ def json_parse_whole_survey_all(
             survey.generate_question_prompt(survey_question)
             for survey_question in survey._questions[0:num_rows_to_update]
         ]
-        long_df = long_df.drop(columns=constants.SURVEY_ITEM_ID).rename(
-            columns={"new_survey_item_id": constants.SURVEY_ITEM_ID}
+        long_df = long_df.drop(columns=constants.INTERVIEW_ITEM_ID).rename(
+            columns={"new_survey_item_id": constants.INTERVIEW_ITEM_ID}
         )
         all_results[survey] = long_df
 
     return all_results
 
 
-def raw_responses(survey_results: List[SurveyResult]) -> Dict[LLMSurvey, pd.DataFrame]:
+def raw_responses(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.DataFrame]:
     all_results = {}
     for survey_result in survey_results:
         all_results[survey_result.survey] = survey_result.to_dataframe()
@@ -168,14 +168,14 @@ def llm_parse_all(
     use_structured_ouput: bool = False,
     seed=42,
     **generation_kwargs,
-) -> Dict[LLMSurvey, pd.DataFrame]:
+) -> Dict[LLMInterview, pd.DataFrame]:
     all_items_to_process = []
     for survey_result in survey_results:
         for item_id, question_llm_response_tuple in survey_result.results.items():
             all_items_to_process.append(
                 {
-                    constants.SURVEY_NAME: survey_result.survey,
-                    constants.SURVEY_ITEM_ID: item_id,
+                    constants.INTERVIEW_NAME: survey_result.survey,
+                    constants.INTERVIEW_ITEM_ID: item_id,
                     constants.QUESTION: question_llm_response_tuple.question,
                     constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
                     "prompt": f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}",
@@ -206,9 +206,9 @@ def llm_parse_all(
     # defaultdict is perfect for this task.
     grouped_data = defaultdict(list)
     for item in all_items_to_process:
-        grouped_data[item[constants.SURVEY_NAME]].append(
+        grouped_data[item[constants.INTERVIEW_NAME]].append(
             {
-                constants.SURVEY_ITEM_ID: item[constants.SURVEY_ITEM_ID],
+                constants.INTERVIEW_ITEM_ID: item[constants.INTERVIEW_ITEM_ID],
                 constants.QUESTION: item[constants.QUESTION],
                 constants.LLM_RESPONSE: item[constants.LLM_RESPONSE],
                 constants.PARSED_RESPONSE: item[constants.PARSED_RESPONSE],
