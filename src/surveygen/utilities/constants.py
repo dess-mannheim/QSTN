@@ -1,4 +1,6 @@
-from typing import Final, List
+from typing import Final, List, Dict
+
+from enum import Enum
 
 # Survey Item
 INTERVIEW_ITEM_ID: Final[str] = "interview_item_id"
@@ -22,3 +24,18 @@ PARSED_RESPONSE: Final[str] = "parsed_response"
 
 #Structured Output constraints
 OPTIONS_ADJUST: List[str] = ["OPTIONS_ADJUST"]
+
+
+class InterviewType(Enum):
+    QUESTION: Final[str] = "interview_type_question"
+    CONTEXT: Final[str] = "interview_type_context"
+    ONE_PROMPT: Final[str] = "interview_type_one_prompt"
+
+
+DEFAULT_SYSTEM_PROMPT: Final[str] = (
+    "You will be given questions and possible answer options for each. Please reason about each question before answering."
+)
+DEFAULT_TASK_INSTRUCTION: Final[str] = ""
+DEFAULT_JSON_STRUCTURE: Final[List[str]] = ["reasoning", "answer"]
+DEFAULT_CONSTRAINTS: Final[Dict[str, List[str]]] = {"answer": OPTIONS_ADJUST}
+DEFAULT_INTERVIEW_ID: Final[str] = "Interview"

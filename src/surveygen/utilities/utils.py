@@ -1,6 +1,6 @@
 import pandas as pd
-from typing import Dict
-from ..survey_manager import LLMInterview
+from typing import Dict, Any
+
 
 def extract_number_manual(key: str) -> int | None:
     i = len(key) - 1
@@ -10,7 +10,7 @@ def extract_number_manual(key: str) -> int | None:
     return int(number_part) if number_part else None
 
 
-def create_one_dataframe(parsed_results: Dict[LLMInterview, pd.DataFrame]) -> pd.DataFrame:
+def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFrame:
     """
     Joins a dictionary of DataFrames into a single DataFrame.
 

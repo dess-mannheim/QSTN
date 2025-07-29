@@ -1,9 +1,13 @@
-from typing import List, Optional, NamedTuple, Dict
+from typing import List, Optional, NamedTuple, Dict, Final, TYPE_CHECKING
+from ..utilities import constants, prompt_templates
+from ..utilities.prompt_creation import PromptCreation
 
-from ..utilities import prompt_templates
+import pandas as pd
 
 from dataclasses import dataclass
 
+if TYPE_CHECKING:
+    from ..llm_interview import LLMInterview
 
 class AnswerOptions:
 
@@ -51,6 +55,21 @@ class QuestionLLMResponseTuple(NamedTuple):
 
 
 @dataclass
+class InterviewResult:
+    interview: "LLMInterview"
+    results: Dict[int, QuestionLLMResponseTuple]
+
+    def to_dataframe(self) -> pd.DataFrame:
+        answers = []
+        for item_id, question_llm_response_tuple in self.results.items():
+            answers.append((item_id, *question_llm_response_tuple))
+        return pd.DataFrame(
+            answers,
+            columns=[constants.INTERVIEW_ITEM_ID, *question_llm_response_tuple._fields],
+        )
+
+
+@dataclass
 class InterviewItem:
     """Represents a single survey question."""
 
@@ -59,3 +78,46 @@ class InterviewItem:
     question_stem: Optional[str] = None
     answer_options: Optional[AnswerOptions] = None
     prefilled_response: Optional[str] = None
+
+@dataclass
+class InferenceOptions:
+    system_prompt: str
+    task_instruction: str
+    question_prompts: Dict[int, str]
+    answer_options: List[AnswerOptions]
+    # guided_decodings: Optional[Dict[int, GuidedDecodingParams]]
+    # full_guided_decoding: Optional[GuidedDecodingParams]
+    # json_structure: Optional[List[str]]
+    # full_json_structure: Optional[List[str]]
+    order: List[int]
+
+    def create_single_question(
+        self, question_id: int, task_instruction: bool = False
+    ) -> str:
+        if task_instruction:
+            return f"""{self.task_instruction} 
+{self.question_prompts[question_id]}""".strip()
+        else:
+            return f"""{self.question_prompts[question_id]}"""
+
+    def create_all_questions(self) -> str:
+        default_prompt = f"{self.task_instruction}"
+        all_questions_prompt = ""
+        for question_prompt in self.question_prompts.values():
+            all_questions_prompt = f"{all_questions_prompt}\n{question_prompt}"
+        if len(default_prompt) > 0:
+            all_prompt = f"{default_prompt.strip()}\n{all_questions_prompt.strip()}"
+        else:
+            all_prompt = all_questions_prompt.strip()
+        return all_prompt
+
+    def json_system_prompt(self, json_options: List[str]) -> str:
+        creator = PromptCreation()
+        creator.set_ouput_format_json(
+            json_attributes=json_options, json_explanation=None
+        )
+        json_appendix = creator.get_output_prompt()
+
+        system_prompt = f"""{self.system_prompt}
+{json_appendix}"""
+        return system_prompt

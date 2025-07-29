@@ -1,6 +1,7 @@
 from typing import List, Dict
 
-from ..survey_manager import SurveyResult, LLMInterview
+from ..llm_interview import LLMInterview
+from ..utilities.survey_objects import InterviewResult
 
 from ..inference.survey_inference import batch_generation
 
@@ -37,7 +38,7 @@ def json_parser_str(answer: str) -> Dict[str, str]:
     return result_json
 
 
-def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.DataFrame]:
+def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, pd.DataFrame]:
     final_result = {}
 
     for survey_result in survey_results:
@@ -68,13 +69,13 @@ def json_parse_all(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.
                     "error_col",
                 ],
             )
-        final_result[survey_result.survey] = df
+        final_result[survey_result.interview] = df
 
     return final_result
 
 
 def json_parse_whole_survey_all(
-    survey_results: List[SurveyResult],
+    survey_results: List[InterviewResult],
 ) -> Dict[LLMInterview, pd.DataFrame]:
     parsed_results = json_parse_all(survey_results)
 
@@ -132,10 +133,10 @@ def json_parse_whole_survey_all(
     return all_results
 
 
-def raw_responses(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.DataFrame]:
+def raw_responses(survey_results: List[InterviewResult]) -> Dict[LLMInterview, pd.DataFrame]:
     all_results = {}
     for survey_result in survey_results:
-        all_results[survey_result.survey] = survey_result.to_dataframe()
+        all_results[survey_result.interview] = survey_result.to_dataframe()
     return all_results
 
 
@@ -162,7 +163,7 @@ def raw_responses(survey_results: List[SurveyResult]) -> Dict[LLMInterview, pd.D
 
 def llm_parse_all(
     model: LLM,
-    survey_results: List[SurveyResult],
+    survey_results: List[InterviewResult],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     prompt: str = DEFAULT_PROMPT,
     use_structured_ouput: bool = False,
@@ -174,7 +175,7 @@ def llm_parse_all(
         for item_id, question_llm_response_tuple in survey_result.results.items():
             all_items_to_process.append(
                 {
-                    constants.INTERVIEW_NAME: survey_result.survey,
+                    constants.INTERVIEW_NAME: survey_result.interview,
                     constants.INTERVIEW_ITEM_ID: item_id,
                     constants.QUESTION: question_llm_response_tuple.question,
                     constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,

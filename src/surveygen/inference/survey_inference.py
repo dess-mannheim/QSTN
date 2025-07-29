@@ -108,7 +108,6 @@ def batch_generation(
     # TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
     if print_conversation:
         conversation_print = "Conversation:"
-        print("Conversation:")
         for system_message, prompt, answer in zip(system_messages, prompts, result):
             round_print = f"{conversation_print}\nSystem Message:\n{system_message}\nUser Message:\n{prompt}\nGenerated Message\n{answer}"
             print(round_print, flush=True)
