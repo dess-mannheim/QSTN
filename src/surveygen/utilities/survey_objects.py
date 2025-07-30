@@ -68,6 +68,17 @@ class InterviewResult:
             columns=[constants.INTERVIEW_ITEM_ID, *question_llm_response_tuple._fields],
         )
 
+    def get_transcript(self) -> str:
+        parts = [self.interview.get_prompt_structure()]
+
+        # Use enumerate to get the index without a manual counter
+        for i, (question, llm_response) in enumerate(self.results.values()):
+            if i > 0:
+                parts.append(f"\nQ: {question}")
+            parts.append(f"\nA: {llm_response}")
+
+        return "".join(parts)
+
 
 @dataclass
 class InterviewItem:
@@ -85,10 +96,6 @@ class InferenceOptions:
     task_instruction: str
     question_prompts: Dict[int, str]
     answer_options: List[AnswerOptions]
-    # guided_decodings: Optional[Dict[int, GuidedDecodingParams]]
-    # full_guided_decoding: Optional[GuidedDecodingParams]
-    # json_structure: Optional[List[str]]
-    # full_json_structure: Optional[List[str]]
     order: List[int]
 
     def create_single_question(

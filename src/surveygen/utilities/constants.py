@@ -27,9 +27,9 @@ OPTIONS_ADJUST: List[str] = ["OPTIONS_ADJUST"]
 
 
 class InterviewType(Enum):
-    QUESTION: Final[str] = "interview_type_question"
-    CONTEXT: Final[str] = "interview_type_context"
-    ONE_PROMPT: Final[str] = "interview_type_one_prompt"
+    QUESTION: str = "interview_type_question"
+    CONTEXT: str = "interview_type_context"
+    ONE_PROMPT: str = "interview_type_one_prompt"
 
 
 DEFAULT_SYSTEM_PROMPT: Final[str] = (

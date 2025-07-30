@@ -20,6 +20,16 @@ import json
 
 import random
 
+from dataclasses import dataclass
+
+
+@dataclass
+class StructuredOutputOptions:
+    category: Literal["choice", "json"]
+    json_fields: Optional[List[str]] = None
+    constraints: Optional[Dict[str, List[str]]] = None
+    allowed_choices: Optional[List[str]] = None
+
 
 def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
     random.seed(seed)
@@ -33,20 +43,19 @@ def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
         **model_keywords,
     )
 
+
 def _generate_seeds(seed: int, batch_size: int) -> List[int]:
     rng = np.random.default_rng(seed)
     return rng.integers(low=0, high=2**32, size=batch_size).tolist()
+
 
 # TODO Structured output for API calls
 def batch_generation(
     model: Union[LLM, AsyncOpenAI],
     system_messages: List[str] = ["You are a helpful assistant."],
     prompts: List[str] = ["Hi there! What is your name?"],
-    # guided_decoding_params: Optional[List[GuidedDecodingParams]] = None,
-    guided_decoding_options: Optional[Literal["json"]] = None,
-    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
-    constraints: Optional[
-        Union[Dict[str, List[str]], List[Dict[str, List[str]]]]
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
     ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
@@ -71,20 +80,12 @@ def batch_generation(
     seeds = _generate_seeds(seed, batch_size=batch_size)
 
     if isinstance(model, LLM):
-        if guided_decoding_options == "json":
-            sampling_params_list = _create_sampling_params(
-                batch_size=batch_size,
-                seeds=seeds,
-                json_fields=json_fields,
-                constraints=constraints,
-                **generation_kwargs,
-            )
-        else:
-            sampling_params_list = [
-                SamplingParams(seed=seeds[i], **generation_kwargs)
-                for i in range(batch_size)
-            ]
-
+        sampling_params_list = _create_sampling_params(
+            batch_size=batch_size,
+            seeds=seeds,
+            structured_output_options=structured_output_options,
+            **generation_kwargs,
+        )
         outputs: List[RequestOutput] = model.chat(
             batch_messages,
             sampling_params=sampling_params_list,
@@ -99,9 +100,7 @@ def batch_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            guided_decoding_options=guided_decoding_options,
-            json_fields=json_fields,
-            constraints=constraints,
+            structured_output_options=structured_output_options,
             **generation_kwargs,
         )
 
@@ -123,44 +122,109 @@ def _make_cache_key(fields: Any, constraints: Any) -> str:
 def _create_sampling_params(
     batch_size: int,
     seeds: List[int],
-    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
-    constraints: Optional[List[Dict[str, List[str]]]] = None,
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    ],
+    use_vllm: bool = True,
     **generation_kwargs: Any,
-) -> List[SamplingParams]:
-    if isinstance(json_fields[0], str):
-        pydantic_model = generate_pydantic_model(
-            fields=json_fields, constraints=constraints
+) -> Union[List[SamplingParams], Dict[str, Any]]:
+    if structured_output_options:
+        sampling_params_list = _structured_sampling_params(
+            batch_size=batch_size,
+            seeds=seeds,
+            structured_output_options=structured_output_options,
+            use_vllm=use_vllm,
+            **generation_kwargs,
         )
-        json_schema = pydantic_model.model_json_schema()
-        global_guided_decoding = GuidedDecodingParams(json=json_schema)
-        guided_decodings = [global_guided_decoding] * batch_size
-    elif isinstance(json_fields[0], list):
+    else:
+        if use_vllm:
+            sampling_params_list = [
+                SamplingParams(seed=seeds[i], **generation_kwargs)
+                for i in range(batch_size)
+            ]
+        else: 
+            return []
+    return sampling_params_list
+
+
+def _structured_sampling_params(
+    batch_size: int,
+    seeds: List[int],
+    structured_output_options: Union[
+        StructuredOutputOptions, List[StructuredOutputOptions]
+    ],
+    use_vllm: bool = True,
+    **generation_kwargs: Any,
+) -> Union[List[SamplingParams], Dict[str, Any]]:
+    if isinstance(structured_output_options, StructuredOutputOptions):
+        if structured_output_options.category == "json":
+            pydantic_model = generate_pydantic_model(
+                fields=structured_output_options.json_fields,
+                constraints=structured_output_options.constraints,
+            )
+            json_schema = pydantic_model.model_json_schema()
+            if use_vllm:
+                global_guided_decoding = GuidedDecodingParams(json=json_schema)
+                guided_decodings = [global_guided_decoding] * batch_size
+            else:
+                guided_decodings = [json_schema] * batch_size
+        elif structured_output_options.category == "choice":
+            if use_vllm:
+                global_guided_decoding = GuidedDecodingParams(
+                    choice=structured_output_options.allowed_choices
+                )
+                guided_decodings = [global_guided_decoding] * batch_size
+            else:
+                guided_decodings = [
+                    structured_output_options.allowed_choices
+                ] * batch_size
+
+    else:
         guided_decodings = []
         cache: Dict[str, GuidedDecodingParams] = {}
 
         for i in range(batch_size):
-            fields = json_fields[i]
-            cons = constraints[i]
+            if structured_output_options[i].category == "json":
+                fields = structured_output_options[i].json_fields
+                cons = structured_output_options[i].constraints
 
-            key = _make_cache_key(fields, cons)
+                key = _make_cache_key(fields, cons)
 
-            if key not in cache:
-                pydantic_model = generate_pydantic_model(
-                    fields=fields, constraints=cons
-                )
-                json_schema = pydantic_model.model_json_schema()
-                cache[key] = GuidedDecodingParams(json=json_schema)
+                if key not in cache:
+                    pydantic_model = generate_pydantic_model(
+                        fields=fields, constraints=cons
+                    )
+                    json_schema = pydantic_model.model_json_schema()
+                    if use_vllm:
+                        cache[key] = GuidedDecodingParams(json=json_schema)
+                    else:
+                        cache[key] = json_schema
 
-            guided_decodings.append(cache[key])
+                guided_decodings.append(cache[key])
+            elif structured_output_options[i].category == "choice":
+                choice = structured_output_options[i].allowed_choices
 
-    sampling_params_list = [
-        SamplingParams(
-            seed=seeds[i],
-            guided_decoding=guided_decodings[i],
-            **generation_kwargs,
-        )
-        for i in range(batch_size)
-    ]
+                key = _make_cache_key(choice, None)
+
+                if key not in cache:
+                    if use_vllm:
+                        cache[key] = GuidedDecodingParams(choice=choice)
+                    else:
+                        cache[key] = choice
+                guided_decodings.append(cache[key])
+
+    if use_vllm:
+        sampling_params_list = [
+            SamplingParams(
+                seed=seeds[i],
+                guided_decoding=guided_decodings[i],
+                **generation_kwargs,
+            )
+            for i in range(batch_size)
+        ]
+    else:
+        return guided_decodings
+
     return sampling_params_list
 
 
@@ -169,9 +233,9 @@ def batch_turn_by_turn_generation(
     system_messages: List[str] = ["You are a helpful assistant."],
     prompts: List[List[str]] = [["Hi there! What is your name?", "Interesting"]],
     assistant_messages: List[List[str]] = None,
-    guided_decoding_options: Optional[Literal["json"]] = None,
-    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
-    constraints: Optional[List[Dict[str, List[str]]]] = None,
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
@@ -205,26 +269,19 @@ def batch_turn_by_turn_generation(
     seeds = _generate_seeds(seed, batch_size=batch_size)
 
     if isinstance(model, LLM):
-        if guided_decoding_options == "json":
-            sampling_params_list = _create_sampling_params(
-                batch_size=batch_size,
-                seeds=seeds,
-                json_fields=json_fields,
-                constraints=constraints,
-                **generation_kwargs,
-            )
-        else:
-            sampling_params_list = [
-                SamplingParams(seed=seeds[i], **generation_kwargs)
-                for i in range(batch_size)
-            ]
-
+        sampling_params_list = _create_sampling_params(
+            batch_size=batch_size,
+            seeds=seeds,
+            structured_output_options=structured_output_options,
+            **generation_kwargs,
+        )
         outputs: List[RequestOutput] = model.chat(
             batch_messages,
             sampling_params=sampling_params_list,
             use_tqdm=print_progress,
         )
         result = [output.outputs[0].text for output in outputs]
+
     else:
         result = _run_async_in_thread(
             client=model,
@@ -232,9 +289,7 @@ def batch_turn_by_turn_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            guided_decoding_options=guided_decoding_options,
-            json_fields=json_fields,
-            constraints=constraints,
+            structured_output_options=structured_output_options,
             **generation_kwargs,
         )
 
@@ -266,38 +321,21 @@ def _run_async_in_thread(
     batch_messages: List[List[Dict[str, str]]],
     seeds: List[int],
     concurrency_limit: int = 10,
-    guided_decoding_options: Optional[Literal["json"]] = None,
-    json_fields: Optional[Union[List[str], List[List[str]]]] = None,
-    constraints: Optional[List[Dict[str, List[str]]]] = None,
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    ] = None,
     **generation_kwargs,
 ):
     result_container = {}
 
-    guided_decodings: List[Dict[str, Any]] = []
-    if guided_decoding_options == "json":
-        if isinstance(json_fields[0], str):
-            pydantic_model = generate_pydantic_model(
-                fields=json_fields, constraints=constraints
-            )
-            global_json_schema = pydantic_model.model_json_schema()
-            guided_decodings = [global_json_schema] * len(batch_messages)
-    elif isinstance(json_fields[0], list):
-        cache: Dict[str, GuidedDecodingParams] = {}
+    structured_output = _create_sampling_params(
+        batch_size=len(batch_messages),
+        seeds=seeds,
+        structured_output_options=structured_output_options,
+        use_vllm=False,
+        **generation_kwargs,
+    )
 
-        for i in range(len(batch_messages)):
-            fields = json_fields[i]
-            cons = constraints[i]
-
-            key = _make_cache_key(fields, cons)
-
-            if key not in cache:
-                pydantic_model = generate_pydantic_model(
-                    fields=fields, constraints=cons
-                )
-                json_schema = pydantic_model.model_json_schema()
-                cache[key] = json_schema
-
-            guided_decodings.append(cache[key])
 
     def thread_target():
         try:
@@ -308,7 +346,8 @@ def _run_async_in_thread(
                     batch_messages=batch_messages,
                     seeds=seeds,
                     concurrency_limit=concurrency_limit,
-                    guided_decodings=guided_decodings,
+                    structured_output_options=structured_output_options,
+                    structured_output=structured_output,
                     **generation_kwargs,
                 )
             )
@@ -332,16 +371,19 @@ async def _run_api_batch_async(
     batch_messages: List[List[Dict[str, str]]],
     seeds: List[int],
     concurrency_limit: int = 10,
-    guided_decodings: List[Dict[str, Any]] = [],
+    structured_output: List[Dict[str, Any]] = [],
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    ] = None,
     **generation_kwargs,
 ) -> List[str]:
     semaphore = asyncio.Semaphore(concurrency_limit)
-    
+
     async def get_completion(
         messages: list,
         seed: int,
-        guided_decoding: Optional[Dict[str, Any]] = None,
-        **generation_kwargs
+        structured_output: Optional[Union[Dict[str, Any], List[str]]] = None,
+        **generation_kwargs,
     ) -> ChatCompletion:
         async with semaphore:
             request_kwargs = {
@@ -351,25 +393,33 @@ async def _run_api_batch_async(
                 **generation_kwargs,
             }
 
-            if guided_decoding is not None:
-                request_kwargs["response_format"] = {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "json_schema",
-                        "schema": guided_decoding,
+            if structured_output_options:
+                if structured_output_options.category == "json":
+                    request_kwargs["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "json_schema",
+                            "schema": structured_output,
+                        },
                     }
-                }
+                elif structured_output_options.category == "choice":
+                    request_kwargs["extra_body"] = {
+                        "guided_choice": structured_output
+                        }
 
             return await client.chat.completions.create(**request_kwargs)
-    
 
-    if len(guided_decodings) > 0:
+    if len(structured_output) > 0:
         tasks = [
-            get_completion(messages, seed, guided_decoding, **generation_kwargs) for messages, seed, guided_decoding in zip(batch_messages, seeds, guided_decodings)
+            get_completion(messages, seed, struct_output, **generation_kwargs)
+            for messages, seed, struct_output in zip(
+                batch_messages, seeds, structured_output
+            )
         ]
     else:
         tasks = [
-            get_completion(messages, seed, **generation_kwargs) for messages, seed in zip(batch_messages, seeds)
+            get_completion(messages, seed, **generation_kwargs)
+            for messages, seed in zip(batch_messages, seeds)
         ]
     responses = await asyncio.gather(*tasks, return_exceptions=True)
 

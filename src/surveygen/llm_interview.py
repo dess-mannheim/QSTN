@@ -3,31 +3,18 @@ from typing import (
     Dict,
     Optional,
     Union,
-    Any,
     overload,
     Self,
-    Literal,
-    Final,
 )
-from enum import Enum
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from .utilities.survey_objects import AnswerOptions
 
-from .utilities.survey_objects import (
-    AnswerOptions,
-    InterviewItem,
-    InferenceOptions
-)
+from .utilities.survey_objects import AnswerOptions, InterviewItem, InferenceOptions
 
 from .utilities import constants
 from .utilities.constants import InterviewType
-
-
-
-from pathlib import Path
-import os
 
 import pandas as pd
 
@@ -38,10 +25,12 @@ import copy
 
 from transformers import AutoTokenizer
 
+
 class LLMInterview:
     """
     A class responsible for preparing and conducting surveys on LLMs.
     """
+
     DEFAULT_INTERVIEW_ID: str = "Interview"
 
     DEFAULT_SYSTEM_PROMPT: str = (
@@ -75,13 +64,39 @@ class LLMInterview:
         return copy.deepcopy(self)
 
     def get_prompt_structure(self) -> str:
-        whole_prompt = f"""SYSTEM PROMPT:
-{self.system_prompt}
-INTERVIEW INSTRUCTIONS:
-{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
-FIRST QUESTION:
-{self.generate_question_prompt(self._questions[0])}
-"""
+        parts = [
+            "SYSTEM PROMPT:",
+            self.system_prompt,
+            "INTERVIEW INSTRUCTIONS:",
+            self.interview_instruction,
+        ]
+
+        if self._global_options:
+            parts.append(self._global_options.create_options_str())
+
+        parts.append("FIRST QUESTION:")
+        parts.append(self.generate_question_prompt(self._questions[0]))
+        
+        return "\n".join(parts)
+
+    def get_prompt_for_interview_type(self, interview_type: InterviewType = InterviewType.QUESTION):
+        parts = [self.system_prompt, self.interview_instruction]
+
+        if self._global_options:
+            parts.append(self._global_options.create_options_str())
+
+        if interview_type == InterviewType.QUESTION:
+            parts.append(self.generate_question_prompt(self._questions[0]))
+            
+        elif interview_type in (InterviewType.ONE_PROMPT, InterviewType.CONTEXT):
+            # Use extend to add all question strings from the generator
+            parts.extend(
+                self.generate_question_prompt(question) for question in self._questions
+            )
+
+        # Join all the collected parts with a newline
+        whole_prompt = "\n".join(parts)
+
         return whole_prompt
 
     def calculate_input_token_estimate(
@@ -97,24 +112,12 @@ FIRST QUESTION:
         :return: Estimated number of input tokens needed for the survey
         """
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        if interview_type == InterviewType.QUESTION:
-
-            whole_prompt = f"""{self.system_prompt}
-{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
-{self.generate_question_prompt(self._questions[0])}
-    """
-        elif (
-            interview_type == InterviewType.ONE_PROMPT or interview_type == InterviewType.CONTEXT
-        ):
-            questions: str = "\n".join(
-                self.generate_question_prompt(question) for question in self._questions
-            )
-            whole_prompt = f"""{self.system_prompt}
-{self.interview_instruction}{f"{chr(10)}{self._global_options.create_options_str()}" if self._global_options else ""}
-{questions}"""
+        whole_prompt = self.get_prompt_for_interview_type(interview_type=interview_type)
         tokens = tokenizer.encode(whole_prompt)
 
-        return len(tokens) if interview_type != InterviewType.CONTEXT else len(tokens) * 3
+        return (
+            len(tokens) if interview_type != InterviewType.CONTEXT else len(tokens) * 3
+        )
 
     def get_survey_questions(self) -> str:
         return self._questions
