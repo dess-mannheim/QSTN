@@ -91,7 +91,7 @@ class SurveyOptionGenerator:
 
     LIKERT_IMPORTANCE_FROM_TO: List[str] = ["Not at all important", "Very Important"]
     LIKERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
-    _IDX_TYPES = Literal["char_low", "char_upper", "integer"]
+    _IDX_TYPES = Literal["char_low", "char_upper", "integer", "no_index"]
 
     @staticmethod
     def generate_likert_options(
@@ -136,7 +136,7 @@ class SurveyOptionGenerator:
         :param scale_prompt_template: The format string for a range-style prompt. Must contain `{start}`
                                     and `{end}`.
         :type scale_prompt_template: str
-        :param idx_type: The type of index for the scale: "char_low", "char_upper" or "integer".
+        :param idx_type: The type of index for the scale: "char_low", "char_upper", "integer", or "no_index".
         :type idx_type: _IDX_TYPES
 
         :raises ValueError: If `n` is less than 2, if `random_order` and `reversed_order` are both True,
@@ -148,12 +148,10 @@ class SurveyOptionGenerator:
 
         # @TODO @Jens Instead of assertions we should probably raise Value errors
         if only_from_to_scale:
-            assert (
-                len(answer_texts) == 2
-            ), "If from to scale, provide exactly two descriptions"
-            assert (
-                idx_type == "integer"
-            ), "Index type must be integer, not lower/uppercase characters."
+            if len(answer_texts) != 2:
+                raise ValueError(f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'.")
+            if idx_type != 'integer':
+                raise ValueError(f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'.")
         else:
             if answer_texts:
                 assert (
@@ -180,7 +178,11 @@ class SurveyOptionGenerator:
             answer_options = answer_options[::-1]
 
         answer_options = []
-        if idx_type == "integer":
+
+        if idx_type == "no_index":
+            # no index, just the answer options directly
+            answer_options = answer_texts
+        elif idx_type == "integer":
             for i in range(n):
                 answer_code = i + start_idx
                 answer_option = f"{answer_code}"
@@ -213,6 +215,7 @@ class SurveyOptionGenerator:
 
         return interview_option
 
+    #TODO: It seems to me like this method and the one above could be merged? (Georg)
     @staticmethod
     def generate_generic_options(
         answer_texts: Dict,
@@ -220,9 +223,7 @@ class SurveyOptionGenerator:
         random_order: bool = False,
         reversed_order: bool = False,
         even_order: bool = False,
-        to_lowercase: bool = False,
-        to_uppercase: bool = False,
-        to_integer: bool = False,
+        idx_type: Optional[_IDX_TYPES] = None, # uses the answer_texts.keys() as an index by default
         list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
         scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
         options_separator: str = ", ",
@@ -233,7 +234,7 @@ class SurveyOptionGenerator:
         answer_texts = answer_texts.values()
         # answer_options = descriptions
 
-        if to_lowercase:
+        if idx_type == 'char_low':
             if all(isinstance(item, int) for item in answer_codes):
                 new_codes = []
                 for i in answer_codes:
@@ -242,7 +243,7 @@ class SurveyOptionGenerator:
                 answer_codes = new_codes
             else:
                 answer_codes = [s.lower() for s in answer_codes]
-        if to_uppercase:
+        elif idx_type == 'char_upper':
             if all(isinstance(item, int) for item in answer_codes):
                 new_codes = []
                 for i in answer_codes:
@@ -251,7 +252,7 @@ class SurveyOptionGenerator:
                 answer_codes = new_codes
             else:
                 answer_codes = [s.upper() for s in answer_codes]
-        if to_integer:
+        elif idx_type == 'integer':
             answer_codes = range(1, len(answer_codes) + 1)
 
         answer_options = dict(zip(answer_codes, answer_texts))
@@ -321,8 +322,11 @@ class SurveyOptionGenerator:
                     zip(first_part + last_parts, answer_options.values())
                 )
 
-        answer_options = [f"{key}: {val}" for key, val in answer_options.items()]
-        print(answer_options)
+        if idx_type == 'no_index':
+            answer_options = list(answer_options.values())
+        else:
+            answer_options = [f"{key}: {val}" for key, val in answer_options.items()]
+        #print(answer_options)
 
         interview_option = AnswerOptions(
             answer_options,
