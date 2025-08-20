@@ -15,6 +15,7 @@ from openai.types.chat import ChatCompletion
 from typing import Any, List, Optional, Union, Dict, Literal
 
 from .dynamic_pydantic import generate_pydantic_model
+from ..utilities import prompt_templates
 
 import json
 
@@ -43,6 +44,7 @@ class StructuredOutputOptions:
     constraints: Optional[Dict[str, List[str]]] = None
     allowed_choices: Optional[List[str]] = None
     automatic_system_prompt: bool = False
+    system_prompt_template: str = prompt_templates.SYSTEM_JSON_DEFAULT
     
     def __post_init__(self):
         """Perform validation after the object has been initialized."""
@@ -55,6 +57,56 @@ class StructuredOutputOptions:
             raise ValueError(
                 "`allowed_choices` must be provided when category is 'choice'"
             )
+
+
+class StructuredOutput_SingleAnswer(StructuredOutputOptions):
+    def __init__(self, answer_options: List[str], automatic_system_prompt: bool = True):
+        """Answer Production Method: Structured Outputs"""
+        # constrain output to the same answer options for every question
+        # for automatic adjustment to different options per question, use constants.OPTIONS_ADJUST
+        # TODO: allow for varying answer_options
+        super().__init__(
+            category = 'json',
+            json_fields = {"answer": ", ".join(answer_options)},
+            constraints = {"answer": answer_options},
+            allowed_choices = None,
+            automatic_system_prompt = automatic_system_prompt,
+            system_prompt_template = prompt_templates.SYSTEM_JSON_SINGLE_ANSWER
+        )
+
+
+class StructuredOutput_Reasoning(StructuredOutputOptions):
+    def __init__(self, answer_options: List[str], automatic_system_prompt: bool = True):
+        """Answer Production Method: Structured Outputs with Reasoning"""
+        # explanation with the same answer options for every question
+        json_fields = {
+            "reasoning": "your reasoning about the answer options",
+            "answer": ", ".join(answer_options)
+        }
+
+        # TODO: allow for varying answer_options
+        super().__init__(
+            category = 'json',
+            json_fields = json_fields,
+            constraints = {"answer": answer_options},
+            allowed_choices = None,
+            automatic_system_prompt = automatic_system_prompt,
+            system_prompt_template = prompt_templates.SYSTEM_JSON_REASONING
+        )    
+
+
+class StructuredOutput_AllOptions(StructuredOutputOptions):
+    def __init__(self, answer_options: List[str], automatic_system_prompt: bool = True):
+        """Answer Production Method: Structured Outputs All Options"""
+        # TODO: allow for varying answer_options
+        super().__init__(
+            category = 'json',
+            json_fields = {_option: "probability" for _option in answer_options},
+            constraints = {_option: float for _option in answer_options},
+            allowed_choices = None,
+            automatic_system_prompt = automatic_system_prompt,
+            system_prompt_template = prompt_templates.SYSTEM_JSON_ALL_OPTIONS
+        )        
 
 
 def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:

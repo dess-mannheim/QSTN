@@ -4,6 +4,8 @@ from typing import Final
 # use this if answer options are already provided in the system prompt
 NO_ANSWER_OPTIONS: Final[None] = None
 
+
+
 # --- List Option Templates (for multiple choice) ---
 # Placeholder: {options}
 
@@ -41,3 +43,21 @@ SCALE_OPTIONS_CONVERSATIONAL: Final[str] = (
 SCALE_OPTIONS_DIRECT: Final[str] = "Rate from {start} to {end}."
 SCALE_OPTIONS_ARROW: Final[str] = "Scale: {start} -> {end}"
 SCALE_OPTIONS_MINIMAL: Final[str] = "{start} to {end}"
+
+
+
+# --- System Prompt JSON Templates ---
+# optionally add JSON formatting instructions to the system prompt
+# Placeholder: {options}
+
+SYSTEM_JSON_DEFAULT: Final[str] = """You only respond in the following JSON format:"""
+
+SYSTEM_JSON_SINGLE_ANSWER: Final[str] = """These are the possible answer options: [{options}].
+You only respond with the most probable answer option in the following JSON format:"""
+
+SYSTEM_JSON_REASONING: Final[str] = """These are the possible answer options: [{options}].
+You always reason about the possible answer options first.
+You respond with your reasoning and the most probable answer option in the following JSON format:"""
+
+SYSTEM_JSON_ALL_OPTIONS: Final[str] = """These are the possible answer options: [{options}].
+You only respond with a probability for each answer option in the following JSON format:"""

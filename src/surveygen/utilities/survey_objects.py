@@ -120,7 +120,11 @@ class InferenceOptions:
             all_prompt = all_questions_prompt.strip()
         return all_prompt
 
-    def json_system_prompt(self, json_fields: List[str] | Dict[str, str]) -> str:
+    def json_system_prompt(
+            self,
+            json_fields: List[str] | Dict[str, str],
+            json_instructions: str = prompt_templates.SYSTEM_JSON_DEFAULT
+        ) -> str:
         """`json_fields` can have optional explanations in the form `{'attribute': 'explanation',...}`"""
         creator = PromptCreation()
         if isinstance(json_fields, dict):
@@ -130,7 +134,9 @@ class InferenceOptions:
             json_attributes = json_fields
             json_explanation = None
         creator.set_output_format_json(
-            json_attributes=json_attributes, json_explanation=json_explanation
+            json_attributes = json_attributes,
+            json_explanation = json_explanation,
+            json_instructions = json_instructions
         )
         json_appendix = creator.get_output_prompt()
 

@@ -2,10 +2,11 @@ from typing import Optional, Dict, Any, Union, Final, List
 from enum import Enum
 import random
 
+from . import prompt_templates
+
 JSON_START_STRING: Final[
     str
-] = """Respond only in the following JSON Format:
-```json
+] = """```json
 {
 """
 
@@ -96,6 +97,7 @@ class OutputForm:
         self,
         json_attributes: List[str],
         json_explanation: Optional[List[str]],
+        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
         end_string: str = JSON_END_STRING,
         randomize: bool = False,
@@ -127,7 +129,11 @@ class OutputForm:
                 line = f'  "{attribute}": <{attribute}>'
             lines.append(line)
         
-        self.output_prompt = start_string
+        if json_instructions is not None:
+            self.output_prompt = json_instructions + "\n"
+        else:
+            self.output_prompt = ''
+        self.output_prompt += start_string
         self.output_prompt += ",\n".join(lines)
         self.output_prompt += end_string
 
@@ -176,6 +182,7 @@ class PromptCreation:
         self,
         json_attributes: List[str],
         json_explanation: Optional[List[str]] = None,
+        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
         end_string: str = JSON_END_STRING,
         randomize: bool = False,
@@ -185,6 +192,7 @@ class PromptCreation:
         self._output_form.json(
             json_attributes=json_attributes,
             json_explanation=json_explanation,
+            json_instructions=json_instructions,
             start_string=start_string,
             end_string=end_string,
             randomize=randomize

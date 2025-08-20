@@ -417,9 +417,12 @@ def conduct_survey_question_by_question(
 
         if structured_output_options:
             if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
+                _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
+                json_instructions = structured_output_options.system_prompt_template.format(options=_answer_options)
                 system_messages = [
                     inference.json_system_prompt(
-                        json_fields=structured_output_options.json_fields
+                        json_fields = structured_output_options.json_fields,
+                        json_instructions = json_instructions
                     )
                     for inference in current_batch
                 ]
@@ -600,6 +603,7 @@ def conduct_whole_survey_one_prompt(
                 structured_output_options.json_fields = all_json_structures[0]
                 if structured_output_options.automatic_system_prompt:
                     system_messages = [
+                        # TODO: add support for JSON custom JSON prompt instructions, including formatting
                         inference.json_system_prompt(all_json_structures[num])
                         for num, inference in enumerate(current_batch)
                     ]
@@ -772,6 +776,7 @@ def conduct_survey_in_context(
         if structured_output_options:
             if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
                 system_messages = [
+                    # TODO: add support for JSON custom JSON prompt instructions, including formatting
                     inference.json_system_prompt(json_fields=structured_output_options.json_fields)
                     for inference in current_batch
                 ]
