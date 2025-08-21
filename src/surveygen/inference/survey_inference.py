@@ -12,126 +12,15 @@ import threading
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-from typing import Any, List, Optional, Union, Dict, Literal
+from typing import Any, List, Optional, Union, Dict
 
 from .dynamic_pydantic import generate_pydantic_model
-from ..utilities import prompt_templates
-from ..utilities.survey_objects import AnswerOptions
+from .answer_production import AnswerProductionMethod, JSON_AnswerProductionMethod, Choice_AnswerProductionMethod
 
 import json
-import warnings
 import random
 
-from dataclasses import dataclass
-
 from tqdm.auto import tqdm
-
-
-@dataclass
-class StructuredOutputOptions:
-    """
-    Configuration for structured output generation.
-
-    Attributes:
-        category: Type of structured output ("choice" or "json")
-        json_fields: List of field names for JSON output, optionally as dicts of format {"field_name": "explanation"}
-        constraints: Optional constraints for field values
-        allowed_choices: List of allowed choices for choice output
-        automatic_system_prompt: If a instruction to only output in the required json format should be added to the system prompt
-        system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
-        output_index_only: If True, constrain output to answer option index rather then the full text of each option
-    """
-
-    category: Literal["choice", "json"]
-    json_fields: Optional[List[str] | Dict[str, str]] = None
-    constraints: Optional[Dict[str, List[str]]] = None
-    allowed_choices: Optional[List[str]] = None
-    automatic_system_prompt: bool = False
-    system_prompt_template: str = prompt_templates.SYSTEM_JSON_DEFAULT
-    output_index_only: bool = False
-    
-    def __post_init__(self):
-        """Perform validation after the object has been initialized."""
-        if self.category == "json" and self.json_fields is None:
-            raise ValueError(
-                "`json_fields` must be provided when category is 'json'"
-            )
-        
-        if self.category == "choice" and self.allowed_choices is None:
-            raise ValueError(
-                "`allowed_choices` must be provided when category is 'choice'"
-            )
-    
-    @staticmethod
-    def _get_valid_outputs(answer_options: AnswerOptions, output_index_only: bool = False) -> List[str]:
-        if output_index_only:
-            if answer_options.index is not None:
-                return [str(i) for i in answer_options.index]
-            else:
-                warnings.warn(
-                    "Answer Production Method configured to only output index of answer options," + \
-                    " but no index was initialized. Returning full answer option texts instead.",
-                    category = RuntimeWarning
-                    )
-                return answer_options.answer_text
-        else:
-            return answer_options.answer_text
-
-class StructuredOutput_SingleAnswer(StructuredOutputOptions):
-    def __init__(self, answer_options: AnswerOptions, automatic_system_prompt: bool = True, output_index_only: bool = False):
-        """Answer Production Method: Structured Outputs"""
-        # constrain output to the same answer options for every question
-        # TODO: allow for varying answer_options
-        options = super()._get_valid_outputs(answer_options, output_index_only)
-
-        super().__init__(
-            category = 'json',
-            json_fields = {"answer": ", ".join(options)},
-            constraints = {"answer": options},
-            allowed_choices = None,
-            automatic_system_prompt = automatic_system_prompt,
-            system_prompt_template = prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
-            output_index_only = output_index_only
-        )
-
-
-class StructuredOutput_Reasoning(StructuredOutputOptions):
-    def __init__(self, answer_options: AnswerOptions, automatic_system_prompt: bool = True, output_index_only: bool = False):
-        """Answer Production Method: Structured Outputs with Reasoning"""
-        # TODO: allow for varying answer_options
-        options = super()._get_valid_outputs(answer_options, output_index_only)
-
-        json_fields = {
-            "reasoning": "your reasoning about the answer options",
-            "answer": ", ".join(options)
-        }
-
-        super().__init__(
-            category = 'json',
-            json_fields = json_fields,
-            constraints = {"answer": options},
-            allowed_choices = None,
-            automatic_system_prompt = automatic_system_prompt,
-            system_prompt_template = prompt_templates.SYSTEM_JSON_REASONING,
-            output_index_only = output_index_only
-        )    
-
-
-class StructuredOutput_AllOptions(StructuredOutputOptions):
-    def __init__(self, answer_options: AnswerOptions, automatic_system_prompt: bool = True, output_index_only: bool = False):
-        """Answer Production Method: Structured Outputs All Options"""
-        # TODO: allow for varying answer_options
-        options = super()._get_valid_outputs(answer_options, output_index_only)
-
-        super().__init__(
-            category = 'json',
-            json_fields = {_option: "probability" for _option in options},
-            constraints = {_option: float for _option in options},
-            allowed_choices = None,
-            automatic_system_prompt = automatic_system_prompt,
-            system_prompt_template = prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
-            output_index_only = output_index_only
-        )        
 
 
 def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
@@ -178,8 +67,8 @@ def batch_generation(
     model: Union[LLM, AsyncOpenAI],
     system_messages: List[str] = ["You are a helpful assistant."],
     prompts: List[str] = ["Hi there! What is your name?"],
-    structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    answer_production_method: Optional[
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
@@ -201,7 +90,7 @@ def batch_generation(
         model: vLLM model or AsyncOpenAI client
         system_messages: System prompts for each conversation
         prompts: User prompts to generate responses for
-        structured_output_options: Configuration for structured output
+        answer_production_method: Configuration for structured output
         seed: Random seed for reproducibility
         client_model_name: Model name when using OpenAI API
         api_concurrency: Max concurrent API requests
@@ -231,7 +120,7 @@ def batch_generation(
         sampling_params_list = _create_sampling_params(
             batch_size=batch_size,
             seeds=seeds,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             **generation_kwargs,
         )
         outputs: List[RequestOutput] = model.chat(
@@ -248,7 +137,7 @@ def batch_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             **generation_kwargs,
         )
 
@@ -270,8 +159,8 @@ def _make_cache_key(fields: Any, constraints: Any) -> str:
 def _create_sampling_params(
     batch_size: int,
     seeds: List[int],
-    structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    answer_production_method: Optional[
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ],
     use_vllm: bool = True,
     **generation_kwargs: Any,
@@ -282,7 +171,7 @@ def _create_sampling_params(
     Args:
         batch_size: Number of prompts in batch
         seeds: Random seeds for generation
-        structured_output_options: Output structure configuration
+        answer_production_method: Output structure configuration
         use_vllm: If True, creates vLLM parameters
         **generation_kwargs: Additional sampling parameters
 
@@ -290,11 +179,11 @@ def _create_sampling_params(
         Sampling parameters for vLLM or API configuration
     """
 
-    if structured_output_options:
+    if answer_production_method:
         sampling_params_list = _structured_sampling_params(
             batch_size=batch_size,
             seeds=seeds,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             use_vllm=use_vllm,
             **generation_kwargs,
         )
@@ -312,17 +201,17 @@ def _create_sampling_params(
 def _structured_sampling_params(
     batch_size: int,
     seeds: List[int],
-    structured_output_options: Union[
-        StructuredOutputOptions, List[StructuredOutputOptions]
+    answer_production_method: Union[
+        AnswerProductionMethod, List[AnswerProductionMethod]
     ],
     use_vllm: bool = True,
     **generation_kwargs: Any,
 ) -> Union[List[SamplingParams], Dict[str, Any]]:
-    if isinstance(structured_output_options, StructuredOutputOptions):
-        if structured_output_options.category == "json":
+    if isinstance(answer_production_method, AnswerProductionMethod):
+        if isinstance(answer_production_method, JSON_AnswerProductionMethod):
             pydantic_model = generate_pydantic_model(
-                fields=structured_output_options.json_fields,
-                constraints=structured_output_options.constraints,
+                fields=answer_production_method.json_fields,
+                constraints=answer_production_method.constraints,
             )
             json_schema = pydantic_model.model_json_schema()
             if use_vllm:
@@ -330,15 +219,15 @@ def _structured_sampling_params(
                 guided_decodings = [global_guided_decoding] * batch_size
             else:
                 guided_decodings = [json_schema] * batch_size
-        elif structured_output_options.category == "choice":
+        elif isinstance(answer_production_method, Choice_AnswerProductionMethod):
             if use_vllm:
                 global_guided_decoding = GuidedDecodingParams(
-                    choice=structured_output_options.allowed_choices
+                    choice=answer_production_method.allowed_choices
                 )
                 guided_decodings = [global_guided_decoding] * batch_size
             else:
                 guided_decodings = [
-                    structured_output_options.allowed_choices
+                    answer_production_method.allowed_choices
                 ] * batch_size
 
     else:
@@ -346,9 +235,9 @@ def _structured_sampling_params(
         cache: Dict[str, GuidedDecodingParams] = {}
 
         for i in range(batch_size):
-            if structured_output_options[i].category == "json":
-                fields = structured_output_options[i].json_fields
-                cons = structured_output_options[i].constraints
+            if isinstance(answer_production_method[i], JSON_AnswerProductionMethod):
+                fields = answer_production_method[i].json_fields
+                cons = answer_production_method[i].constraints
 
                 key = _make_cache_key(fields, cons)
 
@@ -363,8 +252,8 @@ def _structured_sampling_params(
                         cache[key] = json_schema
 
                 guided_decodings.append(cache[key])
-            elif structured_output_options[i].category == "choice":
-                choice = structured_output_options[i].allowed_choices
+            elif isinstance(answer_production_method[i], Choice_AnswerProductionMethod):
+                choice = answer_production_method[i].allowed_choices
 
                 key = _make_cache_key(choice, None)
 
@@ -395,8 +284,8 @@ def batch_turn_by_turn_generation(
     system_messages: List[str] = ["You are a helpful assistant."],
     prompts: List[List[str]] = [["Hi there! What is your name?", "Interesting"]],
     assistant_messages: List[List[str]] = None,
-    structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    answer_production_method: Optional[
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
@@ -420,7 +309,7 @@ def batch_turn_by_turn_generation(
         system_messages: System prompts for each conversation
         prompts: Lists of user messages for each conversation
         assistant_messages: Optional pre-filled assistant responses
-        structured_output_options: Output structure configuration
+        answer_production_method: Output structure configuration
         seed: Random seed for reproducibility
         client_model_name: Model name for OpenAI API
         api_concurrency: Max concurrent API requests
@@ -461,7 +350,7 @@ def batch_turn_by_turn_generation(
         sampling_params_list = _create_sampling_params(
             batch_size=batch_size,
             seeds=seeds,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             **generation_kwargs,
         )
         outputs: List[RequestOutput] = model.chat(
@@ -478,7 +367,7 @@ def batch_turn_by_turn_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             **generation_kwargs,
         )
 
@@ -510,8 +399,8 @@ def _run_async_in_thread(
     batch_messages: List[List[Dict[str, str]]],
     seeds: List[int],
     concurrency_limit: int = 10,
-    structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    answer_production_method: Optional[
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ] = None,
     **generation_kwargs,
 ):
@@ -520,7 +409,7 @@ def _run_async_in_thread(
     structured_output = _create_sampling_params(
         batch_size=len(batch_messages),
         seeds=seeds,
-        structured_output_options=structured_output_options,
+        answer_production_method=answer_production_method,
         use_vllm=False,
         **generation_kwargs,
     )
@@ -534,7 +423,7 @@ def _run_async_in_thread(
                     batch_messages=batch_messages,
                     seeds=seeds,
                     concurrency_limit=concurrency_limit,
-                    structured_output_options=structured_output_options,
+                    answer_production_method=answer_production_method,
                     structured_output=structured_output,
                     **generation_kwargs,
                 )
@@ -560,8 +449,8 @@ async def _run_api_batch_async(
     seeds: List[int],
     concurrency_limit: int = 10,
     structured_output: List[Dict[str, Any]] = [],
-    structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    answer_production_method: Optional[
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ] = None,
     **generation_kwargs,
 ) -> List[str]:
@@ -581,8 +470,8 @@ async def _run_api_batch_async(
                 **generation_kwargs,
             }
 
-            if structured_output_options:
-                if structured_output_options.category == "json":
+            if answer_production_method:
+                if isinstance(answer_production_method, JSON_AnswerProductionMethod):
                     request_kwargs["response_format"] = {
                         "type": "json_schema",
                         "json_schema": {
@@ -590,7 +479,7 @@ async def _run_api_batch_async(
                             "schema": structured_output,
                         },
                     }
-                elif structured_output_options.category == "choice":
+                elif isinstance(answer_production_method, Choice_AnswerProductionMethod):
                     #TODO: add warning if this is not running against vllm, i.e., guided_choice is not supported
                     request_kwargs["extra_body"] = {"guided_choice": structured_output}
 

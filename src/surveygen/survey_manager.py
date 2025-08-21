@@ -52,7 +52,8 @@ from .utilities import utils
 
 from .parser.llm_answer_parser import raw_responses
 
-from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation, StructuredOutputOptions
+from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
+from .inference.answer_production import AnswerProductionMethod, JSON_AnswerProductionMethod, Choice_AnswerProductionMethod
 
 from .llm_interview import LLMInterview
 
@@ -350,7 +351,7 @@ class SurveyOptionGenerator:
 def conduct_survey_question_by_question(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -366,7 +367,7 @@ def conduct_survey_question_by_question(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct as a survey.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         print_conversation: If True, prints all conversations.
@@ -405,13 +406,15 @@ def conduct_survey_question_by_question(
     survey_results: List[InterviewResult] = []
 
     #TODO allow for different answer option constraints between surveys/questions
-    if structured_output_options:
-        if structured_output_options.constraints:
-            for json_element in structured_output_options.constraints.keys():
-                if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
-                    structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
-        if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-            structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
+    if answer_production_method:
+        if (isinstance(answer_production_method, JSON_AnswerProductionMethod) and
+            answer_production_method.constraints):
+            for json_element in answer_production_method.constraints.keys():
+                if answer_production_method.constraints[json_element] == constants.OPTIONS_ADJUST:
+                    answer_production_method.constraints[json_element] = inference_options[0].answer_options[0].answer_text
+        elif (isinstance(answer_production_method, Choice_AnswerProductionMethod) and
+              answer_production_method.allowed_choices == constants.OPTIONS_ADJUST):
+            answer_production_method.allowed_choices = inference_options[0].answer_options[0].answer_text
 
     for i in (
         tqdm(range(max_survey_length), desc='Processing interviews')
@@ -424,13 +427,14 @@ def conduct_survey_question_by_question(
             if len(inference_option.order) > i
         ]
 
-        if structured_output_options:
-            if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
+        if answer_production_method:
+            if (isinstance(answer_production_method, JSON_AnswerProductionMethod)
+                and answer_production_method.automatic_system_prompt):
                 _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
-                json_instructions = structured_output_options.system_prompt_template.format(options=_answer_options)
+                json_instructions = answer_production_method.system_prompt_template.format(options=_answer_options)
                 system_messages = [
                     inference.json_system_prompt(
-                        json_fields = structured_output_options.json_fields,
+                        json_fields = answer_production_method.json_fields,
                         json_instructions = json_instructions
                     )
                     for inference in current_batch
@@ -452,7 +456,7 @@ def conduct_survey_question_by_question(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -528,7 +532,7 @@ def _intermediate_save_path_check(n_save_step:int, intermediate_save_path:str):
 def conduct_whole_survey_one_prompt(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     n_save_step: Optional[int] = None,
@@ -544,7 +548,7 @@ def conduct_whole_survey_one_prompt(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         n_save_step: Save intermediate results every n steps.
@@ -589,18 +593,18 @@ def conduct_whole_survey_one_prompt(
             if len(inference_option.order) > i
         ]
 
-        if structured_output_options:
-            if structured_output_options.category == "json":
+        if answer_production_method:
+            if isinstance(answer_production_method, JSON_AnswerProductionMethod):
                 all_json_structures = []
                 all_constraints = []
                 for inference_option in current_batch:
                     full_json_structure = []
                     full_constraints = {}
                     for i in range(len(inference_option.answer_options)):
-                        for json_element in structured_output_options.json_fields:
+                        for json_element in answer_production_method.json_fields:
                             new_element = f"{json_element}{i}"
-                            if structured_output_options.constraints:
-                                constraints_element = structured_output_options.constraints.get(json_element)
+                            if answer_production_method.constraints:
+                                constraints_element = answer_production_method.constraints.get(json_element)
                                 if constraints_element == constants.OPTIONS_ADJUST:
                                     full_constraints[new_element] = inference_option.answer_options[i].answer_text
                                 elif constraints_element != None:
@@ -608,9 +612,9 @@ def conduct_whole_survey_one_prompt(
                             full_json_structure.append(new_element)
                     all_constraints.append(full_constraints)
                     all_json_structures.append(full_json_structure)
-                structured_output_options.constraints = all_constraints[0]
-                structured_output_options.json_fields = all_json_structures[0]
-                if structured_output_options.automatic_system_prompt:
+                answer_production_method.constraints = all_constraints[0]
+                answer_production_method.json_fields = all_json_structures[0]
+                if answer_production_method.automatic_system_prompt:
                     system_messages = [
                         # TODO: add support for JSON custom JSON prompt instructions, including formatting
                         inference.json_system_prompt(all_json_structures[num])
@@ -618,9 +622,9 @@ def conduct_whole_survey_one_prompt(
                     ]
                 else:
                     system_messages = [inference.system_prompt for inference in current_batch]
-            elif structured_output_options.category == "choice":
-                if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-                    structured_output_options.allowed_choices = inference_option.answer_options[0].answer_text
+            elif isinstance(answer_production_method, Choice_AnswerProductionMethod):
+                if answer_production_method.allowed_choices == constants.OPTIONS_ADJUST:
+                    answer_production_method.allowed_choices = inference_option.answer_options[0].answer_text
                 system_messages = [inference.system_prompt for inference in current_batch]
         else:
             system_messages = [inference.system_prompt for inference in current_batch]
@@ -630,7 +634,7 @@ def conduct_whole_survey_one_prompt(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -657,7 +661,7 @@ def conduct_whole_survey_one_prompt(
 def conduct_survey_in_context(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -673,7 +677,7 @@ def conduct_survey_in_context(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         print_conversation: If True, prints the conversation.
@@ -712,13 +716,15 @@ def conduct_survey_in_context(
     all_prompts: List[List[str]] = []
     assistant_messages: List[List[str]] = []
 
-    if structured_output_options:
-        if structured_output_options.constraints:
-            for json_element in structured_output_options.constraints.keys():
-                if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
-                    structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
-        if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-            structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
+    if answer_production_method:
+        if (isinstance(answer_production_method, JSON_AnswerProductionMethod) and
+            answer_production_method.constraints):
+            for json_element in answer_production_method.constraints.keys():
+                if answer_production_method.constraints[json_element] == constants.OPTIONS_ADJUST:
+                    answer_production_method.constraints[json_element] = inference_options[0].answer_options[0].answer_text
+        elif (isinstance(answer_production_method, Choice_AnswerProductionMethod) and
+              answer_production_method.allowed_choices == constants.OPTIONS_ADJUST):
+            answer_production_method.allowed_choices = inference_options[0].answer_options[0].answer_text
 
     for i in range(len(interviews)):
         assistant_messages.append([])
@@ -782,11 +788,12 @@ def conduct_survey_in_context(
                     }
                 )
             continue
-        if structured_output_options:
-            if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
+        if answer_production_method:
+            if (isinstance(answer_production_method, JSON_AnswerProductionMethod)
+                and answer_production_method.automatic_system_prompt):
                 system_messages = [
                     # TODO: add support for JSON custom JSON prompt instructions, including formatting
-                    inference.json_system_prompt(json_fields=structured_output_options.json_fields)
+                    inference.json_system_prompt(json_fields=answer_production_method.json_fields)
                     for inference in current_batch
                 ]
             else:
@@ -799,7 +806,7 @@ def conduct_survey_in_context(
             system_messages=system_messages,
             prompts=all_prompts,
             assistant_messages=assistant_messages,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,

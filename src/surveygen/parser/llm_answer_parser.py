@@ -1,9 +1,9 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from ..llm_interview import LLMInterview
 from ..utilities.survey_objects import InterviewResult
 
-from ..inference.survey_inference import batch_generation
+from ..inference.survey_inference import batch_generation, AnswerProductionMethod
 
 from ..utilities import constants
 
@@ -166,7 +166,7 @@ def llm_parse_all(
     survey_results: List[InterviewResult],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     prompt: str = DEFAULT_PROMPT,
-    use_structured_ouput: bool = False,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     seed=42,
     **generation_kwargs,
 ) -> Dict[LLMInterview, pd.DataFrame]:
@@ -194,9 +194,10 @@ def llm_parse_all(
         # Perform the single, efficient batch inference.
         llm_parsed_results = batch_generation(
             model,
-            system_messages=system_messages,
-            prompts=all_prompts,
-            seed=seed,
+            system_messages = system_messages,
+            prompts = all_prompts,
+            answer_production_method = answer_production_method,
+            seed = seed,
             **generation_kwargs,
         )
 
