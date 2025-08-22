@@ -235,7 +235,7 @@ def _filter_logprobs_by_choices(
     
     # check for each output token whether any of the choices start with this token
     for token in logprob_df['token']:
-        boolean_index = choices.str.startswith(token) #contains('^(?:' + '|'.join(token) + ')', regex=True)
+        boolean_index = choices.str.startswith(token)
         if len(choices[boolean_index]) > 1:
             warnings.warn(
                 f"Multiple allowed_choices ({list(choices[boolean_index])}) match the same output token: {token}",
@@ -295,14 +295,23 @@ def logprobs_parse_all(
     for survey_result in survey_results:
         answers = []
         for item_id, qa_tuple in survey_result.results.items():
-            filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, allowed_choices)
-            answer_format = filtered_logprobs.keys()
-            answers.append((item_id, qa_tuple.question, *filtered_logprobs.values()))
+            if qa_tuple.logprobs is None:
+                warnings.warn(
+                    "No logprobs found in InterviewResult. " + \
+                    "Make sure to use Logprob_AnswerProductionMethod to generate logprobs.",
+                    stacklevel = 2
+                )
+                answer_format = ["error_col"]
+                answers.append((item_id, qa_tuple.question, "ERROR: Parsing"))
+            else:
+                filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, allowed_choices)
+                answer_format = filtered_logprobs.keys()
+                answers.append((item_id, qa_tuple.question, *filtered_logprobs.values()))
         
-        df = pd.DataFrame(
-                answers,
-                columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
-            )
-        final_result[survey_result.interview] = df
+            df = pd.DataFrame(
+                    answers,
+                    columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
+                )
+            final_result[survey_result.interview] = df
 
     return final_result

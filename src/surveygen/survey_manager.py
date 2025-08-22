@@ -469,6 +469,9 @@ def conduct_survey_question_by_question(
             **generation_kwargs,
         )
 
+        # avoid errors when zipping
+        if logprobs is None: logprobs = [None] * len(current_batch)
+
         for survey_id, question, answer, logprob_answer, item in zip(
             range(len(current_batch)), questions, output, logprobs, current_batch
         ):
@@ -648,6 +651,9 @@ def conduct_whole_survey_one_prompt(
             seed=seed,
             **generation_kwargs,
         )
+
+        # avoid errors when zipping
+        if logprobs is None: logprobs = [None] * len(current_batch)
 
         for survey_id, prompt, answer, logprob_answer in zip(
             range(len(current_batch)), prompts, output, logprobs
