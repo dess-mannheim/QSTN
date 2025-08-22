@@ -266,8 +266,10 @@ def _logprobs_filter(
     for choice, valid_outputs in allowed_choices.items():
         valid_logprobs = _filter_logprobs_by_choices(logprob_df, pd.Series(valid_outputs))
         if len(valid_logprobs) == 0:
-            warnings.warn(f"Could not find logprobs for answer option {choice} with possible outputs {valid_outputs}")
-        choice_results[choice] = valid_logprobs['prob'].sum()
+            warnings.warn(f"Could not find logprobs for answer option '{choice}' with possible outputs {valid_outputs}")
+            choice_results[choice] = np.nan
+        else:    
+            choice_results[choice] = valid_logprobs['prob'].sum()
     
     # normalize so that probs sum up to 1
     overall_sum = sum(choice_results.values())

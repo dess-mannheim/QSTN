@@ -127,6 +127,7 @@ def batch_generation(
         # TODO: add support for List[AnswerProductionMethod]
         if isinstance(answer_production_method, Logprob_AnswerProductionMethod):
             generation_kwargs["logprobs"] = answer_production_method.top_logprobs
+            generation_kwargs["max_tokens"] = answer_production_method.token_position + 1
 
         sampling_params_list = _create_sampling_params(
             batch_size=batch_size,
@@ -144,10 +145,13 @@ def batch_generation(
             logprob_result = []
             for req_output in outputs:
                 logprob_position = answer_production_method.token_position
-                answer_dict = {
-                    x.decoded_token: x.logprob
-                    for x in req_output.outputs[0].logprobs[logprob_position].values()
-                }
+                try:
+                    answer_dict = {
+                        x.decoded_token: x.logprob
+                        for x in req_output.outputs[0].logprobs[logprob_position].values()
+                    }
+                except IndexError: # less than [logprob_position] tokens in the output!
+                    answer_dict = {}
                 logprob_result.append(answer_dict)
 
     else:
