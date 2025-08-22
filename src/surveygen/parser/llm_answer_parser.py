@@ -23,9 +23,11 @@ import warnings
 
 
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
-DEFAULT_PROMPT: str = (
-    "Your task is to parse the correct answer option from an open text answer a LLM has given to survey questions. You will be provided with the survey question, possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible answer options or 'INVALID', if the provided LLM answer does give one of the options."
-)
+DEFAULT_PROMPT: str = "Your task is to parse the correct answer option from an open text " + \
+    "answer a LLM has given to survey questions. You will be provided with the survey question, " + \
+    "possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible " + \
+    "answer options or 'INVALID', if the provided LLM answer does give one of the options. \n" + \
+    "Question: {question} \nResponse by LLM: {llm_response}"
 
 
 def json_parser_str(answer: str) -> Dict[str, str] | None:
@@ -169,6 +171,8 @@ def llm_parse_all(
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     prompt: str = DEFAULT_PROMPT,
     answer_production_method: Optional[AnswerProductionMethod] = None,
+    print_conversation: bool = False,
+    print_progress: bool = True,
     seed=42,
     **generation_kwargs,
 ) -> Dict[LLMInterview, pd.DataFrame]:
@@ -181,7 +185,10 @@ def llm_parse_all(
                     constants.INTERVIEW_ITEM_ID: item_id,
                     constants.QUESTION: question_llm_response_tuple.question,
                     constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
-                    "prompt": f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}",
+                    "prompt": prompt.format(
+                        question = question_llm_response_tuple.question,
+                        llm_response = question_llm_response_tuple.llm_response
+                    ),
                 }
             )
 
@@ -198,8 +205,10 @@ def llm_parse_all(
             model,
             system_messages = system_messages,
             prompts = all_prompts,
-            answer_production_method = answer_production_method,
+            answer_production_method = answer_production_method, # TODO: fix automatic system prompt
             seed = seed,
+            print_conversation = print_conversation,
+            print_progress = print_progress,
             **generation_kwargs,
         )
 
