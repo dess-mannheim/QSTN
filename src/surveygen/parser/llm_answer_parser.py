@@ -283,7 +283,8 @@ def _logprobs_filter(
     
     # normalize so that probs sum up to 1
     overall_sum = sum([_result for _result in choice_results.values() if not np.isnan(_result)]) # only consider values != nan
-    choice_results = {choice: token_sum/overall_sum for choice, token_sum in choice_results.items()}
+    if not np.isnan(overall_sum) and overall_sum > 0:
+        choice_results = {choice: token_sum/overall_sum for choice, token_sum in choice_results.items()}
 
     return choice_results
 
