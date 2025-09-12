@@ -52,28 +52,18 @@ def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, 
             parsed_llm_response = json_parser_str(value.llm_response)
             if isinstance(parsed_llm_response, dict):
                 answer_format = parsed_llm_response.keys()
-                answers.append((key, value.question, *parsed_llm_response.values()))
+                answers.append(pd.DataFrame(
+                  data = [(key, value.question, *parsed_llm_response.values())],
+                  columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
+                  index = [0]
+                ))
             else:
-                answers.append(
-                    (key, value.question, value.llm_response, "ERROR: Parsing")
-                )
-        try:
-            df = pd.DataFrame(
-                answers,
-                columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
-            )
-        except:
-            print(answers)
-            df = pd.DataFrame(
-                answers,
-                columns=[
-                    constants.INTERVIEW_ITEM_ID,
-                    constants.QUESTION,
-                    constants.LLM_RESPONSE,
-                    "error_col",
-                ],
-            )
-        final_result[survey_result.interview] = df
+                answers.append(pd.DataFrame(
+                  data = [(key, value.question, value.llm_response, "ERROR: Parsing")],
+                  columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, "error_col"],
+                  index = [0]
+                ))
+        final_result[survey_result.interview] = pd.concat(answers, ignore_index=True) # handles inconsistent columns
 
     return final_result
 
