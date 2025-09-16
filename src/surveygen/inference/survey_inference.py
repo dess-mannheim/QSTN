@@ -169,7 +169,7 @@ def batch_generation(
             if answer_production_method.ignore_reasoning:
                 tokenizer = model.get_tokenizer()
                 logprob_positions = [
-                    len(tokenizer.tokenize(f'{reasoning_start_token}{_reasoning}{reasoning_end_token}')) + 1 + max(1, answer_production_method.token_position)
+                    len(tokenizer.tokenize(f'{reasoning_start_token}{_reasoning}{reasoning_end_token}')) + 1 + answer_production_method.token_position
                     if _reasoning is not None
                     else answer_production_method.token_position
                     for _reasoning in reasoning_output
