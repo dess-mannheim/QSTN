@@ -46,11 +46,14 @@ def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, 
     final_result = {}
 
     for survey_result in survey_results:
-        answers = []
+        answers: List[pd.DataFrame] = []
         for key, value in survey_result.results.items():
             # value:QuestionAnswerTuple
             parsed_llm_response = json_parser_str(value.llm_response)
             if isinstance(parsed_llm_response, dict):
+                # remove reserved values from dictionary
+                for reserved_key in [constants.INTERVIEW_ITEM_ID, constants.QUESTION]:
+                    if reserved_key in parsed_llm_response: parsed_llm_response.pop(reserved_key)
                 answer_format = parsed_llm_response.keys()
                 answers.append(pd.DataFrame(
                   data = [(key, value.question, *parsed_llm_response.values())],
