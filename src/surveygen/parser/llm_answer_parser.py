@@ -1,15 +1,16 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from ..llm_interview import LLMInterview
 from ..utilities.survey_objects import InterviewResult
 
-from ..inference.survey_inference import batch_generation
+from ..inference.survey_inference import batch_generation, AnswerProductionMethod
 
 from ..utilities import constants
 
 from vllm import LLM
 
 import pandas as pd
+import numpy as np
 
 import json
 
@@ -18,15 +19,18 @@ import json_repair
 import re
 
 from collections import defaultdict
+import warnings
 
 
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
-DEFAULT_PROMPT: str = (
-    "Your task is to parse the correct answer option from an open text answer a LLM has given to survey questions. You will be provided with the survey question, possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible answer options or 'INVALID', if the provided LLM answer does give one of the options."
-)
+DEFAULT_PROMPT: str = "Your task is to parse the correct answer option from an open text " + \
+    "answer a LLM has given to survey questions. You will be provided with the survey question, " + \
+    "possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible " + \
+    "answer options or 'INVALID', if the provided LLM answer does give one of the options. \n" + \
+    "Question: {question} \nResponse by LLM: {llm_response}"
 
 
-def json_parser_str(answer: str) -> Dict[str, str]:
+def json_parser_str(answer: str) -> Dict[str, str] | None:
     try:
         result_json = json.loads(answer)
     except:
@@ -42,34 +46,27 @@ def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, 
     final_result = {}
 
     for survey_result in survey_results:
-        answers = []
+        answers: List[pd.DataFrame] = []
         for key, value in survey_result.results.items():
             # value:QuestionAnswerTuple
             parsed_llm_response = json_parser_str(value.llm_response)
-            if parsed_llm_response:
+            if isinstance(parsed_llm_response, dict):
+                # remove reserved values from dictionary
+                for reserved_key in [constants.INTERVIEW_ITEM_ID, constants.QUESTION]:
+                    if reserved_key in parsed_llm_response: parsed_llm_response.pop(reserved_key)
                 answer_format = parsed_llm_response.keys()
-                answers.append((key, value.question, *parsed_llm_response.values()))
+                answers.append(pd.DataFrame(
+                  data = [(key, value.question, *parsed_llm_response.values())],
+                  columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
+                  index = [0]
+                ))
             else:
-                answers.append(
-                    (key, value.question, value.llm_response, "ERROR: Parsing")
-                )
-        try:
-            df = pd.DataFrame(
-                answers,
-                columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
-            )
-        except:
-            print(answers)
-            df = pd.DataFrame(
-                answers,
-                columns=[
-                    constants.INTERVIEW_ITEM_ID,
-                    constants.QUESTION,
-                    constants.LLM_RESPONSE,
-                    "error_col",
-                ],
-            )
-        final_result[survey_result.interview] = df
+                answers.append(pd.DataFrame(
+                  data = [(key, value.question, value.llm_response, "ERROR: Parsing")],
+                  columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, "error_col"],
+                  index = [0]
+                ))
+        final_result[survey_result.interview] = pd.concat(answers, ignore_index=True) # handles inconsistent columns
 
     return final_result
 
@@ -166,7 +163,9 @@ def llm_parse_all(
     survey_results: List[InterviewResult],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     prompt: str = DEFAULT_PROMPT,
-    use_structured_ouput: bool = False,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
+    print_conversation: bool = False,
+    print_progress: bool = True,
     seed=42,
     **generation_kwargs,
 ) -> Dict[LLMInterview, pd.DataFrame]:
@@ -179,7 +178,10 @@ def llm_parse_all(
                     constants.INTERVIEW_ITEM_ID: item_id,
                     constants.QUESTION: question_llm_response_tuple.question,
                     constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
-                    "prompt": f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}",
+                    "prompt": prompt.format(
+                        question = question_llm_response_tuple.question,
+                        llm_response = question_llm_response_tuple.llm_response
+                    ),
                 }
             )
 
@@ -192,11 +194,15 @@ def llm_parse_all(
         system_messages = [system_prompt] * len(all_prompts)
 
         # Perform the single, efficient batch inference.
-        llm_parsed_results = batch_generation(
+        llm_parsed_results, logprobs, reasoning_output = batch_generation(
             model,
-            system_messages=system_messages,
-            prompts=all_prompts,
-            seed=seed,
+            system_messages = system_messages,
+            prompts = all_prompts,
+            answer_production_method = answer_production_method, # TODO: fix automatic system prompt
+            seed = seed,
+            print_conversation = print_conversation,
+            print_progress = print_progress,
+            chat_template_kwargs = {'enable_thinking': False}, # disable reasoning to facilitate parsing
             **generation_kwargs,
         )
 
@@ -221,3 +227,98 @@ def llm_parse_all(
     }
 
     return all_results
+
+
+def _filter_logprobs_by_choices(
+        logprob_df: pd.DataFrame,
+        choices: pd.Series
+    ) -> pd.DataFrame:
+
+    matches_found = []
+    
+    # check for each output token whether any of the choices start with this token
+    for token in logprob_df['token']:
+        boolean_index = choices.str.startswith(token)
+        #if len(choices[boolean_index]) > 1:
+        #    warnings.warn(
+        #        f"Multiple allowed_choices ({list(choices[boolean_index])}) match the same output token: {token}",
+        #        stacklevel=2
+        #    )
+        matches_found.append(boolean_index.any())
+    
+    return logprob_df[matches_found]
+
+
+def _logprobs_filter(
+        logprobs: Dict[str, float],
+        allowed_choices: Dict[str, List[str]]
+    ) -> Dict[str, float]:
+    
+    # normalize logprobs
+    logprob_df = pd.DataFrame({'token': logprobs.keys(), 'prob': logprobs.values()})
+    logprob_df['prob'] = logprob_df.prob.apply(np.exp)
+    logprob_df = logprob_df[logprob_df.prob > 0]
+
+    # flatten to check for collisions between answer options
+    # TODO: implement this properly---only collisions between answer options matter, not, e.g., TRUMP vs. trump!    
+    #all_valid_outputs = [output for choices in allowed_choices.values() for output in choices]
+    #_ = _filter_logprobs_by_choices(logprob_df, pd.Series(all_valid_outputs))
+
+    # filter the individual survey answers
+    choice_results = {}
+    for choice, valid_outputs in allowed_choices.items():
+        valid_logprobs = _filter_logprobs_by_choices(logprob_df, pd.Series(valid_outputs))
+        if len(valid_logprobs) == 0:
+            warnings.warn(f"Could not find logprobs for answer option '{choice}' with possible outputs {valid_outputs}")
+            choice_results[choice] = np.nan
+        else:    
+            choice_results[choice] = valid_logprobs['prob'].sum()
+    
+    # normalize so that probs sum up to 1
+    overall_sum = sum([_result for _result in choice_results.values() if not np.isnan(_result)]) # only consider values != nan
+    if not np.isnan(overall_sum) and overall_sum > 0:
+        choice_results = {choice: token_sum/overall_sum for choice, token_sum in choice_results.items()}
+
+    return choice_results
+
+
+def logprobs_parse_all(
+        survey_results: List[InterviewResult],
+        allowed_choices: List[str] | Dict[str, List[str]]
+    ) -> Dict[LLMInterview, pd.DataFrame]:
+    """
+    Filter and aggregate the logprobs that are returned when using the Logprob_AnswerProductionMethod
+
+    Args:
+        survey_results: List of InterviewResult that is returned from running a survey
+        allowed_choices: List of possible answer options OR dictionary that maps answer options to multiple tokens that encode each option
+    """
+    final_result = {}
+
+    # if each choice only maps to one token
+    if isinstance(allowed_choices, list):
+        allowed_choices = {c: [c] for c in allowed_choices}
+
+    for survey_result in survey_results:
+        answers = []
+        for item_id, qa_tuple in survey_result.results.items():
+            if qa_tuple.logprobs is None:
+                warnings.warn(
+                    "No logprobs found in InterviewResult. " + \
+                    "Make sure to use Logprob_AnswerProductionMethod to generate logprobs.",
+                    stacklevel = 2
+                )
+                answer_format = ["error_col"]
+                answers.append((item_id, qa_tuple.question, "ERROR: Parsing"))
+            else:
+                filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, allowed_choices)
+                answer_format = filtered_logprobs.keys()
+                answers.append((item_id, qa_tuple.question, *filtered_logprobs.values()))
+        
+            df = pd.DataFrame(
+                    answers,
+                    columns=[constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
+                )
+            final_result[survey_result.interview] = df
+
+    return final_result

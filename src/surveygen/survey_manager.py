@@ -16,7 +16,7 @@ from vllm import LLM
 # Initialize model and interview
 model = LLM(model="meta-llama/Meta-Llama-3-8B-Instruct")
 interview = LLMInterview(interview_path="questions.csv")
-interview.prepare_interview(question_stem="How do you feel towards QUESTION_CONTENT_PLACEHOLDER?")
+interview.prepare_interview(question_stem="How do you feel towards {QUESTION_CONTENT_PLACEHOLDER}?")
 
 # Conduct survey
 results = conduct_survey_question_by_question(
@@ -52,7 +52,8 @@ from .utilities import utils
 
 from .parser.llm_answer_parser import raw_responses
 
-from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation, StructuredOutputOptions
+from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
+from .inference.answer_production import AnswerProductionMethod, JSON_AnswerProductionMethod, Choice_AnswerProductionMethod
 
 from .llm_interview import LLMInterview
 
@@ -69,7 +70,7 @@ import pandas as pd
 
 import random
 
-import tqdm
+from tqdm.auto import tqdm
 
 
 class SurveyOptionGenerator:
@@ -93,7 +94,7 @@ class SurveyOptionGenerator:
 
     LIKERT_IMPORTANCE_FROM_TO: List[str] = ["Not at all important", "Very Important"]
     LIKERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
-    _IDX_TYPES = Literal["char_low", "char_upper", "integer"]
+    _IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
 
     @staticmethod
     def generate_likert_options(
@@ -138,7 +139,7 @@ class SurveyOptionGenerator:
         :param scale_prompt_template: The format string for a range-style prompt. Must contain `{start}`
                                     and `{end}`.
         :type scale_prompt_template: str
-        :param idx_type: The type of index for the scale: "char_low", "char_upper" or "integer".
+        :param idx_type: The type of index for the scale: "char_lower", "char_upper", "integer", or "no_index".
         :type idx_type: _IDX_TYPES
 
         :raises ValueError: If `n` is less than 2, if `random_order` and `reversed_order` are both True,
@@ -150,12 +151,10 @@ class SurveyOptionGenerator:
 
         # @TODO @Jens Instead of assertions we should probably raise Value errors
         if only_from_to_scale:
-            assert (
-                len(answer_texts) == 2
-            ), "If from to scale, provide exactly two descriptions"
-            assert (
-                idx_type == "integer"
-            ), "Index type must be integer, not lower/uppercase characters."
+            if len(answer_texts) != 2:
+                raise ValueError(f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'.")
+            if idx_type != 'integer':
+                raise ValueError(f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'.")
         else:
             if answer_texts:
                 assert (
@@ -182,7 +181,13 @@ class SurveyOptionGenerator:
             answer_options = answer_options[::-1]
 
         answer_options = []
-        if idx_type == "integer":
+        answer_option_index = []
+
+        if idx_type == "no_index":
+            # no index, just the answer options directly
+            answer_options = answer_texts
+            answer_option_index = None
+        elif idx_type == "integer":
             for i in range(n):
                 answer_code = i + start_idx
                 answer_option = f"{answer_code}"
@@ -194,27 +199,32 @@ class SurveyOptionGenerator:
                 elif answer_texts:
                     answer_option = f"{answer_code}: {answer_texts[i]}"
                 answer_options.append(answer_option)
+                answer_option_index.append(answer_code)
         else:
             # TODO @Jens add these to constants.py
-            if idx_type == "char_low":
+            if idx_type == "char_lower":
                 for i in range(n):
                     answer_option = f"{ascii_lowercase[i]}: {answer_texts[i]}"
                     answer_options.append(answer_option)
+                    answer_option_index.append(ascii_lowercase[i])
             elif idx_type == "char_upper":
                 for i in range(n):
                     answer_option = f"{ascii_uppercase[i]}: {answer_texts[i]}"
                     answer_options.append(answer_option)
+                    answer_option_index.append(ascii_uppercase[i])
 
         interview_option = AnswerOptions(
-            answer_options,
-            from_to_scale=only_from_to_scale,
-            list_prompt_template=list_prompt_template,
-            scale_prompt_template=scale_prompt_template,
-            options_seperator=options_separator,
+            answer_text = answer_options,
+            index = answer_option_index,
+            from_to_scale = only_from_to_scale,
+            list_prompt_template = list_prompt_template,
+            scale_prompt_template = scale_prompt_template,
+            options_seperator = options_separator,
         )
 
         return interview_option
 
+    #TODO: It seems to me like this method and the one above could be merged? (Georg)
     @staticmethod
     def generate_generic_options(
         answer_texts: Dict,
@@ -222,11 +232,9 @@ class SurveyOptionGenerator:
         random_order: bool = False,
         reversed_order: bool = False,
         even_order: bool = False,
-        to_lowercase: bool = False,
-        to_uppercase: bool = False,
-        to_integer: bool = False,
-        list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
-        scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+        idx_type: Optional[_IDX_TYPES] = None, # uses the answer_texts.keys() as an index by default
+        list_prompt_template: Optional[str] = prompt_templates.LIST_OPTIONS_DEFAULT,
+        scale_prompt_template: Optional[str] = prompt_templates.SCALE_OPTIONS_DEFAULT,
         options_separator: str = ", ",
     ):
 
@@ -235,7 +243,7 @@ class SurveyOptionGenerator:
         answer_texts = answer_texts.values()
         # answer_options = descriptions
 
-        if to_lowercase:
+        if idx_type == 'char_lower':
             if all(isinstance(item, int) for item in answer_codes):
                 new_codes = []
                 for i in answer_codes:
@@ -244,7 +252,7 @@ class SurveyOptionGenerator:
                 answer_codes = new_codes
             else:
                 answer_codes = [s.lower() for s in answer_codes]
-        if to_uppercase:
+        elif idx_type == 'char_upper':
             if all(isinstance(item, int) for item in answer_codes):
                 new_codes = []
                 for i in answer_codes:
@@ -253,7 +261,7 @@ class SurveyOptionGenerator:
                 answer_codes = new_codes
             else:
                 answer_codes = [s.upper() for s in answer_codes]
-        if to_integer:
+        elif idx_type == 'integer':
             answer_codes = range(1, len(answer_codes) + 1)
 
         answer_options = dict(zip(answer_codes, answer_texts))
@@ -323,15 +331,21 @@ class SurveyOptionGenerator:
                     zip(first_part + last_parts, answer_options.values())
                 )
 
-        answer_options = [f"{key}: {val}" for key, val in answer_options.items()]
-        print(answer_options)
+        if idx_type == 'no_index':
+            answer_option_strings = list(answer_options.values())
+            answer_option_index = None
+        else:
+            answer_option_strings = [f"{key}: {val}" for key, val in answer_options.items()]
+            answer_option_index = list(answer_options.keys())
+        #print(answer_options)
 
         interview_option = AnswerOptions(
-            answer_options,
-            from_to_scale=only_from_to_scale,
-            list_prompt_template=list_prompt_template,
-            scale_prompt_template=scale_prompt_template,
-            options_seperator=options_separator,
+            answer_text = answer_option_strings,
+            index = answer_option_index,
+            from_to_scale = only_from_to_scale,
+            list_prompt_template = list_prompt_template,
+            scale_prompt_template = scale_prompt_template,
+            options_seperator = options_separator,
         )
 
         return interview_option
@@ -339,7 +353,7 @@ class SurveyOptionGenerator:
 def conduct_survey_question_by_question(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -347,6 +361,7 @@ def conduct_survey_question_by_question(
     n_save_step: Optional[int] = None,
     intermediate_save_file: Optional[str] = None,
     seed: int = 42,
+    chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
     """
@@ -355,7 +370,7 @@ def conduct_survey_question_by_question(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct as a survey.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         print_conversation: If True, prints all conversations.
@@ -363,6 +378,7 @@ def conduct_survey_question_by_question(
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
+        chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
 
     Returns:
@@ -393,17 +409,19 @@ def conduct_survey_question_by_question(
 
     survey_results: List[InterviewResult] = []
 
-    #TODO allow for different answer option constraints between surveys
-    if structured_output_options:
-        if structured_output_options.constraints:
-            for json_element in structured_output_options.constraints.keys():
-                if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
-                    structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
-        if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-            structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
+    #TODO allow for different answer option constraints between surveys/questions
+    if answer_production_method:
+        if (isinstance(answer_production_method, JSON_AnswerProductionMethod) and
+            answer_production_method.constraints):
+            for json_element in answer_production_method.constraints.keys():
+                if answer_production_method.constraints[json_element] == constants.OPTIONS_ADJUST:
+                    answer_production_method.constraints[json_element] = inference_options[0].answer_options[0].answer_text
+        elif (isinstance(answer_production_method, Choice_AnswerProductionMethod) and
+              answer_production_method.allowed_choices == constants.OPTIONS_ADJUST):
+            answer_production_method.allowed_choices = inference_options[0].answer_options[0].answer_text
 
     for i in (
-        tqdm.tqdm(range(max_survey_length))
+        tqdm(range(max_survey_length), desc='Processing interviews')
         if print_progress
         else range(max_survey_length)
     ):
@@ -413,12 +431,22 @@ def conduct_survey_question_by_question(
             if len(inference_option.order) > i
         ]
 
-        if structured_output_options:
-            if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
+        if answer_production_method:
+            if (isinstance(answer_production_method, JSON_AnswerProductionMethod)
+                and answer_production_method.automatic_system_prompt):
+                _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
+                json_instructions = answer_production_method.system_prompt_template.format(options=_answer_options)
                 system_messages = [
-                    inference.json_system_prompt(json_options=structured_output_options.json_fields)
+                    inference.json_system_prompt(
+                        json_fields = answer_production_method.json_fields,
+                        json_instructions = json_instructions
+                    )
                     for inference in current_batch
                 ]
+            elif answer_production_method.automatic_system_prompt:
+                _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
+                _instructions = answer_production_method.system_prompt_template.format(options=_answer_options)
+                system_messages = [f"{inference.system_prompt}\n{_instructions}" for inference in current_batch]
             else:
                 system_messages = [inference.system_prompt for inference in current_batch]
         else:
@@ -432,26 +460,31 @@ def conduct_survey_question_by_question(
             for inference in current_batch
         ]
 
-        output = batch_generation(
+        output, logprobs, reasoning_output = batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
 
-        for survey_id, question, answer, item in zip(
-            range(len(current_batch)), questions, output, current_batch
+        # avoid errors when zipping
+        if logprobs is None: logprobs = [None] * len(current_batch)
+
+        for survey_id, question, answer, logprob_answer, reasoning, item in zip(
+            range(len(current_batch)), questions, output, logprobs, reasoning_output, current_batch
         ):
             question_llm_response_pairs[survey_id].update(
-                {item.order[i]: QuestionLLMResponseTuple(question, answer)}
+                {item.order[i]: QuestionLLMResponseTuple(question, answer, logprob_answer, reasoning)}
             )
 
+        # TODO: check that this works with logprobs
         _intermediate_saves(interviews, n_save_step, intermediate_save_file, question_llm_response_pairs, i)
 
     for i, survey in enumerate(interviews):
@@ -512,7 +545,7 @@ def _intermediate_save_path_check(n_save_step:int, intermediate_save_path:str):
 def conduct_whole_survey_one_prompt(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     n_save_step: Optional[int] = None,
@@ -520,6 +553,7 @@ def conduct_whole_survey_one_prompt(
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
+    chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
     """
@@ -528,7 +562,7 @@ def conduct_whole_survey_one_prompt(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         n_save_step: Save intermediate results every n steps.
@@ -536,6 +570,7 @@ def conduct_whole_survey_one_prompt(
         print_conversation: If True, prints the conversation.
         print_progress: If True, shows progress bar.
         seed: Random seed for reproducibility.
+        chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
 
     Returns:
@@ -563,7 +598,7 @@ def conduct_whole_survey_one_prompt(
     survey_results: List[InterviewResult] = []
 
     for i in (
-        tqdm.tqdm(range(max_survey_length))
+        tqdm(range(max_survey_length), desc='Processing interviews')
         if print_progress
         else range(max_survey_length)
     ):
@@ -573,18 +608,18 @@ def conduct_whole_survey_one_prompt(
             if len(inference_option.order) > i
         ]
 
-        if structured_output_options:
-            if structured_output_options.category == "json":
+        if answer_production_method:
+            if isinstance(answer_production_method, JSON_AnswerProductionMethod):
                 all_json_structures = []
                 all_constraints = []
                 for inference_option in current_batch:
                     full_json_structure = []
                     full_constraints = {}
                     for i in range(len(inference_option.answer_options)):
-                        for json_element in structured_output_options.json_fields:
+                        for json_element in answer_production_method.json_fields:
                             new_element = f"{json_element}{i}"
-                            if structured_output_options.constraints:
-                                constraints_element = structured_output_options.constraints.get(json_element)
+                            if answer_production_method.constraints:
+                                constraints_element = answer_production_method.constraints.get(json_element)
                                 if constraints_element == constants.OPTIONS_ADJUST:
                                     full_constraints[new_element] = inference_option.answer_options[i].answer_text
                                 elif constraints_element != None:
@@ -592,41 +627,47 @@ def conduct_whole_survey_one_prompt(
                             full_json_structure.append(new_element)
                     all_constraints.append(full_constraints)
                     all_json_structures.append(full_json_structure)
-                structured_output_options.constraints = all_constraints[0]
-                structured_output_options.json_fields = all_json_structures[0]
-                if structured_output_options.automatic_system_prompt:
+                answer_production_method.constraints = all_constraints[0]
+                answer_production_method.json_fields = all_json_structures[0]
+                if answer_production_method.automatic_system_prompt:
                     system_messages = [
+                        # TODO: add support for JSON custom JSON prompt instructions, including formatting
                         inference.json_system_prompt(all_json_structures[num])
                         for num, inference in enumerate(current_batch)
                     ]
                 else:
                     system_messages = [inference.system_prompt for inference in current_batch]
-            elif structured_output_options.category == "choice":
-                if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-                    structured_output_options.allowed_choices = inference_option.answer_options[0].answer_text
+            # TODO: add support for automatic system prompt for other answer production methods
+            elif isinstance(answer_production_method, Choice_AnswerProductionMethod):
+                if answer_production_method.allowed_choices == constants.OPTIONS_ADJUST:
+                    answer_production_method.allowed_choices = inference_option.answer_options[0].answer_text
                 system_messages = [inference.system_prompt for inference in current_batch]
         else:
             system_messages = [inference.system_prompt for inference in current_batch]
         prompts = [inference.create_all_questions() for inference in current_batch]
 
-        output = batch_generation(
+        output, logprobs, reasoning_output = batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
 
-        for survey_id, prompt, answer in zip(
-            range(len(current_batch)), prompts, output
+        # avoid errors when zipping
+        if logprobs is None: logprobs = [None] * len(current_batch)
+
+        for survey_id, prompt, answer, logprob_answer in zip(
+            range(len(current_batch)), prompts, output, logprobs
         ):
             question_llm_response_pairs[survey_id].update(
-                {-1: QuestionLLMResponseTuple(prompt, answer)}
+                {-1: QuestionLLMResponseTuple(prompt, answer, logprob_answer)}
             )
         
         _intermediate_saves(interviews, n_save_step, intermediate_save_file, question_llm_response_pairs, i)
@@ -640,7 +681,7 @@ def conduct_whole_survey_one_prompt(
 def conduct_survey_in_context(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    structured_output_options: Optional[StructuredOutputOptions] = None,
+    answer_production_method: Optional[AnswerProductionMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -656,7 +697,7 @@ def conduct_survey_in_context(
     Args:
         model: LLM instance or AsyncOpenAI client.
         interviews: Single interview or list of interviews to conduct.
-        structured_output_options: Options for structured output format.
+        answer_production_method: Options for structured output format.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
         print_conversation: If True, prints the conversation.
@@ -695,20 +736,22 @@ def conduct_survey_in_context(
     all_prompts: List[List[str]] = []
     assistant_messages: List[List[str]] = []
 
-    if structured_output_options:
-        if structured_output_options.constraints:
-            for json_element in structured_output_options.constraints.keys():
-                if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
-                    structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
-        if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
-            structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
+    if answer_production_method:
+        if (isinstance(answer_production_method, JSON_AnswerProductionMethod) and
+            answer_production_method.constraints):
+            for json_element in answer_production_method.constraints.keys():
+                if answer_production_method.constraints[json_element] == constants.OPTIONS_ADJUST:
+                    answer_production_method.constraints[json_element] = inference_options[0].answer_options[0].answer_text
+        elif (isinstance(answer_production_method, Choice_AnswerProductionMethod) and
+              answer_production_method.allowed_choices == constants.OPTIONS_ADJUST):
+            answer_production_method.allowed_choices = inference_options[0].answer_options[0].answer_text
 
     for i in range(len(interviews)):
         assistant_messages.append([])
         all_prompts.append([])
 
     for i in (
-        tqdm.tqdm(range(max_survey_length))
+        tqdm(range(max_survey_length), desc='Processing interviews')
         if print_progress
         else range(max_survey_length)
     ):
@@ -760,17 +803,20 @@ def conduct_survey_in_context(
                 question_llm_response[survey_id].update(
                     {
                         item._questions[i].item_id: QuestionLLMResponseTuple(
-                            question, llm_response
+                            question, llm_response, None
                         )
                     }
                 )
             continue
-        if structured_output_options:
-            if structured_output_options.category == "json" and structured_output_options.automatic_system_prompt:
+        if answer_production_method:
+            if (isinstance(answer_production_method, JSON_AnswerProductionMethod)
+                and answer_production_method.automatic_system_prompt):
                 system_messages = [
-                    inference.json_system_prompt(json_options=structured_output_options.json_fields)
+                    # TODO: add support for JSON custom JSON prompt instructions, including formatting
+                    inference.json_system_prompt(json_fields=answer_production_method.json_fields)
                     for inference in current_batch
                 ]
+            # TODO: add support for automatic system prompt for other answer production methods
             else:
                 system_messages = [inference.system_prompt for inference in current_batch]
         else:
@@ -781,7 +827,7 @@ def conduct_survey_in_context(
             system_messages=system_messages,
             prompts=all_prompts,
             assistant_messages=assistant_messages,
-            structured_output_options=structured_output_options,
+            answer_production_method=answer_production_method,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -798,7 +844,7 @@ def conduct_survey_in_context(
             question_llm_response[survey_id].update(
                 {
                     item._questions[i].item_id: QuestionLLMResponseTuple(
-                        question, llm_response
+                        question, llm_response, None
                     )
                 }
             )
