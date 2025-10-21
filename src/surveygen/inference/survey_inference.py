@@ -22,6 +22,7 @@ import random
 
 from dataclasses import dataclass
 
+from tqdm.asyncio import tqdm_asyncio
 
 @dataclass
 class StructuredOutputOptions:
@@ -400,6 +401,7 @@ def batch_turn_by_turn_generation(
             seeds=seeds,
             concurrency_limit=api_concurrency,
             structured_output_options=structured_output_options,
+            print_progress=print_progress,
             **generation_kwargs,
         )
 
@@ -431,6 +433,7 @@ def _run_async_in_thread(
     batch_messages: List[List[Dict[str, str]]],
     seeds: List[int],
     concurrency_limit: int = 10,
+    print_progress: bool = True,
     structured_output_options: Optional[
         Union[StructuredOutputOptions, List[StructuredOutputOptions]]
     ] = None,
@@ -455,6 +458,7 @@ def _run_async_in_thread(
                     batch_messages=batch_messages,
                     seeds=seeds,
                     concurrency_limit=concurrency_limit,
+                    print_progress=print_progress,
                     structured_output_options=structured_output_options,
                     structured_output=structured_output,
                     **generation_kwargs,
@@ -480,6 +484,7 @@ async def _run_api_batch_async(
     batch_messages: List[List[Dict[str, str]]],
     seeds: List[int],
     concurrency_limit: int = 10,
+    print_progress: bool = True,
     structured_output: List[Dict[str, Any]] = [],
     structured_output_options: Optional[
         Union[StructuredOutputOptions, List[StructuredOutputOptions]]
@@ -516,6 +521,8 @@ async def _run_api_batch_async(
 
             return await client.chat.completions.create(**request_kwargs)
 
+    #pbar = tqdm.tqdm if print_progress else lambda x: x
+
     if len(structured_output) > 0:
         tasks = [
             get_completion(messages, seed, struct_output, **generation_kwargs)
@@ -528,7 +535,10 @@ async def _run_api_batch_async(
             get_completion(messages, seed, **generation_kwargs)
             for messages, seed in zip(batch_messages, seeds)
         ]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    if print_progress:
+        responses = await tqdm_asyncio.gather(*tasks, desc="Processing Prompts")
+    else:
+        responses = await asyncio.gather(*tasks, return_exceptions=True, desc="Processing Prompts")
 
     final_results = []
     for res in responses:
@@ -539,3 +549,83 @@ async def _run_api_batch_async(
             final_results.append(res.choices[0].message.content)
 
     return final_results
+
+def batch_decoding(
+    model: Union[LLM, AsyncOpenAI],
+    prompts: List[str] = ["Hi there! What is your name?"],
+    stop_tokens: List[str] = ["\nA:"],
+    structured_output_options: Optional[
+        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+    ] = None,
+    seed: int = 42,
+    client_model_name: Optional[str] = None,
+    api_concurrency: int = 10,
+    print_conversation: bool = False,
+    print_progress: bool = True,
+    **generation_kwargs: Any,
+):
+    """
+    Generate responses for a batch of prompts.
+
+    Handles both vLLM and OpenAI API generation with support for:
+    - Structured output (JSON or choice format)
+    - Conversation printing
+    - Progress tracking
+    - Concurrent API requests
+
+    Args:
+        model: vLLM model or AsyncOpenAI client
+        system_messages: System prompts for each conversation
+        prompts: User prompts to generate responses for
+        structured_output_options: Configuration for structured output
+        seed: Random seed for reproducibility
+        client_model_name: Model name when using OpenAI API
+        api_concurrency: Max concurrent API requests
+        print_conversation: If True, prints conversations
+        print_progress: If True, shows progress bar
+        **generation_kwargs: Additional generation parameters
+
+    Returns:
+        List[str]: Generated responses
+    """
+    random.seed(seed)
+
+    batch_size: int = len(prompts)
+
+    seeds = _generate_seeds(seed, batch_size=batch_size)
+
+    if isinstance(model, LLM):
+        sampling_params_list = _create_sampling_params(
+            batch_size=batch_size,
+            seeds=seeds,
+            structured_output_options=structured_output_options,
+            stop_tokens=stop_tokens,
+            **generation_kwargs,
+        )
+        outputs: List[RequestOutput] = model.generate(
+            prompts,
+            sampling_params=sampling_params_list,
+            use_tqdm=print_progress,
+        )
+        result = [output.outputs[0].text for output in outputs]
+
+    else:
+        result = _run_async_in_thread(
+            client=model,
+            client_model_name=client_model_name,
+            batch_messages=prompts,
+            seeds=seeds,
+            concurrency_limit=api_concurrency,
+            structured_output_options=structured_output_options,
+            **generation_kwargs,
+        )
+
+    # TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
+    if print_conversation:
+        conversation_print = "Conversation:"
+        for prompt, answer in zip(prompts, result):
+            round_print = f"{conversation_print}\nUser Message:\n{prompt}\nGenerated Message\n{answer}"
+            print(round_print, flush=True)
+            break
+
+    return result
