@@ -12,7 +12,7 @@ import threading
 from openai import OpenAI, AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
-from typing import Any, List, Optional, Union, Dict
+from typing import Any, List, Optional, Union, Dict, Literal
 
 from .dynamic_pydantic import generate_pydantic_model
 from .answer_production import (
@@ -29,36 +29,38 @@ from dataclasses import dataclass
 
 from tqdm.asyncio import tqdm_asyncio
 
-@dataclass
-class StructuredOutputOptions:
-    """
-    Configuration for structured output generation.
+# @dataclass
+# class StructuredOutputOptions:
+#     """
+#     Configuration for structured output generation.
 
-    Attributes:
-        category: Type of structured output ("choice" or "json")
-        json_fields: List of field names for JSON output
-        constraints: Optional constraints for field values
-        allowed_choices: List of allowed choices for choice output
-        automatic_system_prompt: If a instruction to only output in the required json format should be added to the system prompt
-    """
+#     Attributes:
+#         category: Type of structured output ("choice" or "json")
+#         json_fields: List of field names for JSON output
+#         constraints: Optional constraints for field values
+#         allowed_choices: List of allowed choices for choice output
+#         automatic_system_prompt: If a instruction to only output in the required json format should be added to the system prompt
+#     """
 
-    category: Literal["choice", "json"]
-    json_fields: Optional[List[str]] = None
-    constraints: Optional[Dict[str, List[str]]] = None
-    allowed_choices: Optional[List[str]] = None
-    automatic_system_prompt: bool = False
+#     category: Literal["choice", "json"]
+#     json_fields: Optional[List[str]] = None
+#     constraints: Optional[Dict[str, List[str]]] = None
+#     allowed_choices: Optional[List[str]] = None
+#     automatic_system_prompt: bool = False
     
-    def __post_init__(self):
-        """Perform validation after the object has been initialized."""
-        if self.category == "json" and self.json_fields is None:
-            raise ValueError(
-                "`json_fields` must be provided when category is 'json'"
-            )
+#     def __post_init__(self):
+#         """Perform validation after the object has been initialized."""
+#         if self.category == "json" and self.json_fields is None:
+#             raise ValueError(
+#                 "`json_fields` must be provided when category is 'json'"
+#             )
         
-        if self.category == "choice" and self.allowed_choices is None:
-            raise ValueError(
-                "`allowed_choices` must be provided when category is 'choice'"
-            )
+#         if self.category == "choice" and self.allowed_choices is None:
+#             raise ValueError(
+#                 "`allowed_choices` must be provided when category is 'choice'"
+#             )
+
+
 import regex as re
 
 from tqdm.auto import tqdm
@@ -648,7 +650,7 @@ def batch_decoding(
     prompts: List[str] = ["Hi there! What is your name?"],
     stop_tokens: List[str] = ["\nA:"],
     structured_output_options: Optional[
-        Union[StructuredOutputOptions, List[StructuredOutputOptions]]
+        Union[AnswerProductionMethod, List[AnswerProductionMethod]]
     ] = None,
     seed: int = 42,
     client_model_name: Optional[str] = None,
