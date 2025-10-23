@@ -273,10 +273,6 @@ def batch_generation(
 
 
 def _make_cache_key(fields: Any, constraints: Any) -> str:
-    print(fields)
-    print(type(fields))
-    print(constraints)
-    print(type(constraints))
     return json.dumps({"fields": fields, "constraints": constraints}, sort_keys=False)
 
 
