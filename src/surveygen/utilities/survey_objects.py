@@ -118,16 +118,12 @@ class AnswerOptions:
                             constraints[key] = answer_texts.full_answers
 
                 
-            elif isinstance(self.response_generation_method, ChoiceResponseGenerationMethod) or isinstance(response_generation_method, LogprobResponseGenerationMethod):
-                allowed_choices = self.response_generation_method.allowed_choices
-
-                if allowed_choices == constants.OPTIONS_ADJUST:
+            elif isinstance(self.response_generation_method, ChoiceResponseGenerationMethod) or isinstance(self.response_generation_method, LogprobResponseGenerationMethod):
+                if self.response_generation_method.allowed_choices == constants.OPTIONS_ADJUST:
                     if self.response_generation_method.output_index_only:
-                        constraints[key] = answer_texts.indices
+                        self.response_generation_method.allowed_choices = answer_texts.indices
                     else:
-                        constraints[key] = answer_texts.full_answers
-
-
+                        self.response_generation_method.allowed_choices = answer_texts.full_answers
 
     def create_options_str(self) -> str:
         if self.from_to_scale:

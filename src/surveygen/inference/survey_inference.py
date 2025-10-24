@@ -19,13 +19,11 @@ from .response_generation import (
     ResponseGenerationMethod,
     JSONResponseGenerationMethod,
     ChoiceResponseGenerationMethod,
-    LogprobResponseGenerationMethod
+    LogprobResponseGenerationMethod,
 )
 
 import json
 import random
-
-from dataclasses import dataclass
 
 from tqdm.asyncio import tqdm_asyncio
 
@@ -47,14 +45,14 @@ from tqdm.asyncio import tqdm_asyncio
 #     constraints: Optional[Dict[str, List[str]]] = None
 #     allowed_choices: Optional[List[str]] = None
 #     automatic_system_prompt: bool = False
-    
+
 #     def __post_init__(self):
 #         """Perform validation after the object has been initialized."""
 #         if self.category == "json" and self.json_fields is None:
 #             raise ValueError(
 #                 "`json_fields` must be provided when category is 'json'"
 #             )
-        
+
 #         if self.category == "choice" and self.allowed_choices is None:
 #             raise ValueError(
 #                 "`allowed_choices` must be provided when category is 'choice'"
@@ -188,47 +186,67 @@ def batch_generation(
             batch_messages,
             sampling_params=sampling_params_list,
             use_tqdm=print_progress,
-            chat_template_kwargs=chat_template_kwargs
+            chat_template_kwargs=chat_template_kwargs,
         )
         result = [output.outputs[0].text for output in outputs]
-        
+
         # separate out reasoning
         # we parse this here because the OpenAI API separates it automatically
         plain_results = []
         reasoning_output = []
-        raw_reasonings = [] # keep the whitespace for length calculations
+        raw_reasonings = []  # keep the whitespace for length calculations
         for output_text in result:
-            reasoning_match = re.search(reasoning_start_token + r"(.*?)" + reasoning_end_token, output_text, re.DOTALL)
+            reasoning_match = re.search(
+                reasoning_start_token + r"(.*?)" + reasoning_end_token,
+                output_text,
+                re.DOTALL,
+            )
             raw_reasonings.append(reasoning_match.group(1) if reasoning_match else None)
-            reasoning_output.append(reasoning_match.group(1).strip() if reasoning_match else None)
+            reasoning_output.append(
+                reasoning_match.group(1).strip() if reasoning_match else None
+            )
             plain_results.append(output_text.split(reasoning_end_token)[-1].strip())
-        
+
         if isinstance(response_generation_method, LogprobResponseGenerationMethod):
             # ignore the first k tokens that belong to the reasoning
             if response_generation_method.ignore_reasoning:
                 tokenizer = model.get_tokenizer()
                 logprob_positions = [
-                    len(tokenizer.tokenize(f'{reasoning_start_token}{_reasoning}{reasoning_end_token}')) + 1 + response_generation_method.token_position
-                    if _reasoning is not None
-                    else response_generation_method.token_position
+                    (
+                        len(
+                            tokenizer.tokenize(
+                                f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+                            )
+                        )
+                        + 1
+                        + response_generation_method.token_position
+                        if _reasoning is not None
+                        else response_generation_method.token_position
+                    )
                     for _reasoning in raw_reasonings
                 ]
             else:
-                logprob_positions = [response_generation_method.token_position] * len(outputs)
-            
+                logprob_positions = [response_generation_method.token_position] * len(
+                    outputs
+                )
+
             logprob_result = []
             for req_output, logprob_position in zip(outputs, logprob_positions):
                 try:
                     answer_dict = {
-                        x.decoded_token.lstrip(space_char).lstrip(): x.logprob # strip the space character and whitespace from tokenization
-                        for x in req_output.outputs[0].logprobs[logprob_position].values()
+                        x.decoded_token.lstrip(
+                            space_char
+                        ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+                        for x in req_output.outputs[0]
+                        .logprobs[logprob_position]
+                        .values()
                     }
-                except IndexError: # less than [logprob_position] tokens in the output!
+                except IndexError:  # less than [logprob_position] tokens in the output!
                     answer_dict = {}
                 logprob_result.append(answer_dict)
 
         # print the first result returned from vllm
-        #if print_conversation:
+        # if print_conversation:
         #    for req_output in outputs:
         #        print(req_output.outputs[0])
         #        break
@@ -236,8 +254,10 @@ def batch_generation(
     else:
         # TODO: add support for List[AnswerProductionMethod]
         if isinstance(response_generation_method[0], LogprobResponseGenerationMethod):
-            raise NotImplementedError("The Logprob_AnswerProductionMethod is not yet implemented " + \
-                                      "for use with the OpenAI API. Use vllm offline inference instead.")
+            raise NotImplementedError(
+                "The Logprob_AnswerProductionMethod is not yet implemented "
+                + "for use with the OpenAI API. Use vllm offline inference instead."
+            )
             generation_kwargs["logprobs"] = True
             generation_kwargs["top_logprobs"] = response_generation_method.top_logprobs
 
@@ -247,7 +267,7 @@ def batch_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            answer_production_method=response_generation_method,
+            response_generation_method=response_generation_method,
             **generation_kwargs,
         )
 
@@ -260,14 +280,15 @@ def batch_generation(
     # TODO add argument to specify how many conversations should be printed (base argument should be reasonable)
     if print_conversation:
         conversation_print = "--- Conversation ---"
-        for system_message, prompt, answer, reasoning, logprob_answer in zip(system_messages, prompts, plain_results, reasoning_output, logprob_result):
+        for system_message, prompt, answer, reasoning, logprob_answer in zip(
+            system_messages, prompts, plain_results, reasoning_output, logprob_result
+        ):
             round_print = f"{conversation_print}\n-- System Message --\n{system_message}\n-- User Message ---\n{prompt}\n-- Generated Message --\n{answer}"
             if reasoning is not None:
                 round_print += "\n-- Reasoning --\n" + str(reasoning)
             if isinstance(response_generation_method, LogprobResponseGenerationMethod):
-                round_print += '\n-- Logprobs --\n' + str(logprob_answer)
+                round_print += "\n-- Logprobs --\n" + str(logprob_answer)
             tqdm.write(round_print)
-            
 
     return (plain_results, logprob_result, reasoning_output)
 
@@ -327,7 +348,7 @@ def _structured_sampling_params(
     use_vllm: bool = True,
     **generation_kwargs: Any,
 ) -> Union[List[SamplingParams], Dict[str, Any]]:
-    
+
     guided_decodings = []
 
     if isinstance(response_generation_method, ResponseGenerationMethod):
@@ -342,9 +363,16 @@ def _structured_sampling_params(
                 guided_decodings = [global_guided_decoding] * batch_size
             else:
                 guided_decodings = [json_schema] * batch_size
-        elif (isinstance(response_generation_method, (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod))
-                  and response_generation_method.allowed_choices is not None):
-            _allowed_choices = [str(c) for c in response_generation_method.allowed_choices]
+        elif (
+            isinstance(
+                response_generation_method,
+                (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
+            )
+            and response_generation_method.allowed_choices is not None
+        ):
+            _allowed_choices = [
+                str(c) for c in response_generation_method.allowed_choices
+            ]
             if use_vllm:
                 global_guided_decoding = GuidedDecodingParams(choice=_allowed_choices)
                 guided_decodings = [global_guided_decoding] * batch_size
@@ -372,12 +400,18 @@ def _structured_sampling_params(
                         cache[key] = json_schema
 
                 guided_decodings.append(cache[key])
-            elif (isinstance(response_generation_method[i], (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod))
-                  and response_generation_method[i].allowed_choices is not None):
-                _allowed_choices = [str(c) for c in response_generation_method[i].allowed_choices]
+            elif (
+                isinstance(
+                    response_generation_method[i],
+                    (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
+                )
+                and response_generation_method[i].allowed_choices is not None
+            ):
+                _allowed_choices = [
+                    str(c) for c in response_generation_method[i].allowed_choices
+                ]
 
                 key = _make_cache_key(_allowed_choices, None)
-
                 if key not in cache:
                     if use_vllm:
                         cache[key] = GuidedDecodingParams(choice=_allowed_choices)
@@ -489,7 +523,7 @@ def batch_turn_by_turn_generation(
             batch_messages,
             sampling_params=sampling_params_list,
             use_tqdm=print_progress,
-            chat_template_kwargs=chat_template_kwargs
+            chat_template_kwargs=chat_template_kwargs,
         )
         # TODO: add support for logprobs
         result = [output.outputs[0].text for output in outputs]
@@ -498,38 +532,56 @@ def batch_turn_by_turn_generation(
         # we parse this here because the OpenAI API separates it automatically
         plain_results = []
         reasoning_output = []
-        raw_reasonings = [] # keep the whitespace for length calculations
+        raw_reasonings = []  # keep the whitespace for length calculations
         logprob_result = []
         for output_text in result:
-            reasoning_match = re.search(reasoning_start_token + r"(.*?)" + reasoning_end_token, output_text, re.DOTALL)
+            reasoning_match = re.search(
+                reasoning_start_token + r"(.*?)" + reasoning_end_token,
+                output_text,
+                re.DOTALL,
+            )
             raw_reasonings.append(reasoning_match.group(1) if reasoning_match else None)
-            reasoning_output.append(reasoning_match.group(1).strip() if reasoning_match else None)
+            reasoning_output.append(
+                reasoning_match.group(1).strip() if reasoning_match else None
+            )
             plain_results.append(output_text.split(reasoning_end_token)[-1].strip())
-        
+
         if isinstance(response_generation_method, LogprobResponseGenerationMethod):
             # ignore the first k tokens that belong to the reasoning
             if response_generation_method.ignore_reasoning:
                 tokenizer = model.get_tokenizer()
                 logprob_positions = [
-                    len(tokenizer.tokenize(f'{reasoning_start_token}{_reasoning}{reasoning_end_token}')) + 1 + response_generation_method.token_position
-                    if _reasoning is not None
-                    else response_generation_method.token_position
+                    (
+                        len(
+                            tokenizer.tokenize(
+                                f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+                            )
+                        )
+                        + 1
+                        + response_generation_method.token_position
+                        if _reasoning is not None
+                        else response_generation_method.token_position
+                    )
                     for _reasoning in raw_reasonings
                 ]
             else:
-                logprob_positions = [response_generation_method.token_position] * len(outputs)
-            
+                logprob_positions = [response_generation_method.token_position] * len(
+                    outputs
+                )
 
             for req_output, logprob_position in zip(outputs, logprob_positions):
                 try:
                     answer_dict = {
-                        x.decoded_token.lstrip(space_char).lstrip(): x.logprob # strip the space character and whitespace from tokenization
-                        for x in req_output.outputs[0].logprobs[logprob_position].values()
+                        x.decoded_token.lstrip(
+                            space_char
+                        ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+                        for x in req_output.outputs[0]
+                        .logprobs[logprob_position]
+                        .values()
                     }
-                except IndexError: # less than [logprob_position] tokens in the output!
+                except IndexError:  # less than [logprob_position] tokens in the output!
                     answer_dict = {}
                 logprob_result.append(answer_dict)
-
 
     else:
         plain_results = _run_async_in_thread(
@@ -538,11 +590,10 @@ def batch_turn_by_turn_generation(
             batch_messages=batch_messages,
             seeds=seeds,
             concurrency_limit=api_concurrency,
-            answer_production_method=response_generation_method,
+            response_generation_method=response_generation_method,
             print_progress=print_progress,
             **generation_kwargs,
         )
-
 
         # TODO: handle reasoning and logprobs
         reasoning_output = [None] * len(plain_results)
@@ -576,17 +627,17 @@ def _run_async_in_thread(
     seeds: List[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    answer_production_method: Optional[
+    response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
     **generation_kwargs,
 ):
     result_container = {}
 
-    structured_output = _create_sampling_params(
+    guided_decoding_params = _create_sampling_params(
         batch_size=len(batch_messages),
         seeds=seeds,
-        response_generation_method=answer_production_method,
+        response_generation_method=response_generation_method,
         use_vllm=False,
         **generation_kwargs,
     )
@@ -601,8 +652,8 @@ def _run_async_in_thread(
                     seeds=seeds,
                     concurrency_limit=concurrency_limit,
                     print_progress=print_progress,
-                    answer_production_method=answer_production_method,
-                    structured_output=structured_output,
+                    response_generation_method=response_generation_method,
+                    guided_decoding_params=guided_decoding_params,
                     **generation_kwargs,
                 )
             )
@@ -627,8 +678,8 @@ async def _run_api_batch_async(
     seeds: List[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    structured_output: List[Dict[str, Any]] = [],
-    answer_production_method: Optional[
+    guided_decoding_params: List[Dict[str, Any]] = [],
+    response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
     **generation_kwargs,
@@ -638,7 +689,10 @@ async def _run_api_batch_async(
     async def get_completion(
         messages: list,
         seed: int,
-        structured_output: Optional[Union[Dict[str, Any], List[str]]] = None,
+        guided_decoding_params: Optional[Union[Dict[str, Any], List[str]]] = None,
+        response_generation_method: Optional[
+            Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
+        ] = None,
         **generation_kwargs,
     ) -> ChatCompletion:
         async with semaphore:
@@ -649,28 +703,35 @@ async def _run_api_batch_async(
                 **generation_kwargs,
             }
 
-            if answer_production_method:
-                if isinstance(answer_production_method, JSONResponseGenerationMethod):
+            if response_generation_method:
+                if isinstance(response_generation_method, JSONResponseGenerationMethod):
                     request_kwargs["response_format"] = {
                         "type": "json_schema",
                         "json_schema": {
                             "name": "json_schema",
-                            "schema": structured_output,
+                            "schema": guided_decoding_params,
                         },
                     }
-                elif isinstance(answer_production_method, ChoiceResponseGenerationMethod):
-                    #TODO: add warning if this is not running against vllm, i.e., guided_choice is not supported
-                    request_kwargs["extra_body"] = {"guided_choice": structured_output}
+                elif isinstance(
+                    response_generation_method, ChoiceResponseGenerationMethod
+                ):
+                    # TODO: add warning if this is not running against vllm, i.e., guided_choice is not supported
+                    request_kwargs["extra_body"] = {
+                        "guided_choice": guided_decoding_params
+                    }
 
             return await client.chat.completions.create(**request_kwargs)
 
-    #pbar = tqdm.tqdm if print_progress else lambda x: x
+    # pbar = tqdm.tqdm if print_progress else lambda x: x
 
-    if len(structured_output) > 0:
+    if len(guided_decoding_params) > 0:
         tasks = [
-            get_completion(messages, seed, struct_output, **generation_kwargs)
-            for messages, seed, struct_output in zip(
-                batch_messages, seeds, structured_output
+            get_completion(messages, seed, struct_output, rgm, **generation_kwargs)
+            for messages, seed, struct_output, rgm in zip(
+                batch_messages,
+                seeds,
+                guided_decoding_params,
+                response_generation_method,
             )
         ]
     else:
@@ -681,7 +742,9 @@ async def _run_api_batch_async(
     if print_progress:
         responses = await tqdm_asyncio.gather(*tasks, desc="Processing Prompts")
     else:
-        responses = await asyncio.gather(*tasks, return_exceptions=True, desc="Processing Prompts")
+        responses = await asyncio.gather(
+            *tasks, return_exceptions=True, desc="Processing Prompts"
+        )
 
     final_results = []
     for res in responses:
@@ -692,6 +755,7 @@ async def _run_api_batch_async(
             final_results.append(res.choices[0].message.content)
 
     return final_results
+
 
 def batch_decoding(
     model: Union[LLM, AsyncOpenAI],
