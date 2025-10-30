@@ -1,0 +1,12 @@
+from typing import Final
+
+# Prompt Placeholder
+PROMPT_QUESTIONS: Final[str] = "{{QUESTION_PLACEHOLDER}}"
+PROMPT_OPTIONS: Final[str] = "{{OPTIONS_PLACEHOLDER}}"
+PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: Final[str] = "{{AUTOMATIC_OUTPUT_PLACEHOLDER}}"
+
+# Question Placeholder
+QUESTION_CONTENT: Final[str] = "{{QUESTION_CONTENT_PLACEHOLDER}}"
+
+# JSON Template
+JSON_TEMPLATE: Final[str] = "{{JSON_TEMPLATE}}"

@@ -1,14 +1,18 @@
-from typing import Optional, Dict, Any, Union, Final
+from typing import Optional, Dict, Any, Union, Final, List
 from enum import Enum
 import random
 
+from . import prompt_templates
+
 JSON_START_STRING: Final[
     str
-] = """
-Respond only in the following JSON Format:
-```json
+] = """```json
 {
 """
+
+JSON_END_STRING: Final[str] = """
+}
+```"""
 
 FORCED_OPTION_STRING: Final[str] = "Respond only with one of these options:"
 
@@ -78,7 +82,7 @@ class OutputForm:
 
     def single_answer(
         self,
-        forced_options: list[str],
+        forced_options: List[str],
         start_string: str = FORCED_OPTION_STRING,
         randomize: bool = False,
     ) -> None:
@@ -91,9 +95,11 @@ class OutputForm:
 
     def json(
         self,
-        json_attributes: list[str],
-        json_explanation: Optional[list[str]],
+        json_attributes: List[str],
+        json_explanation: Optional[List[str]],
+        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
+        end_string: str = JSON_END_STRING,
         randomize: bool = False,
     ) -> None:
         if json_explanation:
@@ -101,8 +107,6 @@ class OutputForm:
                 json_explanation
             ), "Length of attributes and explanation is not the same!"
         assert start_string, "The start string cannot be None"
-
-        self.output_prompt = start_string
 
         if randomize:
             if json_explanation is not None:
@@ -119,12 +123,19 @@ class OutputForm:
         i = 0
         lines = []
         for i, attribute in enumerate(json_attributes):
-            line = f""""{attribute}": "{attribute}","""
             if json_explanation:
-                line += f" // {json_explanation[i]}"
+                line = f'  "{attribute}": <{json_explanation[i]}>'
+            else:
+                line = f'  "{attribute}": <{attribute}>'
             lines.append(line)
-        lines.append("}")  # Add the closing brace at the end
-        self.output_prompt += "\n".join(lines)
+        
+        if json_instructions is not None:
+            self.output_prompt = json_instructions + "\n"
+        else:
+            self.output_prompt = ''
+        self.output_prompt += start_string
+        self.output_prompt += ",\n".join(lines)
+        self.output_prompt += end_string
 
     def chain_of_thought(self, start_string: str = COT_STRING) -> None:
         self.output_prompt = start_string
@@ -159,7 +170,7 @@ class PromptCreation:
 
     def set_output_format_closed_answer(
         self,
-        forced_options: Optional[list[str]],
+        forced_options: Optional[List[str]],
         start_string: str = FORCED_OPTION_STRING,
         randomize: bool = False,
     ) -> None:
@@ -167,17 +178,24 @@ class PromptCreation:
         self._output_form = OutputForm()
         self._output_form.single_answer(forced_options, start_string, randomize)
 
-    def set_ouput_format_json(
+    def set_output_format_json(
         self,
-        json_attributes: list[str],
-        json_explanation: Optional[list[str]],
+        json_attributes: List[str],
+        json_explanation: Optional[List[str]] = None,
+        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
+        end_string: str = JSON_END_STRING,
         randomize: bool = False,
     ) -> None:
         """Sets the desired output format for the LLM."""
         self._output_form = OutputForm()
         self._output_form.json(
-            json_attributes, json_explanation, start_string, randomize
+            json_attributes=json_attributes,
+            json_explanation=json_explanation,
+            json_instructions=json_instructions,
+            start_string=start_string,
+            end_string=end_string,
+            randomize=randomize
         )
 
     def set_output_format_cot(self, start_string: str = COT_STRING) -> None:

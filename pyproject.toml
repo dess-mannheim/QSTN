@@ -17,7 +17,7 @@ dependencies = [
     "pydantic>=2.11.4",
     "torch>=2.6.0",
     "transformers>=4.51.3",
-    "vllm>=0.8.5",
+    "vllm>=0.9.0",
     "json_repair"
 ]
 

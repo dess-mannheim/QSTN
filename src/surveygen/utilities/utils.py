@@ -1,6 +1,6 @@
 import pandas as pd
 from typing import Dict, Any
-
+import re
 
 def extract_number_manual(key: str) -> int | None:
     i = len(key) - 1
@@ -29,3 +29,15 @@ def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFram
         return pd.DataFrame()
 
     return pd.concat(dataframes_to_concat, ignore_index=True)
+
+def safe_format_with_regex(template_string: str, data: dict) -> str:
+    """
+    Safely substitutes {{variable}} style placeholders using a regex.
+    """
+    def replacer(match):
+        result = data.get(match.group(0), match.group(0))
+        return result
+
+    pattern = re.compile(r"\{\{(.*?)\}\}")
+    
+    return pattern.sub(replacer, template_string)
