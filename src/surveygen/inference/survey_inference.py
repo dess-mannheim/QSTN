@@ -116,6 +116,7 @@ def batch_generation(
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
+    number_of_printed_conversation: int = 2,
     print_progress: bool = True,
     # <think>...</think> tokens are used by Qwen3 to separate reasoning
     reasoning_start_token: str = "<think>",
@@ -207,43 +208,45 @@ def batch_generation(
             )
             plain_results.append(output_text.split(reasoning_end_token)[-1].strip())
 
-        if isinstance(response_generation_method, LogprobResponseGenerationMethod):
-            # ignore the first k tokens that belong to the reasoning
-            if response_generation_method.ignore_reasoning:
-                tokenizer = model.get_tokenizer()
-                logprob_positions = [
-                    (
-                        len(
-                            tokenizer.tokenize(
-                                f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+        
+        logprob_result = []
+        for rgm in response_generation_method:
+            if isinstance(rgm, LogprobResponseGenerationMethod):
+                # ignore the first k tokens that belong to the reasoning
+                if rgm.ignore_reasoning:
+                    tokenizer = model.get_tokenizer()
+                    logprob_positions = [
+                        (
+                            len(
+                                tokenizer.tokenize(
+                                    f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+                                )
                             )
+                            + 1
+                            + rgm.token_position
+                            if _reasoning is not None
+                            else rgm.token_position
                         )
-                        + 1
-                        + response_generation_method.token_position
-                        if _reasoning is not None
-                        else response_generation_method.token_position
+                        for _reasoning in raw_reasonings
+                    ]
+                else:
+                    logprob_positions = [rgm.token_position] * len(
+                        outputs
                     )
-                    for _reasoning in raw_reasonings
-                ]
-            else:
-                logprob_positions = [response_generation_method.token_position] * len(
-                    outputs
-                )
 
-            logprob_result = []
-            for req_output, logprob_position in zip(outputs, logprob_positions):
-                try:
-                    answer_dict = {
-                        x.decoded_token.lstrip(
-                            space_char
-                        ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
-                        for x in req_output.outputs[0]
-                        .logprobs[logprob_position]
-                        .values()
-                    }
-                except IndexError:  # less than [logprob_position] tokens in the output!
-                    answer_dict = {}
-                logprob_result.append(answer_dict)
+                for req_output, logprob_position in zip(outputs, logprob_positions):
+                    try:
+                        answer_dict = {
+                            x.decoded_token.lstrip(
+                                space_char
+                            ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+                            for x in req_output.outputs[0]
+                            .logprobs[logprob_position]
+                            .values()
+                        }
+                    except IndexError:  # less than [logprob_position] tokens in the output!
+                        answer_dict = {}
+                    logprob_result.append(answer_dict)
 
         # print the first result returned from vllm
         # if print_conversation:

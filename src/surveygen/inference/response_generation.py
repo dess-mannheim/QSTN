@@ -1,9 +1,12 @@
 import warnings
 from abc import ABC
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Self
 
-from ..utilities import prompt_templates, constants
+import surveygen.utilities.placeholder
 
+from ..utilities import prompt_templates, constants, prompt_creation, utils
+
+# from ..utilities.survey_objects import InterviewItem
 
 # --- Answer Production Base Classes ---
 # TODO: make the answer production methods compatible with being passed as a list
@@ -11,6 +14,9 @@ from ..utilities import prompt_templates, constants
 
 class ResponseGenerationMethod(ABC):
     """Abstract base class for constraining the model output, e.g., for closed-ended survey questions."""
+
+    def get_automatic_prompt(self: Self, questions: List["InterviewItem"] = []):
+        pass
 
     # NOTE that validation is not required anymore, since we rely on inheritance instead
 
@@ -20,8 +26,8 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         self,
         json_fields: List[str] | Dict[str, str],  # required
         constraints: Optional[Dict[str, List[str]]] = None,  # remains optional
-        automatic_system_prompt: bool = False,
-        system_prompt_template: str = prompt_templates.SYSTEM_JSON_DEFAULT,
+        automatic_output_instructions: bool = False,
+        output_template: str = prompt_templates.SYSTEM_JSON_DEFAULT,
         output_index_only: bool = False,
     ):
         """
@@ -47,17 +53,98 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
                 )
         self.json_fields = json_fields
         self.constraints = constraints
-        self.automatic_system_prompt = automatic_system_prompt
-        self.system_prompt_template = system_prompt_template
+        self.automatic_output_instructions = automatic_output_instructions
+        self.output_template = output_template
         self.output_index_only = output_index_only
+
+    def get_json_prompt(self: Self, questions: List["InterviewItem"] = []):
+        num_questions = len(questions)
+        if isinstance(self.json_fields, dict):
+            json_attributes = list(self.json_fields.keys())
+            json_explanation = list(self.json_fields.values())
+        else:
+            json_attributes = list(self.json_fields)
+            json_explanation = None
+
+        if num_questions > 1:
+            json_attributes = [
+                f"{attr}_{questions[i].question_content}"
+                for i in range(num_questions)
+                for attr in json_attributes
+            ]
+
+            if json_explanation is not None:
+                json_explanation = [
+                    f"{expl}" for _ in range(num_questions) for expl in json_explanation
+                ]
+        creator = prompt_creation.PromptCreation()
+        creator.set_output_format_json(
+            json_attributes=json_attributes,
+            json_explanation=json_explanation,
+            json_instructions=None,
+        )
+
+        return creator.get_output_prompt()
+
+    def get_automatic_prompt(self: Self, questions: List["InterviewItem"] = []):
+        formatter = {
+            surveygen.utilities.placeholder.JSON_TEMPLATE: self.get_json_prompt(
+                questions=questions
+            )
+        }
+        return utils.safe_format_with_regex(self.output_template, formatter)
+
+    def create_new_rgm_with_multiple_questions(
+        self: Self, questions: List["InterviewItem"] = []
+    ) -> Self:
+        num_questions = len(questions)
+        if num_questions <= 1:
+            return self
+
+        if isinstance(self.json_fields, dict):
+            original_attributes = list(self.json_fields.keys())
+            original_explanations = list(self.json_fields.values())
+        else:
+            original_attributes = list(self.json_fields)
+            original_explanations = None
+
+        new_attributes = [
+            f"{attr}_{questions[i].question_content}"
+            for i in range(num_questions)
+            for attr in original_attributes
+        ]
+
+        if original_explanations is not None:
+            new_explanations = [
+                expl for i in range(num_questions) for expl in original_explanations
+            ]
+            json_fields = dict(zip(new_attributes, new_explanations))
+        else:
+            json_fields = new_attributes
+
+        new_constraints = None
+        if self.constraints:
+            new_constraints = {
+                f"{key}_{questions[i].question_content}": value
+                for key, value in self.constraints.items()
+                for i in range(num_questions)
+            }
+
+        return JSONResponseGenerationMethod(
+            json_fields=json_fields,
+            constraints=new_constraints,
+            automatic_output_instructions=self.automatic_output_instructions,
+            output_template=self.output_template,
+            output_index_only=self.output_index_only,
+        )
 
 
 class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
     def __init__(
         self,
         allowed_choices: List[str],  # required
-        automatic_system_prompt: bool = False,
-        system_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
+        automatic_output_instructions: bool = False,
+        output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
         """
@@ -71,9 +158,12 @@ class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
         """
         super().__init__()
         self.allowed_choices = allowed_choices
-        self.automatic_system_prompt = automatic_system_prompt
-        self.system_prompt_template = system_prompt_template
+        self.automatic_output_instructions = automatic_output_instructions
+        self.output_template = output_template
         self.output_index_only = output_index_only  # TODO: implement
+
+    def get_automatic_prompt(self: Self, num_questions: int = 1):
+        return self.output_template
 
 
 class LogprobResponseGenerationMethod(ResponseGenerationMethod):
@@ -84,8 +174,8 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         top_logprobs: int = 20,  # the OpenAI API default, local vllm deployments might give you more
         allowed_choices: Optional[List[str]] = None,
         ignore_reasoning: bool = True,
-        automatic_system_prompt: bool = False,
-        system_prompt_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
+        automatic_output_instructions: bool = False,
+        output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
         """
@@ -107,9 +197,12 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         self.top_logprobs = top_logprobs
         self.allowed_choices = allowed_choices  # same name enables re-using code from Choice_AnswerProductionMethod
         self.ignore_reasoning = ignore_reasoning
-        self.automatic_system_prompt = automatic_system_prompt
-        self.system_prompt_template = system_prompt_template
+        self.automatic_output_instructions = automatic_output_instructions
+        self.output_template = output_template
         self.output_index_only = output_index_only  # TODO: implement
+
+    def get_automatic_prompt(self: Self, num_questions: int = 1):
+        return self.output_template
 
 
 # --- Specific Answer Production Methods ---
@@ -118,7 +211,8 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
 class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
     def __init__(
         self,
-        automatic_system_prompt: bool = False,
+        output_template=prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
+        automatic_output_instructions: bool = False,
         output_index_only: bool = False,
     ):
         """Answer Production Method: Structured Outputs"""
@@ -126,8 +220,8 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
         super().__init__(
             json_fields={"answer": constants.OPTIONS_ADJUST},
             constraints={"answer": constants.OPTIONS_ADJUST},
-            automatic_system_prompt=automatic_system_prompt,
-            system_prompt_template=prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
+            automatic_output_instructions=automatic_output_instructions,
+            output_template=output_template,
             output_index_only=output_index_only,
         )
 
@@ -135,7 +229,8 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
 class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
     def __init__(
         self,
-        automatic_system_prompt: bool = False,
+        output_template: str = prompt_templates.SYSTEM_JSON_REASONING,
+        automatic_output_instructions: bool = False,
         output_index_only: bool = False,
     ):
         """Answer Production Method: Structured Outputs with Reasoning"""
@@ -148,8 +243,8 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
         super().__init__(
             json_fields=json_fields,
             constraints={"answer": constants.OPTIONS_ADJUST},
-            automatic_system_prompt=automatic_system_prompt,
-            system_prompt_template=prompt_templates.SYSTEM_JSON_REASONING,
+            automatic_output_instructions=automatic_output_instructions,
+            output_template=output_template,
             output_index_only=output_index_only,
         )
 
@@ -157,17 +252,18 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
 class JSONAllOptionsResponseGenerationMethod(JSONResponseGenerationMethod):
     def __init__(
         self,
+        output_template=prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
         automatic_system_prompt: bool = False,
         output_index_only: bool = False,
     ):
         """Answer Production Method: Structured Outputs All Options"""
 
         super().__init__(
-            #will be set when given to answer options
+            # will be set when given to answer options
             json_fields=None,
             constraints=None,
-            #Variables
-            automatic_system_prompt=automatic_system_prompt,
-            system_prompt_template=prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
+            # Variables
+            automatic_output_instructions=automatic_system_prompt,
+            output_template=output_template,
             output_index_only=output_index_only,
         )

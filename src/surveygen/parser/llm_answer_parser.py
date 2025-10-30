@@ -50,15 +50,29 @@ def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, 
         for key, value in survey_result.results.items():
             # value:QuestionAnswerTuple
             parsed_llm_response = json_parser_str(value.llm_response)
+            reasoning = value.reasoning
+            logprobs = value.logprobs
             if isinstance(parsed_llm_response, dict):
                 # remove reserved values from dictionary
                 for reserved_key in [constants.INTERVIEW_ITEM_ID, constants.QUESTION]:
                     if reserved_key in parsed_llm_response: parsed_llm_response.pop(reserved_key)
                 answer_format = parsed_llm_response.keys()
+                
+                row_data = [key, value.question, *parsed_llm_response.values()]
+                row_columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format]
+                
+                if reasoning is not None:
+                    row_data.append(reasoning)
+                    row_columns.append('built_in_reasoning')
+
+                if logprobs is not None:
+                    row_data.append(logprobs)
+                    row_columns.append('logprobs')
+
                 answers.append(pd.DataFrame(
-                  data = [(key, value.question, *parsed_llm_response.values())],
-                  columns = [constants.INTERVIEW_ITEM_ID, constants.QUESTION, *answer_format],
-                  index = [0]
+                    data = [row_data],
+                    columns = row_columns,
+                    index = [0]
                 ))
             else:
                 answers.append(pd.DataFrame(
@@ -74,7 +88,7 @@ def json_parse_all(survey_results: List[InterviewResult]) -> Dict[LLMInterview, 
 def json_parse_whole_survey_all(
     survey_results: List[InterviewResult],
 ) -> Dict[LLMInterview, pd.DataFrame]:
-    parsed_results = json_parse_all(survey_results)
+    parsed_results: Dict[LLMInterview, pd.DataFrame] = json_parse_all(survey_results)
 
     all_results = {}
 
@@ -84,57 +98,37 @@ def json_parse_whole_survey_all(
             all_results[survey] = df
             continue
 
-        pattern = re.compile(r"^([a-zA-Z_]+)(\d+)$")
-        matched = [pattern.match(col) for col in df.columns]
+        source_row = df.iloc[0]
 
-        stubnames = set()
-        reshape_cols = []
-        static_cols = []
-        seen_stubs = set()
-        stubnames = []
+        grouped_items = {}
 
-        for col, m in zip(df.columns, matched):
-            if m:
-                stub = m.group(1)
-                reshape_cols.append(col)
-                if stub not in seen_stubs:
-                    stubnames.append(stub)
-                    seen_stubs.add(stub)
-            else:
-                static_cols.append(col)
+        for col_name, cell_value in source_row.items():
+            for i in range(len(survey._questions)):
+                current_question = survey._questions[i]
+                current_id = current_question.item_id
+                if col_name.endswith(f"_{current_question.question_content}"):
+                    new_col_name = col_name.removesuffix(f"_{current_question.question_content}")
+                    if current_id not in grouped_items:
+                        grouped_items[current_id] = {constants.INTERVIEW_ITEM_ID: current_id}
+                    grouped_items[current_id][constants.QUESTION] = survey.generate_question_prompt(current_question)
+                    grouped_items[current_id][new_col_name] = cell_value
 
-        long_df = pd.wide_to_long(
-            df,
-            stubnames=stubnames,
-            i=[constants.INTERVIEW_ITEM_ID],
-            j="new_survey_item_id",
-            sep="",
-            suffix="\\d+",
-        ).reset_index()
+            final_data_list = list(grouped_items.values())
 
-        minimum_rows = min(len(long_df), len(survey._questions))
-        
-        #print(num_rows_to_update)
-        print(long_df)
+        all_results[survey] = pd.DataFrame(final_data_list)
 
-        print(f"Len, long_df {len(long_df.loc[0:minimum_rows, constants.INTERVIEW_ITEM_ID])}")
-        print(f"Len, survey_questions {len([
-            survey_question.item_id
-            for survey_question in survey._questions[0:minimum_rows]
-        ])}")
-
-        long_df.loc[0:minimum_rows, constants.INTERVIEW_ITEM_ID] = [
-            survey_question.item_id
-            for survey_question in survey._questions[0:minimum_rows]
-        ]
-        long_df.loc[0:minimum_rows, constants.QUESTION] = [
-            survey.generate_question_prompt(survey_question)
-            for survey_question in survey._questions[0:minimum_rows]
-        ]
-        long_df = long_df.drop(columns=constants.INTERVIEW_ITEM_ID).rename(
-            columns={"new_survey_item_id": constants.INTERVIEW_ITEM_ID}
-        )
-        all_results[survey] = long_df
+        # long_df.loc[0:minimum_rows, constants.INTERVIEW_ITEM_ID] = [
+        #     survey_question.item_id
+        #     for survey_question in survey._questions[0:minimum_rows]
+        # ]
+        # long_df.loc[0:minimum_rows, constants.QUESTION] = [
+        #     survey.generate_question_prompt(survey_question)
+        #     for survey_question in survey._questions[0:minimum_rows]
+        # ]
+        # long_df = long_df.drop(columns=constants.INTERVIEW_ITEM_ID).rename(
+        #     columns={"new_survey_item_id": constants.INTERVIEW_ITEM_ID}
+        # )
+        # all_results[survey] = long_df
 
     return all_results
 

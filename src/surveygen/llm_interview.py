@@ -1,20 +1,13 @@
-from typing import (
-    List,
-    Dict,
-    Optional,
-    Union,
-    overload,
-    Self,
-)
+from typing import List, Dict, Optional, Union, overload, Self, Tuple
 
 from dataclasses import replace
 
-from .utilities.survey_objects import AnswerOptions
-
 from .utilities.survey_objects import AnswerOptions, InterviewItem, InferenceOptions
 
-from .utilities import constants
+from .utilities import constants, placeholder
 from .utilities.constants import InterviewType
+
+from .utilities.utils import  safe_format_with_regex
 
 import pandas as pd
 
@@ -52,15 +45,14 @@ class LLMInterview:
 
     DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
 
-    DEFAULT_PROMPT_STRUCTURE: str = "{interview_instruction}\n{questions}{options}"
+    DEFAULT_PROMPT_STRUCTURE: str = "{questions}\n{options}"
 
     def __init__(
         self,
-        interview_source = Union[str, pd.DataFrame],
+        interview_source=Union[str, pd.DataFrame],
         interview_name: str = DEFAULT_INTERVIEW_ID,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-        interview_instruction: str = DEFAULT_TASK_INSTRUCTION,
-        base_prompt_structure: str = DEFAULT_PROMPT_STRUCTURE,
+        prompt: str = DEFAULT_PROMPT_STRUCTURE,
         verbose=False,
         seed: int = 42,
     ):
@@ -88,9 +80,7 @@ class LLMInterview:
         self.interview_name: str = interview_name
 
         self.system_prompt: str = system_prompt
-        self.interview_instruction: str = interview_instruction
-
-        self.base_prompt_structure: str = base_prompt_structure
+        self.prompt: str = prompt
 
         self._global_options: AnswerOptions = None
         self._same_options = False
@@ -104,33 +94,37 @@ class LLMInterview:
         """
         return copy.deepcopy(self)
 
-    def get_prompt_structure(self) -> str:
-        """
-        Generate a prompt structure for the first question, including system prompt and instructions.
+    # Visualization which is not necessary. Use get_prompt_for_interview_type instead.
+    # def get_prompt_structure(self) -> str:
+    #     """
+    #     Generate a prompt structure for the first question, including system prompt and instructions.
 
-        Returns:
-            str: The full prompt as a string.
-        """
-        parts = [
-            "SYSTEM PROMPT:",
-            self.system_prompt,
-            "INTERVIEW INSTRUCTIONS:",
-            self.interview_instruction,
-        ]
+    #     Returns:
+    #         str: The full prompt as a string.
+    #     """
+    #     parts = [
+    #         "SYSTEM PROMPT:",
+    #         self.system_prompt,
+    #         "INTERVIEW INSTRUCTIONS:",
+    #         self.prompt,
+    #     ]
 
-        if self._global_options:
-            _options_str = self._global_options.create_options_str()
-            if _options_str is not None:
-                parts.append(_options_str)
+    #     if self._global_options:
+    #         _options_str = self._global_options.create_options_str()
+    #         if _options_str is not None:
+    #             parts.append(_options_str)
 
-        parts.append("FIRST QUESTION:")
-        parts.append(self.generate_question_prompt(self._questions[0]))
+    #     parts.append("FIRST QUESTION:")
+    #     parts.append(self.generate_question_prompt(self._questions[0]))
 
-        return "\n".join(parts)
+    #     return "\n".join(parts)
 
     def get_prompt_for_interview_type(
-        self, interview_type: InterviewType = InterviewType.QUESTION
-    ):
+        self,
+        interview_type: InterviewType = InterviewType.QUESTION,
+        item_id: int = 0,
+        item_separator: str = "\n",
+    ) -> Tuple[str, str]:
         """
         Generate the full prompt for a given interview type.
 
@@ -140,33 +134,62 @@ class LLMInterview:
         Returns:
             str: The constructed prompt for the interview type.
         """
-        parts = [self.system_prompt, self.interview_instruction]
 
-        if self._global_options:
-            _options_str = self._global_options.create_options_str()
-            if _options_str is not None:
-                parts.append(_options_str)
+        if (
+            interview_type == InterviewType.QUESTION
+            or interview_type == InterviewType.CONTEXT
+        ):
+            question = self.generate_question_prompt(self._questions[item_id])
+            options = self._questions[item_id].answer_options.create_options_str()
+            
+            rgm = self._questions[
+                item_id
+            ].answer_options.response_generation_method
 
-        if interview_type == InterviewType.QUESTION:
-            parts.append(self.generate_question_prompt(self._questions[0]))
+            automatic_output_instructions: str = rgm.get_automatic_prompt()
 
-        elif interview_type in (InterviewType.ONE_PROMPT, InterviewType.CONTEXT):
-            # Use extend to add all question strings from the generator
-            parts.extend(
-                self.generate_question_prompt(question) for question in self._questions
-            )
+            format_dict = {
+                placeholder.PROMPT_QUESTIONS: question,
+                placeholder.PROMPT_OPTIONS: options,
+                placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
+            }
 
-        # Join all the collected parts with a newline
-        whole_prompt = "\n".join(parts)
+        elif interview_type == InterviewType.ONE_PROMPT:
+            all_questions: List[str] = []
+            for question in self._questions:
+                current_question_prompt = self.generate_question_prompt(question)
+                options = question.answer_options.create_options_str()
+                format_dict = {
+                    placeholder.PROMPT_OPTIONS: options,
+                }
+                current_question_prompt = safe_format_with_regex(current_question_prompt, format_dict)
+                all_questions.append(current_question_prompt)
 
-        return whole_prompt
+            all_questions_str = item_separator.join(all_questions)
+            options = self._questions[item_id].answer_options.create_options_str()
+            rgm = self._questions[
+                item_id
+            ].answer_options.response_generation_method
+
+            automatic_output_instructions: str = rgm.get_automatic_prompt(questions=self._questions)
+
+            format_dict = {
+                    placeholder.PROMPT_QUESTIONS: all_questions_str,
+                    placeholder.PROMPT_OPTIONS: options,
+                    placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
+                }
+
+        system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
+        prompt = safe_format_with_regex(self.prompt, format_dict)
+
+        return system_prompt, prompt
 
     def calculate_input_token_estimate(
         self, model_id: str, interview_type: InterviewType = InterviewType.QUESTION
     ) -> int:
         """
         Estimate the number of input tokens for the prompt, given a model and interview type.
-        Remember that the model also has to have enough context length to fit its own response 
+        Remember that the model also has to have enough context length to fit its own response
         in case of CONTEXT and ONE_PROMPT type.
 
         Args:
@@ -177,11 +200,17 @@ class LLMInterview:
             int: Estimated number of input tokens.
         """
         tokenizer = AutoTokenizer.from_pretrained(model_id)
-        whole_prompt = self.get_prompt_for_interview_type(interview_type=interview_type)
-        tokens = tokenizer.encode(whole_prompt)
+        system_prompt, prompt = self.get_prompt_for_interview_type(
+            interview_type=interview_type
+        )
+        system_tokens = tokenizer.encode(system_prompt)
+        tokens = tokenizer.encode(prompt)
+        total_tokens = len(system_tokens) + len(tokens)
 
         return (
-            len(tokens) if interview_type != InterviewType.CONTEXT else len(tokens) * 3
+            total_tokens
+            if interview_type != InterviewType.CONTEXT
+            else len(total_tokens) * 3
         )
 
     def get_survey_questions(self) -> str:
@@ -276,7 +305,7 @@ class LLMInterview:
             question_stem (str or List[str], optional): Single or list of question stems.
             answer_options (AnswerOptions or Dict[int, AnswerOptions], optional): Answer options for all or per question.
             global_options (bool): If True, the answer options will be specified once at the end of the task instructions. Otherwise, they will be specified once per question.
-            prefilled_responses (Dict[int, str], optional): If you provide prefilled responses, they will be used 
+            prefilled_responses (Dict[int, str], optional): If you provide prefilled responses, they will be used
             to fill the answers instead of prompting the LLM for that question.
             randomized_item_order (bool): If True, randomize the order of questions.
 
@@ -394,58 +423,66 @@ class LLMInterview:
         Returns:
             str: The formatted prompt for the question.
         """
+
         if interview_question.question_stem:
-            if constants.QUESTION_CONTENT_PLACEHOLDER in interview_question.question_stem:
-                question_prompt = interview_question.question_stem.format(
-                    **{
-                        constants.QUESTION_CONTENT_PLACEHOLDER: interview_question.question_content
-                    }
-                )
+            if (
+                placeholder.QUESTION_CONTENT
+                in interview_question.question_stem
+            ):              
+                format_dict = {
+                    placeholder.QUESTION_CONTENT: interview_question.question_content
+                }
+                question_prompt = safe_format_with_regex(interview_question.question_stem, format_dict)
             else:
                 question_prompt = f"""{interview_question.question_stem} {interview_question.question_content}"""
         else:
-             question_prompt = f"""{interview_question.question_content}"""
+            question_prompt = f"""{interview_question.question_content}"""
         if interview_question.answer_options:
             _options_str = interview_question.answer_options.create_options_str()
             if _options_str is not None:
-                question_prompt = '\n'.join([question_prompt, _options_str])
+                safe_formatter = {
+                    placeholder.PROMPT_OPTIONS: _options_str
+                }
+                question_prompt = safe_format_with_regex(question_prompt, safe_formatter)
         return question_prompt
 
-    def _generate_inference_options(
-        self,
-    ):
-        """
-        Internal method to generate inference options for the interview.
+    # def _generate_inference_options(
+    #     self,
+    # ):
+    #     """
+    #     Internal method to generate inference options for the interview.
 
-        Returns:
-            InferenceOptions: Object containing prompts, answer options, and order.
-        """
-        interview_questions = self._questions
+    #     Returns:
+    #         InferenceOptions: Object containing prompts, answer options, and order.
+    #     """
+    #     interview_questions = self._questions
 
-        default_prompt = f"""{self.interview_instruction}"""
+    #     default_prompt = f"""{self.prompt}"""
 
-        if self._global_options:
-            _options_str = self._global_options.create_options_str()
-            if _options_str is not None:
-                default_prompt = '\n'.join([default_prompt, _options_str])
+    #     if self._global_options:
+    #         _options_str = self._global_options.create_options_str()
+    #         if _options_str is not None:
+    #             default_prompt = "\n".join([default_prompt, _options_str])
 
-        question_prompts = {}
+    #     question_prompts = {}
 
-        order = []
+    #     order = []
 
-        answer_options = {}
-        for i, interview_question in enumerate(interview_questions):
-            question_prompt = self.generate_question_prompt(
-                interview_question=interview_question
-            )
-            question_prompts[interview_question.item_id] = question_prompt
-            answer_options[interview_question.item_id] = interview_question.answer_options
-            order.append(interview_question.item_id)
+    #     answer_options = {}
+    #     for i, interview_question in enumerate(interview_questions):
+    #         question_prompt = self.generate_question_prompt(
+    #             interview_question=interview_question
+    #         )
+    #         question_prompts[interview_question.item_id] = question_prompt
+    #         answer_options[interview_question.item_id] = (
+    #             interview_question.answer_options
+    #         )
+    #         order.append(interview_question.item_id)
 
-        return InferenceOptions(
-            system_prompt=self.system_prompt,
-            task_instruction=default_prompt,
-            question_prompts=question_prompts,
-            answer_options=answer_options,
-            order=order,
-        )
+    #     return InferenceOptions(
+    #         system_prompt=self.system_prompt,
+    #         task_instruction=default_prompt,
+    #         question_prompts=question_prompts,
+    #         answer_options=answer_options,
+    #         order=order,
+    #     )

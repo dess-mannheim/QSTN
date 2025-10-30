@@ -60,7 +60,7 @@ from .inference.response_generation import (
     ChoiceResponseGenerationMethod,
 )
 
-from .llm_interview import LLMInterview
+from .llm_interview import LLMInterview, InterviewType
 
 from .utilities.survey_objects import AnswerOptions, InferenceOptions, InterviewResult
 
@@ -360,7 +360,6 @@ class SurveyOptionGenerator:
 def conduct_survey_question_by_question(
     model: Union[LLM, AsyncOpenAI],
     interviews: Union[LLMInterview, List[LLMInterview]],
-    # response_generation_method: Optional[ResponseGenerationMethod] = None,
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -397,81 +396,34 @@ def conduct_survey_question_by_question(
     if isinstance(interviews, LLMInterview):
         interviews = [interviews]
 
-    inference_options: List[InferenceOptions] = []
-
-    max_survey_length: int = 0
-
+    max_survey_length: int = max(len(interview._questions) for interview in interviews)
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    # if print_progress:
-    #     print("Constructing prompts")
     for i in range(len(interviews)):
-        inference_option = interviews[i]._generate_inference_options()
-        inference_options.append(inference_option)
-        survey_length = len(inference_option.order)
-        if survey_length > max_survey_length:
-            max_survey_length = survey_length
-
+        #inference_option = interviews[i]._generate_inference_options()
+        #inference_options.append(inference_opti
         question_llm_response_pairs.append({})
 
     survey_results: List[InterviewResult] = []
-
-    # #TODO allow for different answer option constraints between surveys/questions
-    # if response_generation_method:
-    #     if (isinstance(response_generation_method, JSONResponseGenerationMethod) and
-    #         response_generation_method.constraints):
-    #         for json_element in response_generation_method.constraints.keys():
-    #             if response_generation_method.constraints[json_element] == constants.OPTIONS_ADJUST:
-    #                 response_generation_method.constraints[json_element] = inference_options[0].answer_options[0].answer_texts.full_answers
-    #     elif (isinstance(response_generation_method, ChoiceResponseGenerationMethod) and
-    #           response_generation_method.allowed_choices == constants.OPTIONS_ADJUST):
-    #         response_generation_method.allowed_choices = inference_options[0].answer_options[0].answer_texts.full_answers
 
     for i in (
         tqdm(range(max_survey_length), desc="Processing interviews")
         if print_progress
         else range(max_survey_length)
     ):
-        current_batch = [
-            inference_option
-            for inference_option in inference_options
-            if len(inference_option.order) > i
+        current_batch: List[LLMInterview] = [
+            interview
+            for interview in interviews
+            if len(interview._questions) > i
         ]
 
-        # if response_generation_method:
-        #     if (isinstance(response_generation_method, JSONResponseGenerationMethod)
-        #         and response_generation_method.automatic_system_prompt):
-        #         _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
-        #         json_instructions = response_generation_method.system_prompt_template.format(options=_answer_options)
-        #         system_messages = [
-        #             inference.json_system_prompt(
-        #                 json_fields = response_generation_method.json_fields,
-        #                 json_instructions = json_instructions
-        #             )
-        #             for inference in current_batch
-        #         ]
-        #     elif response_generation_method.automatic_system_prompt:
-        #         _answer_options = ', '.join(inference_options[0].answer_options[0].answer_text)
-        #         _instructions = response_generation_method.system_prompt_template.format(options=_answer_options)
-        #         system_messages = [f"{inference.system_prompt}\n{_instructions}" for inference in current_batch]
-        #     else:
-        #         system_messages = [inference.system_prompt for inference in current_batch]
-        # else:
-        #     system_messages = [inference.system_prompt for inference in current_batch]
+        system_messages, prompts = zip(*[
+            interview.get_prompt_for_interview_type(InterviewType.QUESTION, i)
+            for interview in current_batch
+        ])
 
-        system_messages = [inference.system_prompt for inference in current_batch]
-        prompts = [
-            inference.create_single_question(inference.order[i], task_instruction=True)
-            for inference in current_batch
-        ]
-        questions = [
-            inference.create_single_question(inference.order[i], task_instruction=False)
-            for inference in current_batch
-        ]
-        response_generation_methods = [
-            inference.get_response_generation_methods(inference.order[i])
-            for inference in current_batch
-        ]
+        questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+        response_generation_methods = [interview._questions[i].answer_options.response_generation_method for interview in current_batch]
 
         output, logprobs, reasoning_output = batch_generation(
             model=model,
@@ -497,11 +449,11 @@ def conduct_survey_question_by_question(
             output,
             logprobs,
             reasoning_output,
-            current_batch,
+            current_batch
         ):
             question_llm_response_pairs[survey_id].update(
                 {
-                    item.order[i]: QuestionLLMResponseTuple(
+                    item._questions[i].item_id: QuestionLLMResponseTuple(
                         question, answer, logprob_answer, reasoning
                     )
                 }
@@ -596,6 +548,7 @@ def conduct_whole_survey_one_prompt(
     print_progress: bool = True,
     seed: int = 42,
     chat_template_kwargs: Dict[str, Any] = {},
+    item_separator:str = "\n",
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
     """
@@ -622,7 +575,7 @@ def conduct_whole_survey_one_prompt(
 
     if isinstance(interviews, LLMInterview):
         interviews = [interviews]
-    inference_options: List[InferenceOptions] = []
+    #inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
     max_survey_length: int = 1
@@ -632,9 +585,6 @@ def conduct_whole_survey_one_prompt(
     # if print_progress:
     #     print("Constructing prompts")
     for i in range(len(interviews)):
-        inference_option = interviews[i]._generate_inference_options()
-        inference_options.append(inference_option)
-
         question_llm_response_pairs.append({})
 
     survey_results: List[InterviewResult] = []
@@ -645,66 +595,22 @@ def conduct_whole_survey_one_prompt(
         else range(max_survey_length)
     ):
         current_batch = [
-            inference_option
-            for inference_option in inference_options
-            if len(inference_option.order) > i
+            interview
+            for interview in interviews
+            if len(interview._questions) > i
         ]
 
-        # if response_generation_method:
-        #     if isinstance(response_generation_method, JSONResponseGenerationMethod):
-        #         all_json_structures = []
-        #         all_constraints = []
-        #         for inference_option in current_batch:
-        #             full_json_structure = []
-        #             full_constraints = {}
-        #             for i in range(len(inference_option.answer_options)):
-        #                 for json_element in response_generation_method.json_fields:
-        #                     new_element = f"{json_element}{i}"
-        #                     if response_generation_method.constraints:
-        #                         constraints_element = (
-        #                             response_generation_method.constraints.get(
-        #                                 json_element
-        #                             )
-        #                         )
-        #                         if constraints_element == constants.OPTIONS_ADJUST:
-        #                             full_constraints[new_element] = (
-        #                                 inference_option.answer_options[i].answer_text
-        #                             )
-        #                         elif constraints_element != None:
-        #                             full_constraints[new_element] = constraints_element
-        #                     full_json_structure.append(new_element)
-        #             all_constraints.append(full_constraints)
-        #             all_json_structures.append(full_json_structure)
-        #         response_generation_method.constraints = all_constraints[0]
-        #         response_generation_method.json_fields = all_json_structures[0]
-        #         if response_generation_method.automatic_system_prompt:
-        #             system_messages = [
-        #                 # TODO: add support for JSON custom JSON prompt instructions, including formatting
-        #                 inference.json_system_prompt(all_json_structures[num])
-        #                 for num, inference in enumerate(current_batch)
-        #             ]
-        #         else:
-        #             system_messages = [
-        #                 inference.system_prompt for inference in current_batch
-        #             ]
-        #     # TODO: add support for automatic system prompt for other answer production methods
-        #     elif isinstance(response_generation_method, ChoiceResponseGenerationMethod):
-        #         if (
-        #             response_generation_method.allowed_choices
-        #             == constants.OPTIONS_ADJUST
-        #         ):
-        #             response_generation_method.allowed_choices = (
-        #                 inference_option.answer_options[0].answer_text
-        #             )
-        #         system_messages = [
-        #             inference.system_prompt for inference in current_batch
-        #         ]
-        # else:
-        
-        system_messages = [inference.system_prompt for inference in current_batch]
-        prompts = [inference.create_all_questions() for inference in current_batch]
-
-        response_generation_methods = [inference.create_whole_response_generation_method() for inference in current_batch]
+        system_messages, prompts = zip(*[
+            interview.get_prompt_for_interview_type(InterviewType.ONE_PROMPT, i)
+            for interview in current_batch
+        ])
+        #questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+        response_generation_methods: List[ResponseGenerationMethod] = []
+        for interview in current_batch:
+            response_generation_method = interview._questions[i].answer_options.response_generation_method
+            if isinstance(response_generation_method, JSONResponseGenerationMethod):    
+                response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(questions=interview._questions)
+            response_generation_methods.append(response_generation_method)
 
         output, logprobs, reasoning_output = batch_generation(
             model=model,
@@ -783,22 +689,12 @@ def conduct_survey_in_context(
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
     if isinstance(interviews, LLMInterview):
         interviews = [interviews]
-
-    inference_options: List[InferenceOptions] = []
-
-    max_survey_length: int = 0
+    
+    max_survey_length: int = max(len(interview._questions) for interview in interviews)
 
     question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    # if print_progress:
-    #     print("Constructing prompts")
     for i in range(len(interviews)):
-        inference_option = interviews[i]._generate_inference_options()
-        inference_options.append(inference_option)
-        survey_length = len(inference_option.order)
-        if survey_length > max_survey_length:
-            max_survey_length = survey_length
-
         question_llm_response.append({})
 
     survey_results: List[InterviewResult] = []
@@ -816,37 +712,38 @@ def conduct_survey_in_context(
         else range(max_survey_length)
     ):
         current_batch = [
-            inference_option
-            for inference_option in inference_options
-            if len(inference_option.order) > i
+            interview
+            for interview in interviews
+            if len(interview._questions) > i
         ]
-        current_surveys = [surv for surv in interviews if len(surv._questions) > i]
 
         first_question: bool = i == 0
 
-        prompts = [
-            inference.create_single_question(
-                inference.order[i], task_instruction=first_question
-            )
-            for inference in current_batch
-        ]
-        questions = [
-            inference.create_single_question(inference.order[i], task_instruction=False)
-            for inference in current_batch
-        ]
+        if first_question:
+            system_messages, prompts = zip(*[
+            interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
+            for interview in current_batch
+        ])
+            questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+        else: 
+            system_messages, _ = zip(*[
+                interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
+                for interview in current_batch
+            ])
+            prompts = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+            questions = prompts
 
-        response_generation_methods = [
-            inference.get_response_generation_methods(inference.order[i])
-            for inference in current_batch
-        ]
-        for c in range(len(current_surveys)):
+        response_generation_methods = [interview._questions[i].answer_options.response_generation_method for interview in current_batch]
+
+
+        for c in range(len(current_batch)):
             all_prompts[c].append(prompts[c])
 
         current_assistant_messages: List[str] = []
 
         missing_indeces = []
 
-        for index, surv in enumerate(current_surveys):
+        for index, surv in enumerate(current_batch):
             prefilled_answer = surv._questions[i].prefilled_response
             if prefilled_answer:
                 current_assistant_messages.append(prefilled_answer)
@@ -857,16 +754,15 @@ def conduct_survey_in_context(
         ]
 
         if len(current_batch) == 0:
-            for c in range(len(current_surveys)):
+            for c in range(len(current_batch)):
                 assistant_messages[c].append(current_assistant_messages[c])
             for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-                range(len(current_surveys)),
+                range(len(current_batch)),
                 questions,
                 current_assistant_messages,
                 logprobs,
                 reasoning_output,
                 current_batch,
-                current_surveys,
             ):
                 question_llm_response[survey_id].update(
                     {
@@ -877,8 +773,6 @@ def conduct_survey_in_context(
                 )
             continue
             # TODO: add support for automatic system prompt for other answer production methods
-        else:
-            system_messages = [inference.system_prompt for inference in current_batch]
 
         output, logprobs, reasoning_output = batch_turn_by_turn_generation(
             model=model,
@@ -898,15 +792,11 @@ def conduct_survey_in_context(
         if logprobs is None or len(logprobs) == 0:
             logprobs = [None] * len(current_batch)
 
-        print(f"{logprobs} logprobs")
-        print(f"{reasoning_output} reasonings")
-
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
         for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            range(len(current_surveys)), questions, output, logprobs, reasoning_output, current_surveys
+            range(len(current_batch)), questions, output, logprobs, reasoning_output, current_batch
         ):
-            print("update step")
             question_llm_response[survey_id].update(
                 {
                     item._questions[i].item_id: QuestionLLMResponseTuple(
@@ -923,7 +813,6 @@ def conduct_survey_in_context(
             interviews, n_save_step, intermediate_save_file, question_llm_response, i
         )
 
-    print(question_llm_response)
     for i, survey in enumerate(interviews):
         survey_results.append(InterviewResult(survey, question_llm_response[i]))
 
@@ -972,7 +861,7 @@ class SurveyCreator:
             interview_source=df_questionnaire,
             interview_name=row[constants.INTERVIEW_NAME],
             system_prompt=row[constants.SYSTEM_PROMPT_FIELD],
-            interview_instruction=row[constants.INTERVIEW_INSTRUCTION_FIELD],
+            prompt=row[constants.INTERVIEW_INSTRUCTION_FIELD],
         )
 
     @classmethod

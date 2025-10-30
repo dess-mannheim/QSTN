@@ -1,5 +1,7 @@
 from typing import Final
 
+from . import placeholder
+
 # --- Empty Answer Option Template ---
 # use this if answer options are already provided in the system prompt
 NO_ANSWER_OPTIONS: Final[None] = None
@@ -50,34 +52,26 @@ SCALE_OPTIONS_MINIMAL: Final[str] = "{start} to {end}"
 # optionally add formatting instructions to the system prompt
 # Placeholder: {options}
 
-SYSTEM_JSON_DEFAULT: Final[str] = """You only respond in the following JSON format:"""
+SYSTEM_JSON_DEFAULT: Final[str] = f"""You only respond in the following JSON format:\n{placeholder.JSON_TEMPLATE}"""
 
-SYSTEM_JSON_SINGLE_ANSWER: Final[str] = """These are the possible answer options: [{options}].
-You only respond with the most probable answer option in the following JSON format:"""
+SYSTEM_JSON_SINGLE_ANSWER: Final[str] = f"""You only respond with the most probable answer option in the following JSON format:\n{placeholder.JSON_TEMPLATE}"""
 
-SYSTEM_JSON_REASONING: Final[str] = """These are the possible answer options: [{options}].
-You always reason about the possible answer options first.
-You respond with your reasoning and the most probable answer option in the following JSON format:"""
+SYSTEM_JSON_REASONING: Final[str] = f"""You always reason about the possible answer options first.
+You respond with your reasoning and the most probable answer option in the following JSON format:\n{placeholder.JSON_TEMPLATE}"""
 
-SYSTEM_JSON_ALL_OPTIONS: Final[str] = """These are the possible answer options: [{options}].
-You only respond with a probability for each answer option in the following JSON format:"""
+SYSTEM_JSON_ALL_OPTIONS: Final[str] = f"""You only respond with a probability for each answer option in the following JSON format:\n{placeholder.JSON_TEMPLATE}"""
 
-SYSTEM_SINGLE_ANSWER: Final[str] = """These are the possible answer options: [{options}].
-You only respond with the most probable answer option."""
+SYSTEM_SINGLE_ANSWER: Final[str] = f"""You only respond with the most probable answer option."""
 
 # German versions
 
-DE_SYSTEM_JSON_DEFAULT: Final[str] = """Du antwortest ausschließlich im folgenden JSON-Format:"""
+DE_SYSTEM_JSON_DEFAULT: Final[str] = f"""Du antwortest ausschließlich im folgenden JSON-Format:\n {placeholder.JSON_TEMPLATE}"""
 
-DE_SYSTEM_JSON_SINGLE_ANSWER: Final[str] = """Dies sind die möglichen Antwortoptionen: [{options}].
-Du antwortest ausschließlich mit der wahrscheinlichsten Antwortoption im folgenden JSON-Format:"""
+DE_SYSTEM_JSON_SINGLE_ANSWER: Final[str] = f"""Du antwortest ausschließlich mit der wahrscheinlichsten Antwortoption im folgenden JSON-Format:\n{placeholder.JSON_TEMPLATE}"""
 
-DE_SYSTEM_JSON_REASONING: Final[str] = """Dies sind die möglichen Antwortoptionen: [{options}].
-Du argumentierst immer zuerst über die möglichen Antwort-Optionen.
-Du antwortest mit deiner Argumentation und der wahrscheinlichsten Antwort-Option im folgenden JSON-Format:"""
+DE_SYSTEM_JSON_REASONING: Final[str] = f"""Du argumentierst immer zuerst über die möglichen Antwort-Optionen.
+Du antwortest mit deiner Argumentation und der wahrscheinlichsten Antwort-Option im folgenden JSON-Format:\n{placeholder.JSON_TEMPLATE}"""
 
-DE_SYSTEM_JSON_ALL_OPTIONS: Final[str] = """Dies sind die möglichen Antwortoptionen: [{options}].
-Du antwortest ausschließlich mit einer Wahrscheinlichkeit für jede Antwort-Option im folgenden JSON-Format:"""
+DE_SYSTEM_JSON_ALL_OPTIONS: Final[str] = f"""Du antwortest ausschließlich mit einer Wahrscheinlichkeit für jede Antwort-Option im folgenden JSON-Format:\n{placeholder.JSON_TEMPLATE}"""
 
-DE_SYSTEM_SINGLE_ANSWER: Final[str] = """Dies sind die möglichen Antwortoptionen: [{options}].
-Du antwortest ausschließlich mit der wahrscheinlichsten Antwortoption."""
+DE_SYSTEM_SINGLE_ANSWER: Final[str] = f"""Du antwortest ausschließlich mit der wahrscheinlichsten Antwortoption."""
