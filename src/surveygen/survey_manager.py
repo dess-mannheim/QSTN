@@ -356,7 +356,9 @@ def conduct_survey_question_by_question(
     if structured_output_options:
         if structured_output_options.constraints:
             for json_element in structured_output_options.constraints.keys():
-                if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
+                if interviews[0]._global_options:
+                    structured_output_options.constraints[json_element] = interviews[0]._global_options.answer_text
+                else:
                     structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
         if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
             structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
@@ -522,9 +524,13 @@ def conduct_whole_survey_one_prompt(
                             if structured_output_options.constraints:
                                 constraints_element = structured_output_options.constraints.get(json_element)
                                 if constraints_element == constants.OPTIONS_ADJUST:
-                                    full_constraints[new_element] = inference_option.answer_options[i].answer_text
+                                    if interviews[0]._global_options:
+                                        full_constraints[new_element] = interviews[0]._global_options.answer_text
+                                    else:
+                                        full_constraints[new_element] = inference_options[0].answer_options[0].answer_text
                                 elif constraints_element != None:
                                     full_constraints[new_element] = constraints_element
+                                    
                             full_json_structure.append(new_element)
                     all_constraints.append(full_constraints)
                     all_json_structures.append(full_json_structure)
@@ -627,7 +633,10 @@ def conduct_survey_in_context(
         if structured_output_options.constraints:
             for json_element in structured_output_options.constraints.keys():
                 if structured_output_options.constraints[json_element] == constants.OPTIONS_ADJUST:
-                    structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
+                    if interviews[0]._global_options:
+                        structured_output_options.constraints[json_element] = interviews[0]._global_options.answer_text
+                    else:
+                        structured_output_options.constraints[json_element] = inference_options[0].answer_options[0].answer_text
         if structured_output_options.allowed_choices == constants.OPTIONS_ADJUST:
             structured_output_options.allowed_choices = inference_options[0].answer_options[0].answer_text
 
