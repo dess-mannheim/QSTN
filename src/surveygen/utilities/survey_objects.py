@@ -20,20 +20,37 @@ class AnswerTexts:
     answer_texts: Optional[List[str]] = None
     indices: Optional[List[str]] = None
     index_answer_seperator: str = ": "
-    option_seperators: str = ", "
+    option_seperators: str = ", ",
+    only_scale: bool = False,
 
     def __init__(
         self,
         answer_texts: List[str],
-        indices: Optional[str] = None,
+        indices: Optional[List[str]] = None,
         index_answer_seperator: str = ": ",
         option_seperators: str = ", ",
+        only_scale: bool = False
     ):
         self.answer_texts = answer_texts
         self.indices = indices
         self.index_answer_seperator = index_answer_seperator
         self.option_seperators = option_seperators
+        self.only_scale = only_scale
 
+        if self.only_scale:
+            full_indices = []
+            dummy_answer_texts = []
+            for index in range(int(self.indices[0]), int(self.indices[-1]) + 1):
+                index = str(index)
+                if index == self.indices[0]:
+                    dummy_answer_texts.append(self.answer_texts[0])
+                elif index == self.indices[-1]:
+                    dummy_answer_texts.append(self.answer_texts[-1])
+                else:
+                    dummy_answer_texts.append("")
+                full_indices.append(index)
+            self.indices = full_indices
+            self.answer_texts = dummy_answer_texts
         if self.answer_texts and self.indices:
             self.full_answers = [
                 f"{index}{self.index_answer_seperator}{answer_text}"
@@ -116,7 +133,6 @@ class AnswerOptions:
                             constraints[key] = answer_texts.indices
                         else:
                             constraints[key] = answer_texts.full_answers
-
                 
             elif isinstance(self.response_generation_method, ChoiceResponseGenerationMethod) or isinstance(self.response_generation_method, LogprobResponseGenerationMethod):
                 if self.response_generation_method.allowed_choices == constants.OPTIONS_ADJUST:

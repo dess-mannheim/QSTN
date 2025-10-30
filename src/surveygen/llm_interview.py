@@ -82,7 +82,6 @@ class LLMInterview:
         self.system_prompt: str = system_prompt
         self.prompt: str = prompt
 
-        self._global_options: AnswerOptions = None
         self._same_options = False
 
     def duplicate(self):
@@ -140,13 +139,17 @@ class LLMInterview:
             or interview_type == InterviewType.CONTEXT
         ):
             question = self.generate_question_prompt(self._questions[item_id])
-            options = self._questions[item_id].answer_options.create_options_str()
-            
-            rgm = self._questions[
-                item_id
-            ].answer_options.response_generation_method
 
-            automatic_output_instructions: str = rgm.get_automatic_prompt()
+            if self._questions[item_id].answer_options:
+                options = self._questions[item_id].answer_options.create_options_str()
+                
+                rgm = self._questions[
+                    item_id
+                ].answer_options.response_generation_method
+                automatic_output_instructions: str = rgm.get_automatic_prompt()
+            else:
+                options = ""
+                automatic_output_instructions = ""            
 
             format_dict = {
                 placeholder.PROMPT_QUESTIONS: question,
@@ -158,7 +161,11 @@ class LLMInterview:
             all_questions: List[str] = []
             for question in self._questions:
                 current_question_prompt = self.generate_question_prompt(question)
-                options = question.answer_options.create_options_str()
+                
+                if question.answer_options:
+                    options = question.answer_options.create_options_str()
+                else:
+                    options = ""
                 format_dict = {
                     placeholder.PROMPT_OPTIONS: options,
                 }
@@ -166,12 +173,17 @@ class LLMInterview:
                 all_questions.append(current_question_prompt)
 
             all_questions_str = item_separator.join(all_questions)
-            options = self._questions[item_id].answer_options.create_options_str()
-            rgm = self._questions[
-                item_id
-            ].answer_options.response_generation_method
+            if self._questions[item_id].answer_options:
+                options = self._questions[item_id].answer_options.create_options_str()
+                rgm = self._questions[
+                    item_id
+                ].answer_options.response_generation_method
 
-            automatic_output_instructions: str = rgm.get_automatic_prompt(questions=self._questions)
+                automatic_output_instructions: str = rgm.get_automatic_prompt(questions=self._questions)
+            else:
+                options = ""
+                automatic_output_instructions = ""
+            
 
             format_dict = {
                     placeholder.PROMPT_QUESTIONS: all_questions_str,
@@ -275,7 +287,6 @@ class LLMInterview:
         self,
         question_stem: Optional[str] = None,
         answer_options: Optional[AnswerOptions] = None,
-        global_options: bool = False,
         prefilled_responses: Optional[Dict[int, str]] = None,
         randomized_item_order: bool = False,
     ) -> Self: ...
@@ -285,7 +296,6 @@ class LLMInterview:
         self,
         question_stem: Optional[List[str]] = None,
         answer_options: Optional[Dict[int, AnswerOptions]] = None,
-        global_options: bool = False,
         prefilled_responses: Optional[Dict[int, str]] = None,
         randomized_item_order: bool = False,
     ) -> Self: ...
@@ -294,7 +304,6 @@ class LLMInterview:
         self,
         question_stem: Optional[Union[str, List[str]]] = None,
         answer_options: Optional[Union[AnswerOptions, Dict[int, AnswerOptions]]] = None,
-        global_options: bool = False,
         prefilled_responses: Optional[Dict[int, str]] = None,
         randomized_item_order: bool = False,
     ) -> Self:
@@ -322,19 +331,12 @@ class LLMInterview:
 
         options_dict = False
 
-        if answer_options == None:
-            self._global_options = None
-        elif isinstance(answer_options, AnswerOptions):
+        if isinstance(answer_options, AnswerOptions):
             self._same_options = True
             options_dict = False
-            if global_options:
-                self._global_options = answer_options
-            else:
-                self._global_options = None
         elif isinstance(answer_options, Dict):
             self._same_options = False
             options_dict = True
-            self._global_options = None
 
         updated_questions: List[InterviewItem] = []
 
@@ -353,7 +355,7 @@ class LLMInterview:
                         if question_stem
                         else interview_questions[i].question_stem
                     ),
-                    answer_options=answer_options if not self._global_options else None,
+                    answer_options=answer_options,
                     prefilled_response=prefilled_responses.get(
                         interview_questions[i].item_id
                     ),
@@ -385,7 +387,7 @@ class LLMInterview:
                         if question_stem
                         else interview_questions[i].question_stem
                     ),
-                    answer_options=answer_options if not self._global_options else None,
+                    answer_options=answer_options,
                     prefilled_response=prefilled_responses.get(
                         interview_questions[i].item_id
                     ),

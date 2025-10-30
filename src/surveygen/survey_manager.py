@@ -218,6 +218,7 @@ class SurveyOptionGenerator:
             indices=answer_option_indices,
             index_answer_seperator=index_answer_separator,
             option_seperators=options_separator,
+            only_scale=only_from_to_scale
         )
 
         interview_option = AnswerOptions(

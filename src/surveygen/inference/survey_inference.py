@@ -211,7 +211,7 @@ def batch_generation(
         
 
         for rgm in response_generation_method:
-                   
+            #TODO This is not implemented correcty yet
             if isinstance(rgm, LogprobResponseGenerationMethod):
                 logprob_result = []
                 # ignore the first k tokens that belong to the reasoning
