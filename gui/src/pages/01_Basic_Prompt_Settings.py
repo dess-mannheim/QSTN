@@ -9,9 +9,9 @@ import time
 
 #CONSTANTS FOR FIELDS
 system_prompt_field = "System prompt"
-interview_instruction_field = "Interview instructions"
+prompt_field = "Prompt"
 change_all_system_prompts_checkbox = "system_change_all"
-change_all_interview_instructions_checkbox = "interview_instructions_change_all"
+change_all_prompts_checkbox = "prompts_change_all"
 
 st.set_page_config(layout="wide")
 st.title("Generate Prompt")
@@ -37,7 +37,7 @@ if "interviews" not in st.session_state:
 if 'current_index' not in st.session_state:
     st.session_state.current_index = 0
 
-text_field_ids = [system_prompt_field, interview_instruction_field]
+text_field_ids = [system_prompt_field, prompt_field]
 
 current_interview_id = paginator(st.session_state.interviews, "current_interview_index_prompt")
 
@@ -73,16 +73,16 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
             initial_value=False
         )
 
-        new_interview_instruction = st.text_area(
-            label=interview_instruction_field,
-            key=f"{interview_instruction_field}{current_interview_id}",
-            value=interview.interview_instruction,
+        new_prompt = st.text_area(
+            label=prompt_field,
+            key=f"{prompt_field}{current_interview_id}",
+            value=interview.prompt,
             help="Instructions that are given to the model before the questions."
         )
 
         change_all_interview = state.create(
             st.checkbox,
-            key=change_all_interview_instructions_checkbox,
+            key=change_all_prompts_checkbox,
             label="On update: change all interview instructions",
             help="If this is ticked, all interview instructions will be changed to this.",
             initial_value=False
@@ -96,9 +96,11 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
     # This block re-runs on every widget interaction.
         with st.container(border=True):
             interview.system_prompt = new_system_prompt
-            interview.interview_instruction = new_interview_instruction
-            current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+            interview.prompt = new_prompt
+            current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+            current_system_prompt = current_system_prompt.replace("\n", "  \n")
             current_prompt = current_prompt.replace("\n", "  \n")
+            st.write(current_system_prompt)
             st.write(current_prompt)
     if st.button("Update Prompt(s)", type="secondary", use_container_width=True):
         if change_all_system:
@@ -108,9 +110,9 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
             st.session_state.interviews[current_interview_id].system_prompt = new_system_prompt
         if change_all_interview:
             for interview in st.session_state.interviews:
-                interview.interview_instruction = new_interview_instruction
+                interview.prompt = new_prompt
         else:
-            st.session_state.interviews[current_interview_id].interview_instruction = new_interview_instruction             
+            st.session_state.interviews[current_interview_id].prompt = new_prompt             
         st.success("Prompt(s) updated!")
 
     if st.button("Confirm Base Prompt", type="primary", use_container_width=True):

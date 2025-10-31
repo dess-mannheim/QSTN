@@ -8,10 +8,9 @@ from gui_elements.paginator import paginator
 
 # CONSTANTS FOR FIELDS
 question_stem_field = "Question Stem"
-global_options_tick = "When to specify options"
 randomize_order_tick = "Randomize the order of items"
 
-field_ids = [question_stem_field, global_options_tick, randomize_order_tick]
+field_ids = [question_stem_field, randomize_order_tick]
 
 st.title("Questions Preparation")
 st.write(
@@ -47,35 +46,32 @@ def process_inputs(input: Any, field_id: str) -> str:
         st.session_state.temporary_interview.prepare_interview(
             question_stem=input,
             answer_options=survey_options,
-            global_options=global_options_bool,
             randomized_item_order=randomize_order_bool,
         )
         st.session_state.base_interview.prepare_interview(
             question_stem=input,
             answer_options=survey_options,
-            global_options=global_options_bool,
             randomized_item_order=randomize_order_bool,
         )
-    elif field_id == global_options_tick:
-        option_behavior = input == "Give instruction in the beginning"
-        st.session_state.temporary_interview.prepare_interview(
-            question_stem=question_stem_input,
-            answer_options=survey_options,
-            global_options=option_behavior,
-            randomized_item_order=randomize_order_bool,
-        )
-        st.session_state.base_interview.prepare_interview(
-            question_stem=question_stem_input,
-            answer_options=survey_options,
-            global_options=option_behavior,
-            randomized_item_order=False,
-        )
+    # elif field_id == global_options_tick:
+    #     option_behavior = input == "Give instruction in the beginning"
+    #     st.session_state.temporary_interview.prepare_interview(
+    #         question_stem=question_stem_input,
+    #         answer_options=survey_options,
+    #         global_options=option_behavior,
+    #         randomized_item_order=randomize_order_bool,
+    #     )
+    #     st.session_state.base_interview.prepare_interview(
+    #         question_stem=question_stem_input,
+    #         answer_options=survey_options,
+    #         global_options=option_behavior,
+    #         randomized_item_order=False,
+    #     )
     elif field_id == randomize_order_tick:
         if input == True:
             st.session_state.temporary_interview.prepare_interview(
                 question_stem=question_stem_input,
                 answer_options=survey_options,
-                global_options=global_options_bool,
                 randomized_item_order=input,
             )
         else:
@@ -104,8 +100,6 @@ with col1:
         if not input_key in st.session_state:
             if field_id == question_stem_field:
                 st.session_state[input_key] = st.session_state.temporary_interview ._questions[0].question_stem
-            if field_id == global_options_tick:
-                st.session_state[input_key] =  "Give instruction in the beginning"
             if field_id == randomize_order_tick:
                 st.session_state[input_key] = False
 
@@ -119,19 +113,18 @@ with col1:
         height=100,
     )
 
-    option_behavior = st.radio(
-        global_options_tick,
-        key=f"input_{global_options_tick}",
-        options=[
-            "Give instruction in the beginning",
-            "Give options after each question",
-        ],
-        index=0,
-        #on_change=handle_change,
-        kwargs={'field_id': global_options_tick},
-        help="Choose how answer options are applied.",
-    )
-    global_options_bool = option_behavior == "Give instruction in the beginning"
+    # option_behavior = st.radio(
+    #     global_options_tick,
+    #     key=f"input_{global_options_tick}",
+    #     options=[
+    #         "Give instruction in the beginning",
+    #         "Give options after each question",
+    #     ],
+    #     index=0,
+    #     #on_change=handle_change,
+    #     kwargs={'field_id': global_options_tick},
+    #     help="Choose how answer options are applied.",
+    # )
 
     randomize_order_bool = st.checkbox(
         randomize_order_tick,
@@ -150,13 +143,11 @@ if randomize_order_bool:
     st.session_state.temporary_interview.prepare_interview(
         question_stem=question_stem_input,
         answer_options=survey_options,
-        global_options=global_options_bool,
         randomized_item_order=randomize_order_bool,
     )
 st.session_state.base_interview.prepare_interview(
     question_stem=question_stem_input,
     answer_options=survey_options,
-    global_options=global_options_bool,
     randomized_item_order=False,
 )
 
@@ -166,12 +157,14 @@ if not randomize_order_bool:
 with col2:
     st.subheader("📄 Live Preview")
 
+    #@Ahmed All of these could be a resusable function (it is used on almost all pages) Maybe split up the container in system prompt/ prompt
     with st.container(border=True):
-        current_prompt = st.session_state.temporary_interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+        system_prompt, current_prompt = st.session_state.temporary_interview.get_prompt_for_interview_type(InterviewType.ONE_PROMPT)
         # markdown newlines
+        system_prompt = system_prompt.replace("\n", "  \n")
         current_prompt = current_prompt.replace("\n", "  \n")
+        st.write(system_prompt)
         st.write(current_prompt)
-
 
 st.divider()
 
@@ -180,7 +173,6 @@ if st.button("Confirm and Prepare Interview", type="primary", use_container_widt
         interview.prepare_interview(
             question_stem=question_stem_input,
             answer_options=survey_options,
-            global_options=global_options_bool,
             randomized_item_order=randomize_order_bool,
         )
     st.success("Changed the prompts!")

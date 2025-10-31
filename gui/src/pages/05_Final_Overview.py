@@ -128,8 +128,10 @@ with col_prompt_display:
     st.subheader("📄 Live Preview")
 
     with st.container(border=True):
-        current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+        current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+        current_system_prompt = current_system_prompt.replace("\n", "  \n")
         current_prompt = current_prompt.replace("\n", "  \n")
+        st.write(current_system_prompt)
         st.write(current_prompt)
 
 model_name = state.create(
