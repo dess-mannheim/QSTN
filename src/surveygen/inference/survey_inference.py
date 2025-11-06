@@ -122,6 +122,7 @@ def batch_generation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ):
@@ -187,6 +188,7 @@ def batch_generation(
             batch_messages,
             sampling_params=sampling_params_list,
             use_tqdm=print_progress,
+            chat_template=chat_template,
             chat_template_kwargs=chat_template_kwargs,
         )
         result = [output.outputs[0].text for output in outputs]
@@ -462,6 +464,7 @@ def batch_turn_by_turn_generation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs,
 ) -> List[str]:
@@ -528,6 +531,7 @@ def batch_turn_by_turn_generation(
             batch_messages,
             sampling_params=sampling_params_list,
             use_tqdm=print_progress,
+            chat_template=chat_template,
             chat_template_kwargs=chat_template_kwargs,
         )
         # TODO: add support for logprobs

@@ -368,6 +368,7 @@ def conduct_survey_question_by_question(
     n_save_step: Optional[int] = None,
     intermediate_save_file: Optional[str] = None,
     seed: int = 42,
+    chat_template: Optional[str] = str,
     chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
@@ -385,6 +386,7 @@ def conduct_survey_question_by_question(
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
+        chat_template: Optionally pass a specific chat template
         chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
 
@@ -436,6 +438,7 @@ def conduct_survey_question_by_question(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            chat_template=chat_template,
             chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
@@ -548,6 +551,7 @@ def conduct_whole_survey_one_prompt(
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
+    chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
     item_separator:str = "\n",
     **generation_kwargs: Any,
@@ -566,6 +570,7 @@ def conduct_whole_survey_one_prompt(
         print_conversation: If True, prints the conversation.
         print_progress: If True, shows progress bar.
         seed: Random seed for reproducibility.
+        chat_template: Optionally pass a specific chat template
         chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
 
@@ -623,6 +628,7 @@ def conduct_whole_survey_one_prompt(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            chat_template=chat_template,
             chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
