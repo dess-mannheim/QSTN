@@ -427,8 +427,6 @@ def _structured_sampling_params(
                 guided_decodings.append(None)
 
     if use_vllm and len(guided_decodings) == batch_size:
-        print(guided_decodings[0])
-        print(guided_decodings[-1])
         sampling_params_list = [
             SamplingParams(
                 seed=seeds[i],
