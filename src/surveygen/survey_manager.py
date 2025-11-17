@@ -368,7 +368,7 @@ def conduct_survey_question_by_question(
     n_save_step: Optional[int] = None,
     intermediate_save_file: Optional[str] = None,
     seed: int = 42,
-    chat_template: Optional[str] = str,
+    chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
@@ -426,7 +426,7 @@ def conduct_survey_question_by_question(
         ])
 
         questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
-        response_generation_methods = [interview._questions[i].answer_options.response_generation_method for interview in current_batch]
+        response_generation_methods = [interview._questions[i].answer_options.response_generation_method if interview._questions[i].answer_options else None for interview in current_batch]
 
         output, logprobs, reasoning_output = batch_generation(
             model=model,
@@ -613,10 +613,11 @@ def conduct_whole_survey_one_prompt(
         #questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
         response_generation_methods: List[ResponseGenerationMethod] = []
         for interview in current_batch:
-            response_generation_method = interview._questions[i].answer_options.response_generation_method
-            if isinstance(response_generation_method, JSONResponseGenerationMethod):    
-                response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(questions=interview._questions)
-            response_generation_methods.append(response_generation_method)
+            if interview._questions[i].answer_options:
+                response_generation_method = interview._questions[i].answer_options.response_generation_method
+                if isinstance(response_generation_method, JSONResponseGenerationMethod):    
+                    response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(questions=interview._questions)
+                response_generation_methods.append(response_generation_method)
 
         output, logprobs, reasoning_output = batch_generation(
             model=model,
@@ -740,7 +741,7 @@ def conduct_survey_in_context(
             prompts = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
             questions = prompts
 
-        response_generation_methods = [interview._questions[i].answer_options.response_generation_method for interview in current_batch]
+        response_generation_methods = [interview._questions[i].answer_options.response_generation_method if interview._questions[i].answer_options else None for interview in current_batch]
 
 
         for c in range(len(current_batch)):

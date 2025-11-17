@@ -14,7 +14,7 @@ def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFram
     """
     Joins a dictionary of DataFrames into a single DataFrame.
 
-    - The dictionary key's 'survey_name' attribute is added as the first column.
+    - The dictionary key's 'interview_name' attribute is added as the first column.
     - Handles different columns across DataFrames by creating a union of all columns.
     """
     dataframes_to_concat = []
@@ -22,7 +22,7 @@ def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFram
     for key, df in parsed_results.items():
         temp_df = df.copy()
         
-        temp_df.insert(0, 'survey_name', key.interview_name)
+        temp_df.insert(0, 'interview_name', key.interview_name)
         
         dataframes_to_concat.append(temp_df)
     if not dataframes_to_concat:
