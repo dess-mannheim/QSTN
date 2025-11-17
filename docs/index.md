@@ -2,7 +2,9 @@ This is the homepage for the project's documentation.
 
 ```{toctree}
 :maxdepth: 2
-:caption: Contents:
+:caption: Documentation
 
-api/modules
+getting_started/index
+guides/index
+api_reference
 ```
