@@ -4,6 +4,5 @@ This is the homepage for the project's documentation.
 :maxdepth: 2
 :caption: Contents:
 
-getting-started
 api-reference
 ```
