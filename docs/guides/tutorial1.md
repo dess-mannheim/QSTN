@@ -219,7 +219,6 @@ You respond with your reasoning and the most probable answer option in the follo
   "answer": <1: Strongly Dislike, 2: Dislike, 3: Neiter Dislike nor Like, 4: Like, 5: Strongly Like>
 }
 ```
-```
 
 We run our survey again:
 
