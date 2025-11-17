@@ -108,6 +108,7 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
                 interview.system_prompt = new_system_prompt
         else:
             st.session_state.interviews[current_interview_id].system_prompt = new_system_prompt
+
         if change_all_interview:
             for interview in st.session_state.interviews:
                 interview.prompt = new_prompt

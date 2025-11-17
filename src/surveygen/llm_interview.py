@@ -133,7 +133,8 @@ class LLMInterview:
         Returns:
             str: The constructed prompt for the interview type.
         """
-
+        options = ""    
+        automatic_output_instructions = ""
         if (
             interview_type == InterviewType.QUESTION
             or interview_type == InterviewType.CONTEXT

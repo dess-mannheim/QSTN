@@ -4,8 +4,8 @@ from pydantic import BaseModel, create_model
 from enum import Enum
 
 
-def create_enum(name: str, values: List[str]):
-    return Enum(name, {v.upper(): v for v in values})
+def create_enum(name: str, values: List[str|int]):
+    return Enum(name, {str(v).upper(): v for v in values})
 
 
 def generate_pydantic_model(

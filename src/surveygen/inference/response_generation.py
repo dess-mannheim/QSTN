@@ -124,6 +124,7 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
 
         new_constraints = None
         if self.constraints:
+            print("Got here")
             new_constraints = {
                 f"{key}_{questions[i].question_content}": value
                 for key, value in self.constraints.items()
