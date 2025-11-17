@@ -80,7 +80,8 @@ from tqdm.auto import tqdm
 
 class SurveyOptionGenerator:
     """
-    A class responsible for preparing optional answers for the LLM.
+    This class offers robust creation of options. Can do various prompt pertubations. 
+    When used in Conjunction with response generation methods the tokens for the output of the model can be restricted.
     """
 
     LIKERT_5: List[str] = [
@@ -123,38 +124,46 @@ class SurveyOptionGenerator:
         optionally attaching textual labels to the scale. It provides
         extensive control over ordering, formatting, and the final prompt string.
 
-        :param n: The number of points on the scale (e.g., 5 for a 1-5 scale).
-        :type n: int
-        :param answer_texts: A list of strings to use as labels for points on the scale.
-                             For example, ["Agree", "Disagree", "Neither"] for a 3-point scale.
-        :type answer_texts: Optional[List[str]]
-        :param only_from_to_scale: If True, forces a 'range' style prompt (e.g., "from 1 to 5")
-                                using `scale_prompt_template`.
-        :type only_from_to_scale: bool
-        :param random_order: If True, shuffles the final list of generated options.
-                            Mutually exclusive with `reversed_order`.
-        :type random_order: bool
-        :param reversed_order: If True, reverses the natural order of the scale (e.g., 5, 4, 3, 2, 1).
-                            Mutually exclusive with `random_order`.
-        :type reversed_order: bool
-        :param even_order: Removes the middle answer option of the scale, if the scale is odd.
-        :type even_order: bool
-        :param start_idx: The starting number for an character and integer based scales. Defaults to 1. If e.g. 2 is given then (0 -> 1) and (A -> B).
-        :type start_idx: int
-        :param list_prompt_template: The format string for a list-style prompt. Must contain `{options}`.
-        :type list_prompt_template: str
-        :param scale_prompt_template: The format string for a range-style prompt. Must contain `{start}`
-                                    and `{end}`.
-        :type scale_prompt_template: str
-        :param idx_type: The type of index for the scale: "char_lower", "char_upper", "integer", or "no_index".
-        :type idx_type: _IDX_TYPES
+        Args:
+            n (int): The number of options to generate (e.g., 5 for a 5-point scale).
+            answer_texts (Optional[List[str]]): A list of text labels for each option.
+                Its length must equal `n` if provided.
+            only_from_to_scale (bool, optional): If True, the prompt will only show the
+                min and max of the scale (e.g., "1 to 5"). Defaults to False.
+            random_order (bool, optional): If True, the options are randomized. Defaults to False.
+            reversed_order (bool, optional): If True, the options are in reversed input order.
+                Defaults to False.
+            even_order (bool, optional): If True, options the center option will be removed.
+                E.g., for n=5: 1, 2, 4, 5
+            start_idx (int, optional): The starting index for the scale (usually 0 or 1).
+                Defaults to 1.
+            list_prompt_template (str, optional): The template for prompts that list all options.
+            scale_prompt_template (str, optional): The template for prompts that only show the range.
+            index_answer_separator (str, optional): The string used to separate an index from its
+                text label (e.g., "1: Strongly Agree"). Defaults to ": ".
+            options_separator (str, optional): The string used to separate options when listed
+                in the prompt. Defaults to ", ".
+            idx_type (_IDX_TYPES, optional): The type of index to use: "integer", "upper" (A, B, C),
+                or "lower" (a, b, c). Defaults to "integer".
+            response_generation_method (Optional[ResponseGenerationMethod], optional): An object
+                controlling how the final response object is generated. Defaults to None.
 
-        :raises ValueError: If `n` is less than 2, if `random_order` and `reversed_order` are both True,
-                            or if `len(anchor_labels)` > `n`.
+        Raises:
+            ValueError: If `answer_texts` is provided and its length does not match `n`.
 
-        :return: An object containing `options` (the final list of option strings) and `prompt`
-                (the formatted prompt string).
-        :rtype: AnswerOptions"""
+        Returns:
+            AnswerOptions: An object containing the generated list of option strings and the
+            final formatted prompt ready for display.
+
+        Example:
+            .. code-block:: python
+
+                # Generate a classic 5-point "Strongly Disagree" to "Strongly Agree" scale
+                labels = [
+                    "Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"
+                ]
+                options = SurveyOptionGenerator.generate_likert_options(n=5, answer_texts=labels)"""
+
 
         if only_from_to_scale:
             if len(answer_texts) != 2:
@@ -218,7 +227,7 @@ class SurveyOptionGenerator:
             indices=answer_option_indices,
             index_answer_seperator=index_answer_separator,
             option_seperators=options_separator,
-            only_scale=only_from_to_scale
+            only_scale=only_from_to_scale,
         )
 
         interview_option = AnswerOptions(
@@ -403,8 +412,8 @@ def conduct_survey_question_by_question(
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
 
     for i in range(len(interviews)):
-        #inference_option = interviews[i]._generate_inference_options()
-        #inference_options.append(inference_opti
+        # inference_option = interviews[i]._generate_inference_options()
+        # inference_options.append(inference_opti
         question_llm_response_pairs.append({})
 
     survey_results: List[InterviewResult] = []
@@ -415,18 +424,30 @@ def conduct_survey_question_by_question(
         else range(max_survey_length)
     ):
         current_batch: List[LLMInterview] = [
-            interview
-            for interview in interviews
-            if len(interview._questions) > i
+            interview for interview in interviews if len(interview._questions) > i
         ]
 
-        system_messages, prompts = zip(*[
-            interview.get_prompt_for_interview_type(InterviewType.QUESTION, i)
-            for interview in current_batch
-        ])
+        system_messages, prompts = zip(
+            *[
+                interview.get_prompt_for_interview_type(InterviewType.QUESTION, i)
+                for interview in current_batch
+            ]
+        )
 
-        questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
-        response_generation_methods = [interview._questions[i].answer_options.response_generation_method if interview._questions[i].answer_options else None for interview in current_batch]
+        questions = [
+            interview.generate_question_prompt(
+                interview_question=interview._questions[i]
+            )
+            for interview in current_batch
+        ]
+        response_generation_methods = [
+            (
+                interview._questions[i].answer_options.response_generation_method
+                if interview._questions[i].answer_options
+                else None
+            )
+            for interview in current_batch
+        ]
 
         output, logprobs, reasoning_output = batch_generation(
             model=model,
@@ -453,7 +474,7 @@ def conduct_survey_question_by_question(
             output,
             logprobs,
             reasoning_output,
-            current_batch
+            current_batch,
         ):
             question_llm_response_pairs[survey_id].update(
                 {
@@ -553,7 +574,7 @@ def conduct_whole_survey_one_prompt(
     seed: int = 42,
     chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
-    item_separator:str = "\n",
+    item_separator: str = "\n",
     **generation_kwargs: Any,
 ) -> List[InterviewResult]:
     """
@@ -581,7 +602,7 @@ def conduct_whole_survey_one_prompt(
 
     if isinstance(interviews, LLMInterview):
         interviews = [interviews]
-    #inference_options: List[InferenceOptions] = []
+    # inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
     max_survey_length: int = 1
@@ -601,22 +622,26 @@ def conduct_whole_survey_one_prompt(
         else range(max_survey_length)
     ):
         current_batch = [
-            interview
-            for interview in interviews
-            if len(interview._questions) > i
+            interview for interview in interviews if len(interview._questions) > i
         ]
 
-        system_messages, prompts = zip(*[
-            interview.get_prompt_for_interview_type(InterviewType.ONE_PROMPT, i)
-            for interview in current_batch
-        ])
-        #questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+        system_messages, prompts = zip(
+            *[
+                interview.get_prompt_for_interview_type(InterviewType.ONE_PROMPT, i)
+                for interview in current_batch
+            ]
+        )
+        # questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
         response_generation_methods: List[ResponseGenerationMethod] = []
         for interview in current_batch:
             if interview._questions[i].answer_options:
-                response_generation_method = interview._questions[i].answer_options.response_generation_method
-                if isinstance(response_generation_method, JSONResponseGenerationMethod):    
-                    response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(questions=interview._questions)
+                response_generation_method = interview._questions[
+                    i
+                ].answer_options.response_generation_method
+                if isinstance(response_generation_method, JSONResponseGenerationMethod):
+                    response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(
+                        questions=interview._questions
+                    )
                 response_generation_methods.append(response_generation_method)
 
         output, logprobs, reasoning_output = batch_generation(
@@ -697,7 +722,7 @@ def conduct_survey_in_context(
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
     if isinstance(interviews, LLMInterview):
         interviews = [interviews]
-    
+
     max_survey_length: int = max(len(interview._questions) for interview in interviews)
 
     question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
@@ -720,29 +745,47 @@ def conduct_survey_in_context(
         else range(max_survey_length)
     ):
         current_batch = [
-            interview
-            for interview in interviews
-            if len(interview._questions) > i
+            interview for interview in interviews if len(interview._questions) > i
         ]
 
         first_question: bool = i == 0
 
         if first_question:
-            system_messages, prompts = zip(*[
-            interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
-            for interview in current_batch
-        ])
-            questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
-        else: 
-            system_messages, _ = zip(*[
-                interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
+            system_messages, prompts = zip(
+                *[
+                    interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
+                    for interview in current_batch
+                ]
+            )
+            questions = [
+                interview.generate_question_prompt(
+                    interview_question=interview._questions[i]
+                )
                 for interview in current_batch
-            ])
-            prompts = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
+            ]
+        else:
+            system_messages, _ = zip(
+                *[
+                    interview.get_prompt_for_interview_type(InterviewType.CONTEXT, i)
+                    for interview in current_batch
+                ]
+            )
+            prompts = [
+                interview.generate_question_prompt(
+                    interview_question=interview._questions[i]
+                )
+                for interview in current_batch
+            ]
             questions = prompts
 
-        response_generation_methods = [interview._questions[i].answer_options.response_generation_method if interview._questions[i].answer_options else None for interview in current_batch]
-
+        response_generation_methods = [
+            (
+                interview._questions[i].answer_options.response_generation_method
+                if interview._questions[i].answer_options
+                else None
+            )
+            for interview in current_batch
+        ]
 
         for c in range(len(current_batch)):
             all_prompts[c].append(prompts[c])
@@ -764,7 +807,14 @@ def conduct_survey_in_context(
         if len(current_batch) == 0:
             for c in range(len(current_batch)):
                 assistant_messages[c].append(current_assistant_messages[c])
-            for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
+            for (
+                survey_id,
+                question,
+                llm_response,
+                logprob_answer,
+                reasoning,
+                item,
+            ) in zip(
                 range(len(current_batch)),
                 questions,
                 current_assistant_messages,
@@ -803,7 +853,12 @@ def conduct_survey_in_context(
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
         for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            range(len(current_batch)), questions, output, logprobs, reasoning_output, current_batch
+            range(len(current_batch)),
+            questions,
+            output,
+            logprobs,
+            reasoning_output,
+            current_batch,
         ):
             question_llm_response[survey_id].update(
                 {
