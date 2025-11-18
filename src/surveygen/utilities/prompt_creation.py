@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Union, Final, List
+from typing import Optional, Dict, Any, Final, List
 from enum import Enum
 import random
 
@@ -10,7 +10,9 @@ JSON_START_STRING: Final[
 {
 """
 
-JSON_END_STRING: Final[str] = """
+JSON_END_STRING: Final[
+    str
+] = """
 }
 ```"""
 
@@ -128,11 +130,11 @@ class OutputForm:
             else:
                 line = f'  "{attribute}": <{attribute}>'
             lines.append(line)
-        
+
         if json_instructions is not None:
             self.output_prompt = json_instructions + "\n"
         else:
-            self.output_prompt = ''
+            self.output_prompt = ""
         self.output_prompt += start_string
         self.output_prompt += ",\n".join(lines)
         self.output_prompt += end_string
@@ -195,7 +197,7 @@ class PromptCreation:
             json_instructions=json_instructions,
             start_string=start_string,
             end_string=end_string,
-            randomize=randomize
+            randomize=randomize,
         )
 
     def set_output_format_cot(self, start_string: str = COT_STRING) -> None:

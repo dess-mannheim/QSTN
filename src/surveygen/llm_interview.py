@@ -7,7 +7,7 @@ from .utilities.survey_objects import AnswerOptions, InterviewItem
 from .utilities import constants, placeholder
 from .utilities.constants import InterviewType
 
-from .utilities.utils import  safe_format_with_regex
+from .utilities.utils import safe_format_with_regex
 
 import pandas as pd
 
@@ -25,15 +25,6 @@ class LLMInterview:
 
     This class handles loading questions, preparing prompts, managing answer options,
     and generating prompt structures for different interview types.
-
-    Usage example:
-    --------------
-    ```python
-    interview = LLMInterview(interview_path="questions.csv")
-    interview.prepare_interview(question_stem="Do you think {QUESTION_CONTENT_PLACEHOLDER} is good?", answer_options=AnswerOptions(...))
-    prompt = interview.get_prompt_structure()
-    print(prompt)
-    ```
     """
 
     DEFAULT_INTERVIEW_ID: str = "Interview"
@@ -45,7 +36,9 @@ class LLMInterview:
 
     DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
 
-    DEFAULT_PROMPT_STRUCTURE: str = f"{placeholder.PROMPT_QUESTIONS}\n{placeholder.PROMPT_OPTIONS}"
+    DEFAULT_PROMPT_STRUCTURE: str = (
+        f"{placeholder.PROMPT_QUESTIONS}\n{placeholder.PROMPT_OPTIONS}"
+    )
 
     def __init__(
         self,
@@ -108,7 +101,7 @@ class LLMInterview:
         Returns:
             str: The constructed prompt for the interview type.
         """
-        options = ""    
+        options = ""
         automatic_output_instructions = ""
         if (
             interview_type == InterviewType.QUESTION
@@ -118,17 +111,15 @@ class LLMInterview:
 
             if self._questions[item_id].answer_options:
                 options = self._questions[item_id].answer_options.create_options_str()
-                
-                rgm = self._questions[
-                    item_id
-                ].answer_options.response_generation_method
-                if rgm is None: # by default, no response generation method is required
+
+                rgm = self._questions[item_id].answer_options.response_generation_method
+                if rgm is None:  # by default, no response generation method is required
                     automatic_output_instructions = ""
                 else:
                     automatic_output_instructions: str = rgm.get_automatic_prompt()
             else:
                 options = ""
-                automatic_output_instructions = ""            
+                automatic_output_instructions = ""
 
             format_dict = {
                 placeholder.PROMPT_QUESTIONS: question,
@@ -140,7 +131,7 @@ class LLMInterview:
             all_questions: List[str] = []
             for question in self._questions:
                 current_question_prompt = self.generate_question_prompt(question)
-                
+
                 if question.answer_options:
                     options = question.answer_options.create_options_str()
                 else:
@@ -148,30 +139,31 @@ class LLMInterview:
                 format_dict = {
                     placeholder.PROMPT_OPTIONS: options,
                 }
-                current_question_prompt = safe_format_with_regex(current_question_prompt, format_dict)
+                current_question_prompt = safe_format_with_regex(
+                    current_question_prompt, format_dict
+                )
                 all_questions.append(current_question_prompt)
 
             all_questions_str = item_separator.join(all_questions)
             if self._questions[item_id].answer_options:
                 options = self._questions[item_id].answer_options.create_options_str()
-                rgm = self._questions[
-                    item_id
-                ].answer_options.response_generation_method
+                rgm = self._questions[item_id].answer_options.response_generation_method
 
-                if rgm is None: # by default, no response generation method is required
+                if rgm is None:  # by default, no response generation method is required
                     automatic_output_instructions = ""
                 else:
-                    automatic_output_instructions: str = rgm.get_automatic_prompt(questions=self._questions)
+                    automatic_output_instructions: str = rgm.get_automatic_prompt(
+                        questions=self._questions
+                    )
             else:
                 options = ""
                 automatic_output_instructions = ""
-            
 
             format_dict = {
-                    placeholder.PROMPT_QUESTIONS: all_questions_str,
-                    placeholder.PROMPT_OPTIONS: options,
-                    placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
-                }
+                placeholder.PROMPT_QUESTIONS: all_questions_str,
+                placeholder.PROMPT_OPTIONS: options,
+                placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
+            }
 
         system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
         prompt = safe_format_with_regex(self.prompt, format_dict)
@@ -409,14 +401,13 @@ class LLMInterview:
         """
 
         if interview_question.question_stem:
-            if (
-                placeholder.QUESTION_CONTENT
-                in interview_question.question_stem
-            ):              
+            if placeholder.QUESTION_CONTENT in interview_question.question_stem:
                 format_dict = {
                     placeholder.QUESTION_CONTENT: interview_question.question_content
                 }
-                question_prompt = safe_format_with_regex(interview_question.question_stem, format_dict)
+                question_prompt = safe_format_with_regex(
+                    interview_question.question_stem, format_dict
+                )
             else:
                 question_prompt = f"""{interview_question.question_stem} {interview_question.question_content}"""
         else:
@@ -424,10 +415,10 @@ class LLMInterview:
         if interview_question.answer_options:
             _options_str = interview_question.answer_options.create_options_str()
             if _options_str is not None:
-                safe_formatter = {
-                    placeholder.PROMPT_OPTIONS: _options_str
-                }
-                question_prompt = safe_format_with_regex(question_prompt, safe_formatter)
+                safe_formatter = {placeholder.PROMPT_OPTIONS: _options_str}
+                question_prompt = safe_format_with_regex(
+                    question_prompt, safe_formatter
+                )
         return question_prompt
 
     # def _generate_inference_options(

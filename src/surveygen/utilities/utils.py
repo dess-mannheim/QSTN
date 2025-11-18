@@ -18,26 +18,28 @@ def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFram
         input dictionary is empty.
     """
     dataframes_to_concat = []
-    
+
     for key, df in parsed_results.items():
         temp_df = df.copy()
-        
-        temp_df.insert(0, 'interview_name', key.interview_name)
-        
+
+        temp_df.insert(0, "interview_name", key.interview_name)
+
         dataframes_to_concat.append(temp_df)
     if not dataframes_to_concat:
         return pd.DataFrame()
 
     return pd.concat(dataframes_to_concat, ignore_index=True)
 
+
 def safe_format_with_regex(template_string: str, data: dict) -> str:
     """
     Safely substitutes {{variable}} style placeholders using a regex.
     """
+
     def replacer(match):
         result = data.get(match.group(0), match.group(0))
         return result
 
     pattern = re.compile(r"\{\{(.*?)\}\}")
-    
+
     return pattern.sub(replacer, template_string)

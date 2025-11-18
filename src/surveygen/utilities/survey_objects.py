@@ -1,6 +1,5 @@
-from typing import List, Optional, Dict, Final, TYPE_CHECKING, NamedTuple
+from typing import List, Optional, Dict, TYPE_CHECKING, NamedTuple
 from ..utilities import constants, prompt_templates
-from ..utilities.prompt_creation import PromptCreation
 
 from ..inference.response_generation import (
     ResponseGenerationMethod,
@@ -18,7 +17,6 @@ if TYPE_CHECKING:
     from ..llm_interview import LLMInterview
 
 
-import copy
 
 
 @dataclass

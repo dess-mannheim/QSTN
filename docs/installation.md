@@ -2,6 +2,8 @@
 
 To install the project and dependencies you can use `pip`.
 
+
+(This is still TODO)
 ```bash
 pip install surveyGen
 ```

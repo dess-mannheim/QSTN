@@ -16,7 +16,6 @@ import json
 
 import json_repair
 
-import re
 
 from collections import defaultdict
 import warnings
@@ -352,7 +351,7 @@ def logprobs_parse_all(
     Args:
         survey_results: List of InterviewResult that is returned from running a survey
         allowed_choices: List of possible answer options OR dictionary that maps answer options to multiple tokens that encode each option
-    
+
     Returns:
         Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
     """

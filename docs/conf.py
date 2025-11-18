@@ -11,7 +11,7 @@ import sys
 # Make sure the path to your project's source code is on the Python path
 # This is crucial for Sphinx's autodoc extension to find your modules.
 # Replace '../src' with the actual path to your source code directory.
-sys.path.insert(0, os.path.abspath('../src'))
+sys.path.insert(0, os.path.abspath('../src/surveygen'))
 
 project = 'SurveyGen'
 copyright = '2025, Maximilian Kreutner'
@@ -31,6 +31,16 @@ extensions = [
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+
+# Tell Sphinx to use MyST for docstrings
+autodoc_default_options = {
+    'members': True,
+    'undoc-members': True,
+    'private-members': False,
+}
+
+# Use the description for typehints, not the signature
+autodoc_typehints = "description"
 
 source_suffix = {
     '.rst': 'restructuredtext',

@@ -37,7 +37,6 @@ from typing import (
     Optional,
     Union,
     Any,
-    overload,
     Literal,
 )
 from string import ascii_lowercase, ascii_uppercase
@@ -57,7 +56,6 @@ from .inference.survey_inference import batch_generation, batch_turn_by_turn_gen
 from .inference.response_generation import (
     ResponseGenerationMethod,
     JSONResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
 )
 
 from .llm_interview import LLMInterview, InterviewType
@@ -80,7 +78,7 @@ from tqdm.auto import tqdm
 
 class SurveyOptionGenerator:
     """
-    This class offers robust creation of options. Can do various prompt pertubations. 
+    This class offers robust creation of options. Can do various prompt pertubations.
     When used in Conjunction with response generation methods the tokens for the output of the model can be restricted.
     """
 
@@ -162,8 +160,8 @@ class SurveyOptionGenerator:
                 labels = [
                     "Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"
                 ]
-                options = SurveyOptionGenerator.generate_likert_options(n=5, answer_texts=labels)"""
-
+                options = SurveyOptionGenerator.generate_likert_options(n=5, answer_texts=labels)
+        """
 
         if only_from_to_scale:
             if len(answer_texts) != 2:

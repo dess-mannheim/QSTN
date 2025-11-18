@@ -1,3 +1,5 @@
+# Tutorials
+
 This section provides in-depth tutorials on how to use the project's features.
 
 ```{toctree}
