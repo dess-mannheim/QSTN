@@ -126,9 +126,28 @@ with col_llm:
 
 with col_prompt_display:
     st.subheader("📄 Live Preview")
+    
+    # Survey method selector
+    survey_method_options = {
+        "Question by Question": ("single_item", InterviewType.QUESTION),
+        "All Questions in One Prompt": ("battery", InterviewType.ONE_PROMPT),
+        "In-Context Learning": ("sequential", InterviewType.CONTEXT),
+    }
+    
+    survey_method_display = state.create(
+        st.selectbox,
+        "survey_method",
+        "Survey Method",
+        options=list(survey_method_options.keys()),
+        initial_value="Question by Question",
+        help="Choose how to conduct the survey: Question by Question (one at a time), All in One Prompt (all questions together), or In-Context Learning (with conversation history)."
+    )
+    
+    # Get the method name and interview type from selection
+    selected_method_name, selected_interview_type = survey_method_options[survey_method_display]
 
     with st.container(border=True):
-        current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+        current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(selected_interview_type)
         current_system_prompt = current_system_prompt.replace("\n", "  \n")
         current_prompt = current_prompt.replace("\n", "  \n")
         st.write(current_system_prompt)
@@ -176,7 +195,7 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
 
     # Helper function for asyncronous runs
     def run_async_in_thread(
-        result_q, client, interviews, model_name, **inference_config
+        result_q, client, interviews, model_name, survey_method_name, **inference_config
     ):
         queue_writer = QueueWriter(log_queue)
 
@@ -184,7 +203,17 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
         # API concurrency should be  configurable in the GUI
         try:
             with redirect_stderr(queue_writer):
-                result = conduct_survey_single_item(
+                # Select the appropriate survey method based on user choice
+                if survey_method_name == "single_item":
+                    survey_func = conduct_survey_single_item
+                elif survey_method_name == "battery":
+                    survey_func = conduct_survey_battery
+                elif survey_method_name == "sequential":
+                    survey_func = conduct_survey_sequential
+                else:
+                    survey_func = conduct_survey_single_item  # Default fallback
+                
+                result = survey_func(
                     client,
                     interviews=interviews,
                     client_model_name=model_name,
@@ -202,9 +231,18 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
     while not result_queue.empty():
         result_queue.get()
 
+    # Get the selected survey method
+    survey_method_display = st.session_state.get("survey_method", "Question by Question")
+    survey_method_options = {
+        "Question by Question": ("single_item", InterviewType.QUESTION),
+        "All Questions in One Prompt": ("battery", InterviewType.ONE_PROMPT),
+        "In-Context Learning": ("sequential", InterviewType.CONTEXT),
+    }
+    selected_method_name, _ = survey_method_options.get(survey_method_display, ("single_item", InterviewType.QUESTION))
+    
     thread = threading.Thread(
         target=run_async_in_thread,
-        args=(result_queue, client, st.session_state.interviews, model_name),
+        args=(result_queue, client, st.session_state.interviews, model_name, selected_method_name),
         kwargs=inference_config,
     )
     thread.start()
