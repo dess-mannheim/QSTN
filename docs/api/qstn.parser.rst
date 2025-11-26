@@ -1,13 +1,13 @@
-surveygen.parser package
+Parser
 ========================
 
 Submodules
 ----------
 
-surveygen.parser.llm\_answer\_parser module
+qstn.parser.llm\_answer\_parser module
 -------------------------------------------
 
-.. automodule:: surveygen.parser.llm_answer_parser
+.. automodule:: qstn.parser.llm_answer_parser
    :members:
    :undoc-members:
    :show-inheritance:
@@ -15,7 +15,7 @@ surveygen.parser.llm\_answer\_parser module
 Module contents
 ---------------
 
-.. automodule:: surveygen.parser
+.. automodule:: qstn.parser
    :members:
    :undoc-members:
    :show-inheritance:

@@ -1,7 +1,7 @@
-surveygen
+qstn
 =========
 
 .. toctree::
    :maxdepth: 4
 
-   surveygen
+   qstn

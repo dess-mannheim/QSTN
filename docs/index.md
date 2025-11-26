@@ -19,7 +19,7 @@ guides/index
 
 ```{toctree}
 :caption: API Reference
-:maxdepth: 2
+:maxdepth: 5
 
 api_reference
 ```

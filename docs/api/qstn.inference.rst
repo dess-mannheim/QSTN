@@ -1,29 +1,29 @@
-surveygen.inference package
+Inference
 ===========================
 
 Submodules
 ----------
 
-surveygen.inference.dynamic\_pydantic module
+qstn.inference.dynamic\_pydantic module
 --------------------------------------------
 
-.. automodule:: surveygen.inference.dynamic_pydantic
+.. automodule:: qstn.inference.dynamic_pydantic
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.inference.response\_generation module
+qstn.inference.response\_generation module
 -----------------------------------------------
 
-.. automodule:: surveygen.inference.response_generation
+.. automodule:: qstn.inference.response_generation
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.inference.survey\_inference module
+qstn.inference.survey\_inference module
 --------------------------------------------
 
-.. automodule:: surveygen.inference.survey_inference
+.. automodule:: qstn.inference.survey_inference
    :members:
    :undoc-members:
    :show-inheritance:
@@ -31,7 +31,7 @@ surveygen.inference.survey\_inference module
 Module contents
 ---------------
 
-.. automodule:: surveygen.inference
+.. automodule:: qstn.inference
    :members:
    :undoc-members:
    :show-inheritance:

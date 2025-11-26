@@ -1,4 +1,4 @@
-surveygen package
+QSTN
 =================
 
 Subpackages
@@ -7,25 +7,25 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
-   surveygen.inference
-   surveygen.parser
-   surveygen.utilities
+   qstn.inference
+   qstn.parser
+   qstn.utilities
 
 Submodules
 ----------
 
-surveygen.llm\_interview module
+qstn.llm\_interview module
 -------------------------------
 
-.. automodule:: surveygen.llm_interview
+.. automodule:: qstn.llm_interview
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.survey\_manager module
+qstn.survey\_manager module
 --------------------------------
 
-.. automodule:: surveygen.survey_manager
+.. automodule:: qstn.survey_manager
    :members:
    :undoc-members:
    :show-inheritance:
@@ -33,7 +33,7 @@ surveygen.survey\_manager module
 Module contents
 ---------------
 
-.. automodule:: surveygen
+.. automodule:: qstn
    :members:
    :undoc-members:
    :show-inheritance:

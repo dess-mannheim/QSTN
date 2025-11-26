@@ -1,53 +1,53 @@
-surveygen.utilities package
+Utilities
 ===========================
 
 Submodules
 ----------
 
-surveygen.utilities.constants module
+qstn.utilities.constants module
 ------------------------------------
 
-.. automodule:: surveygen.utilities.constants
+.. automodule:: qstn.utilities.constants
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.utilities.placeholder module
+qstn.utilities.placeholder module
 --------------------------------------
 
-.. automodule:: surveygen.utilities.placeholder
+.. automodule:: qstn.utilities.placeholder
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.utilities.prompt\_creation module
+qstn.utilities.prompt\_creation module
 -------------------------------------------
 
-.. automodule:: surveygen.utilities.prompt_creation
+.. automodule:: qstn.utilities.prompt_creation
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.utilities.prompt\_templates module
+qstn.utilities.prompt\_templates module
 --------------------------------------------
 
-.. automodule:: surveygen.utilities.prompt_templates
+.. automodule:: qstn.utilities.prompt_templates
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.utilities.survey\_objects module
+qstn.utilities.survey\_objects module
 ------------------------------------------
 
-.. automodule:: surveygen.utilities.survey_objects
+.. automodule:: qstn.utilities.survey_objects
    :members:
    :undoc-members:
    :show-inheritance:
 
-surveygen.utilities.utils module
+qstn.utilities.utils module
 --------------------------------
 
-.. automodule:: surveygen.utilities.utils
+.. automodule:: qstn.utilities.utils
    :members:
    :undoc-members:
    :show-inheritance:
@@ -55,7 +55,7 @@ surveygen.utilities.utils module
 Module contents
 ---------------
 
-.. automodule:: surveygen.utilities
+.. automodule:: qstn.utilities
    :members:
    :undoc-members:
    :show-inheritance:
