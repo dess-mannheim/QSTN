@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath('../src'))
 
-project = 'SurveyGen'
+project = 'QSTN'
 copyright = '2025, Maximilian Kreutner'
 author = 'Maximilian Kreutner'
 

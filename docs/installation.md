@@ -5,12 +5,12 @@ To install the project and dependencies you can use `pip`.
 
 (This is still TODO)
 ```bash
-pip install surveyGen
+pip install qstn
 ```
 
 You can install the project from source as well by cloning the repository:
 
 ```bash
-git clone https://github.com/dess-mannheim/SurveyGen.git
-cd SurveyGen
+git clone https://github.com/dess-mannheim/QSTN.git
+cd QSTN
 pip install -e .
