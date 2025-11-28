@@ -1,19 +1,6 @@
 QSTN
 =================
 
-Subpackages
------------
-
-.. toctree::
-   :maxdepth: 4
-
-   qstn.inference
-   qstn.parser
-   qstn.utilities
-
-Submodules
-----------
-
 Prompt Generation
 -------------------------------
 
@@ -29,3 +16,13 @@ Survey Manager
    :members:
    :undoc-members:
    :show-inheritance:
+
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   qstn.inference
+   qstn.parser
+   qstn.utilities

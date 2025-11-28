@@ -1,6 +1,6 @@
 # Detailed Documentation
 
-This is the auto-generated documentation from the source code.
+You can find the full documentation here.
 
 ```{toctree}
 :maxdepth: 4

@@ -1,3 +1,0 @@
-# Tutorial 2: Advanced Usage
-
-Now we will look at more advanced features...
