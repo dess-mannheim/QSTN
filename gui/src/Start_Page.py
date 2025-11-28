@@ -4,7 +4,7 @@ from io import StringIO
 
 from qstn.survey_manager import SurveyCreator
 
-from qstn.llm_questionnaire import LLMQuestionnaire
+from qstn.prompt_builder import LLMPrompt
 
 st.set_page_config(layout="wide")
 st.title("Questionnaire")
@@ -55,6 +55,6 @@ if df_population is not None and df_questionnaire is not None:
 st.divider()
 
 if st.button("Confirm and Prepare Questionnaire", type="primary", disabled=disabled, use_container_width=True):
-    questionnaires: list[LLMQuestionnaire] = SurveyCreator.from_dataframe(df_population, df_questionnaire)
+    questionnaires: list[LLMPrompt] = SurveyCreator.from_dataframe(df_population, df_questionnaire)
     st.session_state.questionnaires = questionnaires
     st.switch_page("pages/01_Prompt_Configuration.py")

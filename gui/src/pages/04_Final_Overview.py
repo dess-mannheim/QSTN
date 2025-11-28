@@ -14,7 +14,7 @@ import logging
 from contextlib import redirect_stderr, redirect_stdout
 
 from qstn.parser.llm_answer_parser import raw_responses
-from qstn.utilities.constants import QuestionnaireType
+from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities.utils import create_one_dataframe
 from qstn.survey_manager import (
     conduct_survey_sequential,
@@ -129,9 +129,9 @@ with col_prompt_display:
     
     # Survey method selector
     survey_method_options = {
-        "Single item": ("single_item", QuestionnaireType.SINGLE_ITEM),
-        "Battery": ("battery", QuestionnaireType.BATTERY),
-        "Sequential": ("sequential", QuestionnaireType.SEQUENTIAL),
+        "Single item": ("single_item", QuestionnairePresentation.SINGLE_ITEM),
+        "Battery": ("battery", QuestionnairePresentation.BATTERY),
+        "Sequential": ("sequential", QuestionnairePresentation.SEQUENTIAL),
     }
     
     survey_method_display = state.create(
@@ -215,7 +215,7 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
                 
                 result = survey_func(
                     client,
-                    questionnaires=questionnaires,
+                    llm_prompts=questionnaires,
                     client_model_name=model_name,
                     api_concurrency=100,
                     **inference_config,
@@ -223,6 +223,7 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
 
         except Exception as e:
             result = e
+            st.error(e)
         finally:
             result_q.put(result)
 
@@ -234,11 +235,11 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
     # Get the selected survey method
     survey_method_display = st.session_state.get("survey_method", "Single item")
     survey_method_options = {
-        "Single item": ("single_item", QuestionnaireType.SINGLE_ITEM),
-        "Battery": ("battery", QuestionnaireType.BATTERY),
-        "Sequential": ("sequential", QuestionnaireType.SEQUENTIAL),
+        "Single item": ("single_item", QuestionnairePresentation.SINGLE_ITEM),
+        "Battery": ("battery", QuestionnairePresentation.BATTERY),
+        "Sequential": ("sequential", QuestionnairePresentation.SEQUENTIAL),
     }
-    selected_method_name, _ = survey_method_options.get(survey_method_display, ("single_item", QuestionnaireType.SINGLE_ITEM))
+    selected_method_name, _ = survey_method_options.get(survey_method_display, ("single_item", QuestionnairePresentation.SINGLE_ITEM))
     
     thread = threading.Thread(
         target=run_async_in_thread,
@@ -255,7 +256,7 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
             # Here we can write directly to the UI, as it is the main thread
             # TQDM uses carriage returns (\r) to animate in the console, we only show clear lines
             log_message = log_queue.get_nowait()
-            # This is quite a hacky solution for now, we should adjust surveygen to make the messages clearly parsable.
+            # This is quite a hacky solution for now, we should adjust QSTN to make the messages clearly parsable.
             if "[A" not in log_message and "Processing Prompts" not in log_message:
                 all_questions_placeholder.text(log_message.strip().replace("\r", ""))
 

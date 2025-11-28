@@ -1,7 +1,6 @@
 import streamlit as st
-from qstn.survey_manager import SurveyOptionGenerator
-from qstn.llm_questionnaire import LLMQuestionnaire
-from qstn.utilities.constants import QuestionnaireType
+from qstn.prompt_builder import LLMPrompt
+from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities import placeholder
 from typing import Any
 
@@ -59,20 +58,20 @@ def process_inputs(input: Any, field_id: str) -> str:
         survey_options = None
 
     if field_id == question_stem_field:
-        LLMQuestionnaire.prepare_questionnaire
-        st.session_state.temporary_questionnaire.prepare_questionnaire(
+        LLMPrompt.prepare_prompt
+        st.session_state.temporary_questionnaire.prepare_prompt(
             question_stem=input,
             answer_options=survey_options,
             randomized_item_order=randomize_order_bool,
         )
-        st.session_state.base_questionnaire.prepare_questionnaire(
+        st.session_state.base_questionnaire.prepare_prompt(
             question_stem=input,
             answer_options=survey_options,
             randomized_item_order=randomize_order_bool,
         )
     elif field_id == randomize_order_tick:
         if input == True:
-            st.session_state.temporary_questionnaire.prepare_questionnaire(
+            st.session_state.temporary_questionnaire.prepare_prompt(
                 question_stem=question_stem_input,
                 answer_options=survey_options,
                 randomized_item_order=input,
@@ -260,12 +259,12 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
                 survey_options = None
 
             if randomize_order_bool:
-                st.session_state.temporary_questionnaire.prepare_questionnaire(
+                st.session_state.temporary_questionnaire.prepare_prompt(
                     question_stem=question_stem_input,
                     answer_options=survey_options,
                     randomized_item_order=randomize_order_bool,
                 )
-            st.session_state.base_questionnaire.prepare_questionnaire(
+            st.session_state.base_questionnaire.prepare_prompt(
                 question_stem=question_stem_input,
                 answer_options=survey_options,
                 randomized_item_order=False,
@@ -277,7 +276,7 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             # Update system prompt and main prompt for preview (apply to temporary_questionnaire)
             st.session_state.temporary_questionnaire.system_prompt = new_system_prompt
             st.session_state.temporary_questionnaire.prompt = new_prompt
-            current_system_prompt, current_prompt = st.session_state.temporary_questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.SEQUENTIAL)
+            current_system_prompt, current_prompt = st.session_state.temporary_questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
             current_system_prompt = current_system_prompt.replace("\n", "  \n")
             current_prompt = current_prompt.replace("\n", "  \n")
             st.write(current_system_prompt)
@@ -301,7 +300,7 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
 
     if st.button("Confirm and Prepare Questionnaire", type="primary", use_container_width=True):
         for questionnaire in st.session_state.questionnaires:
-            questionnaire.prepare_questionnaire(
+            questionnaire.prepare_prompt(
                 question_stem=question_stem_input,
                 answer_options=survey_options,
                 randomized_item_order=randomize_order_bool,

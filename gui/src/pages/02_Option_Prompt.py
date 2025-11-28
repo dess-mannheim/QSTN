@@ -1,6 +1,5 @@
 import streamlit as st
-from qstn.survey_manager import SurveyOptionGenerator
-from qstn.llm_questionnaire import LLMQuestionnaire
+from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities.prompt_templates import (
     LIST_OPTIONS_DEFAULT,
     SCALE_OPTIONS_DEFAULT,
@@ -178,7 +177,7 @@ if submitted:
         validation_ok = False
 
     if validation_ok:
-        survey_options = SurveyOptionGenerator.generate_likert_options(
+        survey_options = generate_likert_options(
             n=n_options,
             answer_texts=answer_texts_list,
             only_from_to_scale=only_from_to_scale,
