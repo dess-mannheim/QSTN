@@ -39,14 +39,12 @@ from typing import (
     Any,
     Literal,
 )
-from string import ascii_lowercase, ascii_uppercase
 
 from .utilities.survey_objects import (
     AnswerOptions,
     QuestionLLMResponseTuple,
     AnswerTexts,
 )
-from .utilities import prompt_templates
 from .utilities import constants
 from .utilities import utils
 
@@ -58,9 +56,9 @@ from .inference.response_generation import (
     JSONResponseGenerationMethod,
 )
 
-from .llm_questionnaire import LLMQuestionnaire, QuestionnaireType
+from .prompt_builder import LLMPrompt, QuestionnairePresentation
 
-from .utilities.survey_objects import AnswerOptions, QuestionnaireResult
+from .utilities.survey_objects import AnswerOptions, InferenceResult
 
 from vllm import LLM
 
@@ -76,298 +74,9 @@ import random
 from tqdm.auto import tqdm
 
 
-class SurveyOptionGenerator:
-    """
-    This class offers robust creation of options. Can do various prompt pertubations.
-    When used in Conjunction with response generation methods the tokens for the output of the model can be restricted.
-    """
-
-    LIKERT_5: List[str] = [
-        "disagree strongly",
-        "disagree a little",
-        "neither agree nor disagree",
-        "agree a little",
-        "agree strongly",
-    ]
-    LIKERT_NO_MIDDLE: List[str] = [
-        "disagree strongly",
-        "disagree a little",
-        "agree a little",
-        "agree strongly",
-    ]
-
-    LIKERT_IMPORTANCE_FROM_TO: List[str] = ["Not at all important", "Very Important"]
-    LIKERT_JUSTIFIABLE_FROM_TO: List[str] = ["Never justifiable", "Always justifiable"]
-    _IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
-
-    @staticmethod
-    def generate_likert_options(
-        n: int,
-        answer_texts: Optional[List[str]],
-        only_from_to_scale: bool = False,
-        random_order: bool = False,
-        reversed_order: bool = False,
-        even_order: bool = False,
-        start_idx: int = 1,
-        list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
-        scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
-        index_answer_separator: str = ": ",
-        options_separator: str = ", ",
-        idx_type: _IDX_TYPES = "integer",
-        response_generation_method: Optional[ResponseGenerationMethod] = None,
-    ) -> AnswerOptions:
-        """Generates a set of options and a prompt for a Likert-style scale.
-
-        This function creates a numeric or alphabetic scale of a specified size (n),
-        optionally attaching textual labels to the scale. It provides
-        extensive control over ordering, formatting, and the final prompt string.
-
-        Args:
-            n (int): The number of options to generate (e.g., 5 for a 5-point scale).
-            answer_texts (Optional[List[str]]): A list of text labels for each option.
-                Its length must equal `n` if provided.
-            only_from_to_scale (bool, optional): If True, the prompt will only show the
-                min and max of the scale (e.g., "1 to 5"). Defaults to False.
-            random_order (bool, optional): If True, the options are randomized. Defaults to False.
-            reversed_order (bool, optional): If True, the options are in reversed input order.
-                Defaults to False.
-            even_order (bool, optional): If True, options the center option will be removed.
-                E.g., for n=5: 1, 2, 4, 5
-            start_idx (int, optional): The starting index for the scale (usually 0 or 1).
-                Defaults to 1.
-            list_prompt_template (str, optional): The template for prompts that list all options.
-            scale_prompt_template (str, optional): The template for prompts that only show the range.
-            index_answer_separator (str, optional): The string used to separate an index from its
-                text label (e.g., "1: Strongly Agree"). Defaults to ": ".
-            options_separator (str, optional): The string used to separate options when listed
-                in the prompt. Defaults to ", ".
-            idx_type (_IDX_TYPES, optional): The type of index to use: "integer", "upper" (A, B, C),
-                or "lower" (a, b, c). Defaults to "integer".
-            response_generation_method (Optional[ResponseGenerationMethod], optional): An object
-                controlling how the final response object is generated. Defaults to None.
-
-        Raises:
-            ValueError: If `answer_texts` is provided and its length does not match `n`.
-
-        Returns:
-            AnswerOptions: An object containing the generated list of option strings and the
-            final formatted prompt ready for display.
-
-        Example:
-            .. code-block:: python
-
-                # Generate a classic 5-point "Strongly Disagree" to "Strongly Agree" scale
-                labels = [
-                    "Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"
-                ]
-                options = SurveyOptionGenerator.generate_likert_options(n=5, answer_texts=labels)
-        """
-
-        if only_from_to_scale:
-            if len(answer_texts) != 2:
-                raise ValueError(
-                    f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'."
-                )
-            if idx_type != "integer":
-                raise ValueError(
-                    f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'."
-                )
-        else:
-            if answer_texts:
-                if len(answer_texts) != n:
-                    raise ValueError(
-                        f"answer_texts and n need to be the same length, but answer_texts has length {len(answer_texts)} and n was given as {n}."
-                    )
-        if even_order:
-            if n % 2 != 0:
-                raise ValueError(
-                    "If you want to turn a scale even, it should be odd before."
-                )
-            middle_index = n // 2
-            answer_texts = (
-                answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
-            )
-            n = n - 1
-        if random_order:
-            if len(answer_texts) < 2:
-                raise ValueError(
-                    "There must be at least two answer options to reorder randomly."
-                )
-            random.shuffle(
-                answer_texts
-            )  # no assignment needed because shuffles already inplace
-        if reversed_order:
-            if len(answer_texts) < 2:
-                raise ValueError(
-                    "There must be at least two answer options to reorder in reverse."
-                )
-            answer_options = answer_options[::-1]
-
-        answer_option_indices = []
-        if idx_type == "no_index":
-            # no index, just the answer options directly
-            answer_option_indices = None
-        elif idx_type == "integer":
-            for i in range(n):
-                answer_code = i + start_idx
-                answer_option_indices.append(str(answer_code))
-        else:
-            # TODO @Jens add these to constants.py
-            if idx_type == "char_lower":
-                for i in range(n):
-                    answer_option_indices.append(ascii_lowercase[(i + start_idx) % 26])
-            elif idx_type == "char_upper":
-                for i in range(n):
-                    answer_option_indices.append(ascii_uppercase[(i + start_idx) % 26])
-
-        answer_texts_object = AnswerTexts(
-            answer_texts=answer_texts,
-            indices=answer_option_indices,
-            index_answer_seperator=index_answer_separator,
-            option_seperators=options_separator,
-            only_scale=only_from_to_scale,
-        )
-
-        questionnaire_options = AnswerOptions(
-            answer_texts=answer_texts_object,
-            from_to_scale=only_from_to_scale,
-            list_prompt_template=list_prompt_template,
-            scale_prompt_template=scale_prompt_template,
-            response_generation_method=response_generation_method,
-        )
-
-        return questionnaire_options
-
-    # #TODO: It seems to me like this method and the one above could be merged? (Georg)
-    # @staticmethod
-    # def generate_generic_options(
-    #     answer_texts: Dict,
-    #     only_from_to_scale: bool = False,
-    #     random_order: bool = False,
-    #     reversed_order: bool = False,
-    #     even_order: bool = False,
-    #     idx_type: Optional[_IDX_TYPES] = None, # uses the answer_texts.keys() as an index by default
-    #     list_prompt_template: Optional[str] = prompt_templates.LIST_OPTIONS_DEFAULT,
-    #     scale_prompt_template: Optional[str] = prompt_templates.SCALE_OPTIONS_DEFAULT,
-    #     options_separator: str = ", ",
-    # ):
-
-    #     n = len(answer_texts.values())
-    #     answer_codes = answer_texts.keys()
-    #     answer_texts = answer_texts.values()
-    #     # answer_options = descriptions
-
-    #     if idx_type == 'char_lower':
-    #         if all(isinstance(item, int) for item in answer_codes):
-    #             new_codes = []
-    #             for i in answer_codes:
-    #                 code = ascii_lowercase[i - 1]
-    #                 new_codes.append(code)
-    #             answer_codes = new_codes
-    #         else:
-    #             answer_codes = [s.lower() for s in answer_codes]
-    #     elif idx_type == 'char_upper':
-    #         if all(isinstance(item, int) for item in answer_codes):
-    #             new_codes = []
-    #             for i in answer_codes:
-    #                 code = ascii_uppercase[i - 1]
-    #                 new_codes.append(code)
-    #             answer_codes = new_codes
-    #         else:
-    #             answer_codes = [s.upper() for s in answer_codes]
-    #     elif idx_type == 'integer':
-    #         answer_codes = range(1, len(answer_codes) + 1)
-
-    #     answer_options = dict(zip(answer_codes, answer_texts))
-
-    #     if only_from_to_scale:
-    #         assert all(
-    #             isinstance(item, int) for item in answer_codes
-    #         ), "To use from-to scale you must have integer answer codes."
-
-    #     if random_order:
-    #         assert (
-    #             n >= 2
-    #         ), "There must be at least two answer options to reorder randomly."
-    #         temp = list(answer_texts)
-    #         random.shuffle(temp)
-    #         # reassigning to keys
-    #         answer_options = dict(zip(answer_codes, temp))
-    #     if reversed_order:
-    #         assert (
-    #             n >= 2
-    #         ), "There must be at least two answer options to reverse options."
-    #         reversed_values = list(answer_texts)[::-1]
-    #         answer_options = dict(zip(answer_codes, reversed_values))
-    #     if even_order:
-    #         assert n % 2 != 0, "There must be a odd number of options!"
-    #         middle_index = n // 2
-    #         # Get the key of the item to be removed
-    #         key_to_remove = list(answer_codes)[middle_index]
-    #         # Create a new dictionary, excluding the item with key_to_remove
-    #         # This uses a dictionary comprehension.
-    #         answer_options = {
-    #             key: value
-    #             for key, value in answer_options.items()
-    #             if key != key_to_remove
-    #         }
-    #         if all(isinstance(element, int) for element in list(answer_codes)):
-    #             first_part = list(answer_codes)[:middle_index]
-    #             last_part = list(answer_codes)[middle_index + 1 :]
-    #             last_part = [x - 1 for x in last_part]
-    #             answer_options = dict(
-    #                 zip(first_part + last_part, answer_options.values())
-    #             )
-    #         elif set(list(answer_codes)).issubset(list(ascii_lowercase)):
-    #             first_part = list(answer_codes)[:middle_index]
-    #             # print("First part:", first_part)
-    #             last_part = list(answer_codes)[middle_index + 1 :]
-    #             # print("Last part:", last_part)
-    #             last_parts = []
-    #             for i in range(middle_index + 1, len(list(answer_codes))):
-    #                 part = list(ascii_lowercase)[i - 1]
-    #                 last_parts.append(part)
-    #                 # print("Last parts:", last_parts)
-    #             answer_options = dict(
-    #                 zip(first_part + last_parts, answer_options.values())
-    #             )
-    #         elif set(list(answer_codes)).issubset(list(ascii_uppercase)):
-    #             first_part = list(answer_codes)[:middle_index]
-    #             # print("First part:", first_part)
-    #             last_part = list(answer_codes)[middle_index + 1 :]
-    #             # print("Last part:", last_part)
-    #             last_parts = []
-    #             for i in range(middle_index + 1, len(list(answer_codes))):
-    #                 part = list(ascii_uppercase)[i - 1]
-    #                 last_parts.append(part)
-    #                 # print("Last parts:", last_parts)
-    #             answer_options = dict(
-    #                 zip(first_part + last_parts, answer_options.values())
-    #             )
-
-    #     if idx_type == 'no_index':
-    #         answer_option_strings = list(answer_options.values())
-    #         answer_option_index = None
-    #     else:
-    #         answer_option_strings = [f"{key}: {val}" for key, val in answer_options.items()]
-    #         answer_option_index = list(answer_options.keys())
-    #     #print(answer_options)
-
-    #     interview_option = AnswerOptions(
-    #         answer_text = answer_option_strings,
-    #         index = answer_option_index,
-    #         from_to_scale = only_from_to_scale,
-    #         list_prompt_template = list_prompt_template,
-    #         scale_prompt_template = scale_prompt_template,
-    #         options_seperator = options_separator,
-    #     )
-
-    #     return interview_option
-
-
 def conduct_survey_single_item(
     model: Union[LLM, AsyncOpenAI],
-    questionnaires: Union[LLMQuestionnaire, List[LLMQuestionnaire]],
+    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -378,7 +87,7 @@ def conduct_survey_single_item(
     chat_template: Optional[str] = None,
     chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
-) -> List[QuestionnaireResult]:
+) -> List[InferenceResult]:
     """
     Conducts a survey by asking questions one at a time.
 
@@ -403,31 +112,31 @@ def conduct_survey_single_item(
 
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
-    if isinstance(questionnaires, LLMQuestionnaire):
-        questionnaires = [questionnaires]
+    if isinstance(llm_prompts, LLMPrompt):
+        llm_prompts = [llm_prompts]
 
-    max_survey_length: int = max(len(questionnaire._questions) for questionnaire in questionnaires)
+    max_survey_length: int = max(len(questionnaire._questions) for questionnaire in llm_prompts)
     question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    for i in range(len(questionnaires)):
+    for i in range(len(llm_prompts)):
         # inference_option = interviews[i]._generate_inference_options()
         # inference_options.append(inference_opti
         question_llm_response_pairs.append({})
 
-    survey_results: List[QuestionnaireResult] = []
+    survey_results: List[InferenceResult] = []
 
     for i in (
         tqdm(range(max_survey_length), desc="Processing questionnaires")
         if print_progress
         else range(max_survey_length)
     ):
-        current_batch: List[LLMQuestionnaire] = [
-            questionnaire for questionnaire in questionnaires if len(questionnaire._questions) > i
+        current_batch: List[LLMPrompt] = [
+            questionnaire for questionnaire in llm_prompts if len(questionnaire._questions) > i
         ]
 
         system_messages, prompts = zip(
             *[
-                questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.SINGLE_ITEM, i)
+                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SINGLE_ITEM, i)
                 for questionnaire in current_batch
             ]
         )
@@ -484,21 +193,21 @@ def conduct_survey_single_item(
 
         # TODO: check that this works with logprobs
         _intermediate_saves(
-            questionnaires,
+            llm_prompts,
             n_save_step,
             intermediate_save_file,
             question_llm_response_pairs,
             i,
         )
 
-    for i, survey in enumerate(questionnaires):
-        survey_results.append(QuestionnaireResult(survey, question_llm_response_pairs[i]))
+    for i, survey in enumerate(llm_prompts):
+        survey_results.append(InferenceResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
 
 
 def _intermediate_saves(
-    questionnaires: List[LLMQuestionnaire],
+    questionnaires: List[LLMPrompt],
     n_save_step: int,
     intermediate_save_file: str,
     question_llm_response_pairs: QuestionLLMResponseTuple,
@@ -516,10 +225,10 @@ def _intermediate_saves(
     """
     if n_save_step:
         if i % n_save_step == 0:
-            intermediate_survey_results: List[QuestionnaireResult] = []
+            intermediate_survey_results: List[InferenceResult] = []
             for j, questionnaire in enumerate(questionnaires):
                 intermediate_survey_results.append(
-                    QuestionnaireResult(questionnaire, question_llm_response_pairs[j])
+                    InferenceResult(questionnaire, question_llm_response_pairs[j])
                 )
             parsed_results = raw_responses(intermediate_survey_results)
             utils.create_one_dataframe(parsed_results).to_csv(intermediate_save_file)
@@ -562,7 +271,7 @@ def _intermediate_save_path_check(n_save_step: int, intermediate_save_path: str)
 
 def conduct_survey_battery(
     model: Union[LLM, AsyncOpenAI],
-    questionnaires: Union[LLMQuestionnaire, List[LLMQuestionnaire]],
+    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     n_save_step: Optional[int] = None,
@@ -574,7 +283,7 @@ def conduct_survey_battery(
     chat_template_kwargs: Dict[str, Any] = {},
     item_separator: str = "\n",
     **generation_kwargs: Any,
-) -> List[QuestionnaireResult]:
+) -> List[InferenceResult]:
     """
     Conducts the entire survey in one single LLM prompt.
 
@@ -598,8 +307,8 @@ def conduct_survey_battery(
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
-    if isinstance(questionnaires, LLMQuestionnaire):
-        questionnaires = [questionnaires]
+    if isinstance(llm_prompts, LLMPrompt):
+        llm_prompts = [llm_prompts]
     # inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
@@ -609,10 +318,10 @@ def conduct_survey_battery(
 
     # if print_progress:
     #     print("Constructing prompts")
-    for i in range(len(questionnaires)):
+    for i in range(len(llm_prompts)):
         question_llm_response_pairs.append({})
 
-    survey_results: List[QuestionnaireResult] = []
+    survey_results: List[InferenceResult] = []
 
     for i in (
         tqdm(range(max_survey_length), desc="Processing questionnaires")
@@ -620,12 +329,12 @@ def conduct_survey_battery(
         else range(max_survey_length)
     ):
         current_batch = [
-            questionnaire for questionnaire in questionnaires if len(questionnaire._questions) > i
+            questionnaire for questionnaire in llm_prompts if len(questionnaire._questions) > i
         ]
 
         system_messages, prompts = zip(
             *[
-                questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.BATTERY, i)
+                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.BATTERY, i)
                 for questionnaire in current_batch
             ]
         )
@@ -673,22 +382,22 @@ def conduct_survey_battery(
             )
 
         _intermediate_saves(
-            questionnaires,
+            llm_prompts,
             n_save_step,
             intermediate_save_file,
             question_llm_response_pairs,
             i,
         )
 
-    for i, survey in enumerate(questionnaires):
-        survey_results.append(QuestionnaireResult(survey, question_llm_response_pairs[i]))
+    for i, survey in enumerate(llm_prompts):
+        survey_results.append(InferenceResult(survey, question_llm_response_pairs[i]))
 
     return survey_results
 
 
 def conduct_survey_sequential(
     model: Union[LLM, AsyncOpenAI],
-    questionnaires: Union[LLMQuestionnaire, List[LLMQuestionnaire]],
+    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
@@ -697,7 +406,7 @@ def conduct_survey_sequential(
     intermediate_save_file: Optional[str] = None,
     seed: int = 42,
     **generation_kwargs: Any,
-) -> List[QuestionnaireResult]:
+) -> List[InferenceResult]:
     """
     Conducts surveys using in-context learning approach.
 
@@ -718,22 +427,22 @@ def conduct_survey_sequential(
         List[QuestionnaireResult]: Results for each questionnaire.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
-    if isinstance(questionnaires, LLMQuestionnaire):
-        questionnaires = [questionnaires]
+    if isinstance(llm_prompts, LLMPrompt):
+        llm_prompts = [llm_prompts]
 
-    max_survey_length: int = max(len(questionnaire._questions) for questionnaire in questionnaires)
+    max_survey_length: int = max(len(questionnaire._questions) for questionnaire in llm_prompts)
 
     question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
 
-    for i in range(len(questionnaires)):
+    for i in range(len(llm_prompts)):
         question_llm_response.append({})
 
-    survey_results: List[QuestionnaireResult] = []
+    survey_results: List[InferenceResult] = []
 
     all_prompts: List[List[str]] = []
     assistant_messages: List[List[str]] = []
 
-    for i in range(len(questionnaires)):
+    for i in range(len(llm_prompts)):
         assistant_messages.append([])
         all_prompts.append([])
 
@@ -743,7 +452,7 @@ def conduct_survey_sequential(
         else range(max_survey_length)
     ):
         current_batch = [
-            questionnaire for questionnaire in questionnaires if len(questionnaire._questions) > i
+            questionnaire for questionnaire in llm_prompts if len(questionnaire._questions) > i
         ]
 
         first_question: bool = i == 0
@@ -751,7 +460,7 @@ def conduct_survey_sequential(
         if first_question:
             system_messages, prompts = zip(
                 *[
-                    questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.SEQUENTIAL, i)
+                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, i)
                     for questionnaire in current_batch
                 ]
             )
@@ -764,7 +473,7 @@ def conduct_survey_sequential(
         else:
             system_messages, _ = zip(
                 *[
-                    questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.SEQUENTIAL, i)
+                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, i)
                     for questionnaire in current_batch
                 ]
             )
@@ -871,11 +580,11 @@ def conduct_survey_sequential(
         # assistant_messages.append(output)
 
         _intermediate_saves(
-            questionnaires, n_save_step, intermediate_save_file, question_llm_response, i
+            llm_prompts, n_save_step, intermediate_save_file, question_llm_response, i
         )
 
-    for i, survey in enumerate(questionnaires):
-        survey_results.append(QuestionnaireResult(survey, question_llm_response[i]))
+    for i, survey in enumerate(llm_prompts):
+        survey_results.append(InferenceResult(survey, question_llm_response[i]))
 
     return survey_results
 
@@ -884,7 +593,7 @@ class SurveyCreator:
     @classmethod
     def from_path(
         self, survey_path: str, questionnaire_path: str
-    ) -> List[LLMQuestionnaire]:
+    ) -> List[LLMPrompt]:
         """
         Generates LLMQuestionnaire objects from a CSV file path.
 
@@ -901,7 +610,7 @@ class SurveyCreator:
     @classmethod
     def from_dataframe(
         self, survey_dataframe: pd.DataFrame, questionnaire_dataframe: pd.DataFrame
-    ) -> List[LLMQuestionnaire]:
+    ) -> List[LLMPrompt]:
         """
         Generates LLMQuestionnaire objects from a pandas DataFrame.
 
@@ -914,11 +623,11 @@ class SurveyCreator:
         return self._from_dataframe(survey_dataframe, questionnaire_dataframe)
 
     @classmethod
-    def _create_questionnaire(self, row: pd.Series, df_questionnaire) -> LLMQuestionnaire:
+    def _create_questionnaire(self, row: pd.Series, df_questionnaire) -> LLMPrompt:
         """
         Internal helper method to process the DataFrame.
         """
-        return LLMQuestionnaire(
+        return LLMPrompt(
             questionnaire_source=df_questionnaire,
             questionnaire_name=row[constants.QUESTIONNAIRE_NAME],
             system_prompt=row[constants.SYSTEM_PROMPT_FIELD],
@@ -928,7 +637,7 @@ class SurveyCreator:
     @classmethod
     def _from_dataframe(
         self, df: pd.DataFrame, df_questionnaire: pd.DataFrame
-    ) -> List[LLMQuestionnaire]:
+    ) -> List[LLMPrompt]:
         """
         Internal helper method to process the DataFrame.
         """

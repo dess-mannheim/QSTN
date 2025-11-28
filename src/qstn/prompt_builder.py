@@ -1,13 +1,14 @@
-from typing import List, Dict, Optional, Union, overload, Self, Tuple
+from typing import List, Dict, Optional, Union, overload, Self, Tuple, Literal
+from string import ascii_lowercase, ascii_uppercase
 
 from dataclasses import replace
 
-from .utilities.survey_objects import AnswerOptions, QuestionnaireItem
-
-from .utilities import constants, placeholder
-from .utilities.constants import QuestionnaireType
-
+from .utilities.survey_objects import AnswerOptions, QuestionnaireItem, AnswerTexts
+from .utilities import constants, placeholder, prompt_templates
+from .utilities.constants import QuestionnairePresentation
 from .utilities.utils import safe_format_with_regex
+
+from .inference.response_generation import ResponseGenerationMethod
 
 import pandas as pd
 
@@ -19,7 +20,7 @@ import copy
 from transformers import AutoTokenizer
 
 
-class LLMQuestionnaire:
+class LLMPrompt:
     """
     Main class for setting up and managing an LLM-based interview or survey.
 
@@ -53,9 +54,9 @@ class LLMQuestionnaire:
         Initialize an LLMInterview instance. Either a path to a csv file or a pandas dataframe has to be provided
 
         Args:
-            questionnaire_source (str): Path to the CSV file containing the interview structure and questions.
-            interview_dataframe (pd.Dataframe): A pandas dataframe interview structure and questions.
-            interview_name (str): Name/ID for the interview.
+            questionnaire_source (str): Path to the CSV file containing the questionnaire structure and questions.
+            questionnaire_dataframe (pd.Dataframe): A pandas dataframe questionnaire structure and questions.
+            questionnaire_name (str): Name/ID for the questionnaire.
             system_prompt (str): System prompt to prepend to all questions.
             interview_instruction (str): Instructions that will be given to the model before asking the questions.
             verbose (bool): If True, enables verbose output.
@@ -88,7 +89,7 @@ class LLMQuestionnaire:
 
     def get_prompt_for_questionnaire_type(
         self,
-        questionnaire_type: QuestionnaireType = QuestionnaireType.SINGLE_ITEM,
+        questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
         item_id: int = 0,
         item_separator: str = "\n",
     ) -> Tuple[str, str]:
@@ -104,8 +105,8 @@ class LLMQuestionnaire:
         options = ""
         automatic_output_instructions = ""
         if (
-            questionnaire_type == QuestionnaireType.SINGLE_ITEM
-            or questionnaire_type == QuestionnaireType.SEQUENTIAL
+            questionnaire_type == QuestionnairePresentation.SINGLE_ITEM
+            or questionnaire_type == QuestionnairePresentation.SEQUENTIAL
         ):
             question = self.generate_question_prompt(self._questions[item_id])
 
@@ -127,7 +128,7 @@ class LLMQuestionnaire:
                 placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
             }
 
-        elif questionnaire_type == QuestionnaireType.BATTERY:
+        elif questionnaire_type == QuestionnairePresentation.BATTERY:
             all_questions: List[str] = []
             for question in self._questions:
                 current_question_prompt = self.generate_question_prompt(question)
@@ -171,7 +172,7 @@ class LLMQuestionnaire:
         return system_prompt, prompt
 
     def calculate_input_token_estimate(
-        self, model_id: str, questionnaire_type: QuestionnaireType = QuestionnaireType.SINGLE_ITEM
+        self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
     ) -> int:
         """
         Estimate the number of input tokens for the prompt, given a model and interview type.
@@ -195,7 +196,7 @@ class LLMQuestionnaire:
 
         return (
             total_tokens
-            if questionnaire_type != QuestionnaireType.SEQUENTIAL
+            if questionnaire_type != QuestionnairePresentation.SEQUENTIAL
             else len(total_tokens) * 3
         )
 
@@ -257,7 +258,7 @@ class LLMQuestionnaire:
 
     # TODO Item order could be given by ids
     @overload
-    def prepare_questionnaire(
+    def prepare_prompt(
         self,
         question_stem: Optional[str] = None,
         answer_options: Optional[AnswerOptions] = None,
@@ -266,7 +267,7 @@ class LLMQuestionnaire:
     ) -> Self: ...
 
     @overload
-    def prepare_questionnaire(
+    def prepare_prompt(
         self,
         question_stem: Optional[List[str]] = None,
         answer_options: Optional[Dict[int, AnswerOptions]] = None,
@@ -274,7 +275,7 @@ class LLMQuestionnaire:
         randomized_item_order: bool = False,
     ) -> Self: ...
 
-    def prepare_questionnaire(
+    def prepare_prompt(
         self,
         question_stem: Optional[Union[str, List[str]]] = None,
         answer_options: Optional[Union[AnswerOptions, Dict[int, AnswerOptions]]] = None,
@@ -420,3 +421,143 @@ class LLMQuestionnaire:
                     question_prompt, safe_formatter
                 )
         return question_prompt
+    
+
+_IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
+
+def generate_likert_options(
+    n: int,
+    answer_texts: Optional[List[str]],
+    only_from_to_scale: bool = False,
+    random_order: bool = False,
+    reversed_order: bool = False,
+    even_order: bool = False,
+    start_idx: int = 1,
+    list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
+    scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
+    index_answer_separator: str = ": ",
+    options_separator: str = ", ",
+    idx_type: _IDX_TYPES = "integer",
+    response_generation_method: Optional[ResponseGenerationMethod] = None,
+) -> AnswerOptions:
+    """Generates a set of options and a prompt for a Likert-style scale.
+
+    This function creates a numeric or alphabetic scale of a specified size (n),
+    optionally attaching textual labels to the scale. It provides
+    extensive control over ordering, formatting, and the final prompt string.
+
+    Args:
+        n (int): The number of options to generate (e.g., 5 for a 5-point scale).
+        answer_texts (Optional[List[str]]): A list of text labels for each option.
+            Its length must equal `n` if provided.
+        only_from_to_scale (bool, optional): If True, the prompt will only show the
+            min and max of the scale (e.g., "1 to 5"). Defaults to False.
+        random_order (bool, optional): If True, the options are randomized. Defaults to False.
+        reversed_order (bool, optional): If True, the options are in reversed input order.
+            Defaults to False.
+        even_order (bool, optional): If True, options the center option will be removed.
+            E.g., for n=5: 1, 2, 4, 5
+        start_idx (int, optional): The starting index for the scale (usually 0 or 1).
+            Defaults to 1.
+        list_prompt_template (str, optional): The template for prompts that list all options.
+        scale_prompt_template (str, optional): The template for prompts that only show the range.
+        index_answer_separator (str, optional): The string used to separate an index from its
+            text label (e.g., "1: Strongly Agree"). Defaults to ": ".
+        options_separator (str, optional): The string used to separate options when listed
+            in the prompt. Defaults to ", ".
+        idx_type (_IDX_TYPES, optional): The type of index to use: "integer", "upper" (A, B, C),
+            or "lower" (a, b, c). Defaults to "integer".
+        response_generation_method (Optional[ResponseGenerationMethod], optional): An object
+            controlling how the final response object is generated. Defaults to None.
+
+    Raises:
+        ValueError: If `answer_texts` is provided and its length does not match `n`.
+
+    Returns:
+        AnswerOptions: An object containing the generated list of option strings and the
+        final formatted prompt ready for display.
+
+    Example:
+        .. code-block:: python
+
+            # Generate a classic 5-point "Strongly Disagree" to "Strongly Agree" scale
+            labels = [
+                "Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"
+            ]
+            options = SurveyOptionGenerator.generate_likert_options(n=5, answer_texts=labels)
+    """
+
+    if only_from_to_scale:
+        if len(answer_texts) != 2:
+            raise ValueError(
+                f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'."
+            )
+        if idx_type != "integer":
+            raise ValueError(
+                f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'."
+            )
+    else:
+        if answer_texts:
+            if len(answer_texts) != n:
+                raise ValueError(
+                    f"answer_texts and n need to be the same length, but answer_texts has length {len(answer_texts)} and n was given as {n}."
+                )
+    if even_order:
+        if n % 2 != 0:
+            raise ValueError(
+                "If you want to turn a scale even, it should be odd before."
+            )
+        middle_index = n // 2
+        answer_texts = (
+            answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
+        )
+        n = n - 1
+    if random_order:
+        if len(answer_texts) < 2:
+            raise ValueError(
+                "There must be at least two answer options to reorder randomly."
+            )
+        random.shuffle(
+            answer_texts
+        )  # no assignment needed because shuffles already inplace
+    if reversed_order:
+        if len(answer_texts) < 2:
+            raise ValueError(
+                "There must be at least two answer options to reorder in reverse."
+            )
+        answer_options = answer_options[::-1]
+
+    answer_option_indices = []
+    if idx_type == "no_index":
+        # no index, just the answer options directly
+        answer_option_indices = None
+    elif idx_type == "integer":
+        for i in range(n):
+            answer_code = i + start_idx
+            answer_option_indices.append(str(answer_code))
+    else:
+        # TODO @Jens add these to constants.py
+        if idx_type == "char_lower":
+            for i in range(n):
+                answer_option_indices.append(ascii_lowercase[(i + start_idx) % 26])
+        elif idx_type == "char_upper":
+            for i in range(n):
+                answer_option_indices.append(ascii_uppercase[(i + start_idx) % 26])
+
+    answer_texts_object = AnswerTexts(
+        answer_texts=answer_texts,
+        indices=answer_option_indices,
+        index_answer_seperator=index_answer_separator,
+        option_seperators=options_separator,
+        only_scale=only_from_to_scale,
+    )
+
+    questionnaire_options = AnswerOptions(
+        answer_texts=answer_texts_object,
+        from_to_scale=only_from_to_scale,
+        list_prompt_template=list_prompt_template,
+        scale_prompt_template=scale_prompt_template,
+        response_generation_method=response_generation_method,
+    )
+
+    return questionnaire_options

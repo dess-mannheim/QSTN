@@ -1,4 +1,4 @@
-from . import llm_questionnaire, survey_manager
+from . import prompt_builder, survey_manager
 
 # TODO: discuss whether we want all functions available on the top level
 #from .inference import *

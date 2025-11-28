@@ -14,7 +14,7 @@ import pandas as pd
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
-    from ..llm_questionnaire import LLMQuestionnaire
+    from ..prompt_builder import LLMPrompt
 
 
 
@@ -253,12 +253,12 @@ class QuestionLLMResponseTuple(NamedTuple):
 
 
 @dataclass
-class QuestionnaireResult:
-    """Contains an questionnaire and the corresponding responses by the LLM.
+class InferenceResult:
+    """Contains a prompt and the corresponding responses by the LLM.
     Can return results as a dataframe or return the transcript of all questions and answers.
     """
 
-    questionnaire: "LLMQuestionnaire"
+    questionnaire: "LLMPrompt"
     results: Dict[int, QuestionLLMResponseTuple]
 
     def to_dataframe(self) -> pd.DataFrame:

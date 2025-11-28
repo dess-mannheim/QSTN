@@ -27,7 +27,7 @@ PARSED_RESPONSE: Final[str] = "parsed_response"
 OPTIONS_ADJUST: List[str] = ["OPTIONS_ADJUST"]
 
 
-class QuestionnaireType(Enum):
+class QuestionnairePresentation(Enum):
     SINGLE_ITEM: str = "questionnaire_type_single_item"
     SEQUENTIAL: str = "questionnaire_type_sequential"
     BATTERY: str = "questionnaire_type_battery"

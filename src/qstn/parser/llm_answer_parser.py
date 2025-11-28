@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional
 
-from ..llm_questionnaire import LLMQuestionnaire
-from ..utilities.survey_objects import QuestionnaireResult
+from ..prompt_builder import LLMPrompt
+from ..utilities.survey_objects import InferenceResult
 
 from ..inference.survey_inference import batch_generation, ResponseGenerationMethod
 
@@ -31,7 +31,7 @@ DEFAULT_PROMPT: str = (
 )
 
 
-def json_parser_str(answer: str) -> Dict[str, str] | None:
+def parse_json_str(answer: str) -> Dict[str, str] | None:
     try:
         result_json = json.loads(answer)
     except:
@@ -43,9 +43,9 @@ def json_parser_str(answer: str) -> Dict[str, str] | None:
     return result_json
 
 
-def json_parse_all(
-    survey_results: List[QuestionnaireResult],
-) -> Dict[LLMQuestionnaire, pd.DataFrame]:
+def parse_json(
+    survey_results: List[InferenceResult],
+) -> Dict[LLMPrompt, pd.DataFrame]:
     """Parses json output of a survey of LLMs.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
@@ -59,7 +59,7 @@ def json_parse_all(
         answers: List[pd.DataFrame] = []
         for key, value in survey_result.results.items():
             # value:QuestionAnswerTuple
-            parsed_llm_response = json_parser_str(value.llm_response)
+            parsed_llm_response = parse_json_str(value.llm_response)
             reasoning = value.reasoning
             logprobs = value.logprobs
             if isinstance(parsed_llm_response, dict):
@@ -109,9 +109,9 @@ def json_parse_all(
     return final_result
 
 
-def json_parse_whole_survey_all(
-    survey_results: List[QuestionnaireResult],
-) -> Dict[LLMQuestionnaire, pd.DataFrame]:
+def parse_json_battery(
+    survey_results: List[InferenceResult],
+) -> Dict[LLMPrompt, pd.DataFrame]:
     """Parses json output of a survey of LLMs when prompted with one prompt.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
@@ -119,7 +119,7 @@ def json_parse_whole_survey_all(
     Returns:
         Dict[LLMInterview]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
     """
-    parsed_results: Dict[LLMQuestionnaire, pd.DataFrame] = json_parse_all(survey_results)
+    parsed_results: Dict[LLMPrompt, pd.DataFrame] = parse_json(survey_results)
 
     all_results = {}
 
@@ -171,8 +171,8 @@ def json_parse_whole_survey_all(
 
 
 def raw_responses(
-    survey_results: List[QuestionnaireResult],
-) -> Dict[LLMQuestionnaire, pd.DataFrame]:
+    survey_results: List[InferenceResult],
+) -> Dict[LLMPrompt, pd.DataFrame]:
     """Organizes the questions and answers of a survey in a pandas Dataframe.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
@@ -208,9 +208,9 @@ def raw_responses(
 #     return all_results
 
 
-def llm_parse_all(
+def parse_with_llm(
     model: LLM,
-    survey_results: List[QuestionnaireResult],
+    survey_results: List[InferenceResult],
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     prompt: str = DEFAULT_PROMPT,
     answer_production_method: Optional[ResponseGenerationMethod] = None,
@@ -218,7 +218,7 @@ def llm_parse_all(
     print_progress: bool = True,
     seed=42,
     **generation_kwargs,
-) -> Dict[LLMQuestionnaire, pd.DataFrame]:
+) -> Dict[LLMPrompt, pd.DataFrame]:
     all_items_to_process = []
     for survey_result in survey_results:
         for item_id, question_llm_response_tuple in survey_result.results.items():
@@ -341,10 +341,10 @@ def _logprobs_filter(
     return choice_results
 
 
-def logprobs_parse_all(
-    survey_results: List[QuestionnaireResult],
+def parse_logprobs(
+    survey_results: List[InferenceResult],
     allowed_choices: List[str] | Dict[str, List[str]],
-) -> Dict[LLMQuestionnaire, pd.DataFrame]:
+) -> Dict[LLMPrompt, pd.DataFrame]:
     """
     Filter and aggregate the logprobs that are returned when using the Logprob_AnswerProductionMethod
 
