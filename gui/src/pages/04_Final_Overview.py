@@ -14,7 +14,7 @@ import logging
 from contextlib import redirect_stderr, redirect_stdout
 
 from qstn.parser.llm_answer_parser import raw_responses
-from qstn.utilities.constants import InterviewType
+from qstn.utilities.constants import QuestionnaireType
 from qstn.utilities.utils import create_one_dataframe
 from qstn.survey_manager import (
     conduct_survey_sequential,
@@ -29,7 +29,7 @@ from openai import AsyncOpenAI
 # Set OpenAI's API key and API base to use vLLM's API server.
 
 
-if "interviews" not in st.session_state:
+if "questionnaires" not in st.session_state:
     st.error(
         "You need to first upload a questionnaire and the population you want to survey."
     )
@@ -46,9 +46,9 @@ def create_stateful_widget() -> StatefulWidgets:
 
 state = create_stateful_widget()
 
-current_index = paginator(st.session_state.interviews, "overview_page")
+current_index = paginator(st.session_state.questionnaires, "overview_page")
 
-interview = st.session_state.interviews[current_index]
+questionnaires = st.session_state.questionnaires[current_index]
 
 col_llm, col_prompt_display = st.columns(2)
 
@@ -126,9 +126,28 @@ with col_llm:
 
 with col_prompt_display:
     st.subheader("📄 Live Preview")
+    
+    # Survey method selector
+    survey_method_options = {
+        "Single item": ("single_item", QuestionnaireType.SINGLE_ITEM),
+        "Battery": ("battery", QuestionnaireType.BATTERY),
+        "Sequential": ("sequential", QuestionnaireType.SEQUENTIAL),
+    }
+    
+    survey_method_display = state.create(
+        st.selectbox,
+        "survey_method",
+        "Questionnaire Method",
+        options=list(survey_method_options.keys()),
+        initial_value="Single item",
+        help="Choose how to conduct the questionnaire: Single item (one at a time), Battery (all questions together), or Sequential (with conversation history)."
+    )
+    
+    # Get the method name and questionnaire type from selection
+    selected_method_name, selected_questionnaire_type = survey_method_options[survey_method_display]
 
     with st.container(border=True):
-        current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+        current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
         current_system_prompt = current_system_prompt.replace("\n", "  \n")
         current_prompt = current_prompt.replace("\n", "  \n")
         st.write(current_system_prompt)
@@ -144,7 +163,7 @@ model_name = state.create(
 )
 
 
-if st.button("Confirm and Run Survey", type="primary", use_container_width=True):
+if st.button("Confirm and Run Questionnaire", type="primary", use_container_width=True):
     st.write("Starting inference...")
 
     openai_api_key = "EMPTY"
@@ -176,7 +195,7 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
 
     # Helper function for asyncronous runs
     def run_async_in_thread(
-        result_q, client, interviews, model_name, **inference_config
+        result_q, client, questionnaires, model_name, survey_method_name, **inference_config
     ):
         queue_writer = QueueWriter(log_queue)
 
@@ -184,9 +203,19 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
         # API concurrency should be  configurable in the GUI
         try:
             with redirect_stderr(queue_writer):
-                result = conduct_survey_single_item(
+                # Select the appropriate survey method based on user choice
+                if survey_method_name == "single_item":
+                    survey_func = conduct_survey_single_item
+                elif survey_method_name == "battery":
+                    survey_func = conduct_survey_battery
+                elif survey_method_name == "sequential":
+                    survey_func = conduct_survey_sequential
+                else:
+                    survey_func = conduct_survey_single_item  # Default fallback
+                
+                result = survey_func(
                     client,
-                    interviews=interviews,
+                    questionnaires=questionnaires,
                     client_model_name=model_name,
                     api_concurrency=100,
                     **inference_config,
@@ -200,11 +229,20 @@ if st.button("Confirm and Run Survey", type="primary", use_container_width=True)
     while not log_queue.empty():
         log_queue.get()
     while not result_queue.empty():
-        result_queue.get()
+        result_queue.get()  
 
+    # Get the selected survey method
+    survey_method_display = st.session_state.get("survey_method", "Single item")
+    survey_method_options = {
+        "Single item": ("single_item", QuestionnaireType.SINGLE_ITEM),
+        "Battery": ("battery", QuestionnaireType.BATTERY),
+        "Sequential": ("sequential", QuestionnaireType.SEQUENTIAL),
+    }
+    selected_method_name, _ = survey_method_options.get(survey_method_display, ("single_item", QuestionnaireType.SINGLE_ITEM))
+    
     thread = threading.Thread(
         target=run_async_in_thread,
-        args=(result_queue, client, st.session_state.interviews, model_name),
+        args=(result_queue, client, st.session_state.questionnaires, model_name, selected_method_name),
         kwargs=inference_config,
     )
     thread.start()

@@ -1,7 +1,7 @@
 import streamlit as st
-from qstn.llm_interview import LLMInterview
+from qstn.llm_questionnaire import LLMQuestionnaire
 from qstn.survey_manager import conduct_survey_single_item, conduct_survey_sequential, conduct_survey_battery, SurveyOptionGenerator, SurveyCreator
-from qstn.utilities.constants import InterviewType
+from qstn.utilities.constants import QuestionnaireType
 from gui_elements.paginator import paginator
 from gui_elements.stateful_widget import StatefulWidgets
 import time
@@ -28,9 +28,9 @@ def create_stateful_widget() -> StatefulWidgets:
 state = create_stateful_widget()
 
 #FOR DEBUGGING
-# if "interviews" not in st.session_state:
-#     st.session_state.interviews = [SurveyCreator().from_path(survey_path="/home/maxi/Documents/SurveyGen/surveys/ANES.csv", questionnaire_path="/home/maxi/Documents/SurveyGen/surveys/ANES_PERSONAS.csv")]
-if "interviews" not in st.session_state:
+# if "questionnaires" not in st.session_state:
+#     st.session_state.questionnaires = [SurveyCreator().from_path(survey_path="/home/maxi/Documents/SurveyGen/surveys/ANES.csv", questionnaire_path="/home/maxi/Documents/SurveyGen/surveys/ANES_PERSONAS.csv")]
+if "questionnaires" not in st.session_state:
     st.error("You need to first upload a questionnaire and the population you want to survey.")
     st.stop()
 
@@ -39,19 +39,19 @@ if 'current_index' not in st.session_state:
 
 text_field_ids = [system_prompt_field, prompt_field]
 
-current_interview_id = paginator(st.session_state.interviews, "current_interview_index_prompt")
+current_questionnaire_id = paginator(st.session_state.questionnaires, "current_questionnaire_index_prompt")
 
 st.divider()
 
-if "interviews" in st.session_state and st.session_state.interviews is not None:
+if "questionnaires" in st.session_state and st.session_state.questionnaires is not None:
     try:
-        interview = st.session_state.interviews[current_interview_id].duplicate()
+        questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
     except IndexError:
         st.error("Index is out of range. Resetting to the first item.")
-        current_interview_id = 0
-        interview = st.session_state.interviews[current_interview_id].duplicate()
+        current_questionnaire_id = 0
+        questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
         
-    #st.session_state.preview_interview = interview
+    #st.session_state.preview_questionnaire = questionnaire
 
     col_options, col_prompt_display = st.columns(2)
 
@@ -60,8 +60,8 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
 
         new_system_prompt = st.text_area(
             label=system_prompt_field,
-            key=f"{system_prompt_field}{current_interview_id}",
-            value=interview.system_prompt,
+            key=f"{system_prompt_field}{current_questionnaire_id}",
+            value=questionnaire.system_prompt,
             help="The system prompt the model is prompted with."
         )
 
@@ -75,16 +75,16 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
 
         new_prompt = st.text_area(
             label=prompt_field,
-            key=f"{prompt_field}{current_interview_id}",
-            value=interview.prompt,
+            key=f"{prompt_field}{current_questionnaire_id}",
+            value=questionnaire.prompt,
             help="Instructions that are given to the model before the questions."
         )
 
-        change_all_interview = state.create(
+        change_all_questionnaire = state.create(
             st.checkbox,
             key=change_all_prompts_checkbox,
-            label="On update: change all interview instructions",
-            help="If this is ticked, all interview instructions will be changed to this.",
+            label="On update: change all questionnaire instructions",
+            help="If this is ticked, all questionnaire instructions will be changed to this.",
             initial_value=False
         )
 
@@ -95,25 +95,25 @@ if "interviews" in st.session_state and st.session_state.interviews is not None:
     # --- The Dynamic Preview Logic ---
     # This block re-runs on every widget interaction.
         with st.container(border=True):
-            interview.system_prompt = new_system_prompt
-            interview.prompt = new_prompt
-            current_system_prompt, current_prompt = interview.get_prompt_for_interview_type(InterviewType.CONTEXT)
+            questionnaire.system_prompt = new_system_prompt
+            questionnaire.prompt = new_prompt
+            current_system_prompt, current_prompt = questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.SEQUENTIAL)
             current_system_prompt = current_system_prompt.replace("\n", "  \n")
             current_prompt = current_prompt.replace("\n", "  \n")
             st.write(current_system_prompt)
             st.write(current_prompt)
     if st.button("Update Prompt(s)", type="secondary", use_container_width=True):
         if change_all_system:
-            for interview in st.session_state.interviews:
-                interview.system_prompt = new_system_prompt
+            for questionnaire in st.session_state.questionnaires:
+                questionnaire.system_prompt = new_system_prompt
         else:
-            st.session_state.interviews[current_interview_id].system_prompt = new_system_prompt
+            st.session_state.questionnaires[current_questionnaire_id].system_prompt = new_system_prompt
 
-        if change_all_interview:
-            for interview in st.session_state.interviews:
-                interview.prompt = new_prompt
+        if change_all_questionnaire:
+            for questionnaire in st.session_state.questionnaires:
+                questionnaire.prompt = new_prompt
         else:
-            st.session_state.interviews[current_interview_id].prompt = new_prompt             
+            st.session_state.questionnaires[current_questionnaire_id].prompt = new_prompt             
         st.success("Prompt(s) updated!")
 
     if st.button("Confirm Base Prompt", type="primary", use_container_width=True):

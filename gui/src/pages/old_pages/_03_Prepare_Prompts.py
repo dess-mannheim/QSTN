@@ -1,7 +1,7 @@
 import streamlit as st
 from qstn.survey_manager import SurveyOptionGenerator
-from qstn.llm_interview import LLMInterview
-from qstn.utilities.constants import InterviewType
+from qstn.llm_questionnaire import LLMQuestionnaire
+from qstn.utilities.constants import QuestionnaireType
 from typing import Any
 
 from gui_elements.paginator import paginator
@@ -19,21 +19,21 @@ st.write(
 st.page_link("pages/02_Option_Prompt.py", label="Click here to adjust the answer options.")
 st.divider()
 
-#current_interview_id = paginator(st.session_state.interviews, "current_interview_index_prepare")
+#current_questionnaire_id = paginator(st.session_state.questionnaires, "current_questionnaire_index_prepare")
 
-if "interviews" not in st.session_state:
+if "questionnaires" not in st.session_state:
     st.error("You need to first upload a questionnaire and the population you want to survey.")
     st.stop()
     disabled = True
 else:
     disabled = False
-if not "temporary_interview" in st.session_state:
-    st.session_state.temporary_interview = st.session_state.interviews[0].duplicate()
+if not "temporary_questionnaire" in st.session_state:
+    st.session_state.temporary_questionnaire = st.session_state.questionnaires[0].duplicate()
 
-    #print(st.session_state.temporary_interview._questions)
+    #print(st.session_state.temporary_questionnaire._questions)
 
-if not "base_interview" in st.session_state:
-    st.session_state.base_interview = st.session_state.temporary_interview.duplicate()
+if not "base_questionnaire" in st.session_state:
+    st.session_state.base_questionnaire = st.session_state.temporary_questionnaire.duplicate()
 
 def process_inputs(input: Any, field_id: str) -> str:
     if "survey_options" in st.session_state:
@@ -42,26 +42,26 @@ def process_inputs(input: Any, field_id: str) -> str:
         survey_options = None
 
     if field_id == question_stem_field:
-        LLMInterview.prepare_interview
-        st.session_state.temporary_interview.prepare_interview(
+        LLMQuestionnaire.prepare_questionnaire
+        st.session_state.temporary_questionnaire.prepare_questionnaire(
             question_stem=input,
             answer_options=survey_options,
             randomized_item_order=randomize_order_bool,
         )
-        st.session_state.base_interview.prepare_interview(
+        st.session_state.base_questionnaire.prepare_questionnaire(
             question_stem=input,
             answer_options=survey_options,
             randomized_item_order=randomize_order_bool,
         )
     # elif field_id == global_options_tick:
     #     option_behavior = input == "Give instruction in the beginning"
-    #     st.session_state.temporary_interview.prepare_interview(
+    #     st.session_state.temporary_questionnaire.prepare_questionnaire(
     #         question_stem=question_stem_input,
     #         answer_options=survey_options,
     #         global_options=option_behavior,
     #         randomized_item_order=randomize_order_bool,
     #     )
-    #     st.session_state.base_interview.prepare_interview(
+    #     st.session_state.base_questionnaire.prepare_questionnaire(
     #         question_stem=question_stem_input,
     #         answer_options=survey_options,
     #         global_options=option_behavior,
@@ -69,13 +69,13 @@ def process_inputs(input: Any, field_id: str) -> str:
     #     )
     elif field_id == randomize_order_tick:
         if input == True:
-            st.session_state.temporary_interview.prepare_interview(
+            st.session_state.temporary_questionnaire.prepare_questionnaire(
                 question_stem=question_stem_input,
                 answer_options=survey_options,
                 randomized_item_order=input,
             )
         else:
-            st.session_state.temporary_interview = st.session_state.base_interview.duplicate()
+            st.session_state.temporary_questionnaire = st.session_state.base_questionnaire.duplicate()
 
 def handle_change(field_id: str):
     """
@@ -99,7 +99,7 @@ with col1:
         input_key = f"input_{field_id}"
         if not input_key in st.session_state:
             if field_id == question_stem_field:
-                st.session_state[input_key] = st.session_state.temporary_interview ._questions[0].question_stem
+                st.session_state[input_key] = st.session_state.temporary_questionnaire ._questions[0].question_stem
             if field_id == randomize_order_tick:
                 st.session_state[input_key] = False
 
@@ -140,26 +140,26 @@ else:
     survey_options = None
 
 if randomize_order_bool:
-    st.session_state.temporary_interview.prepare_interview(
+    st.session_state.temporary_questionnaire.prepare_questionnaire(
         question_stem=question_stem_input,
         answer_options=survey_options,
         randomized_item_order=randomize_order_bool,
     )
-st.session_state.base_interview.prepare_interview(
+st.session_state.base_questionnaire.prepare_questionnaire(
     question_stem=question_stem_input,
     answer_options=survey_options,
     randomized_item_order=False,
 )
 
 if not randomize_order_bool:
-    st.session_state.temporary_interview = st.session_state.base_interview.duplicate()
+    st.session_state.temporary_questionnaire = st.session_state.base_questionnaire.duplicate()
 
 with col2:
     st.subheader("📄 Live Preview")
 
     #@Ahmed All of these could be a resusable function (it is used on almost all pages) Maybe split up the container in system prompt/ prompt
     with st.container(border=True):
-        system_prompt, current_prompt = st.session_state.temporary_interview.get_prompt_for_interview_type(InterviewType.ONE_PROMPT)
+        system_prompt, current_prompt = st.session_state.temporary_questionnaire.get_prompt_for_questionnaire_type(QuestionnaireType.BATTERY)
         # markdown newlines
         system_prompt = system_prompt.replace("\n", "  \n")
         current_prompt = current_prompt.replace("\n", "  \n")
@@ -168,9 +168,9 @@ with col2:
 
 st.divider()
 
-if st.button("Confirm and Prepare Interview", type="primary", use_container_width=True):
-    for interview in st.session_state.interviews:
-        interview.prepare_interview(
+if st.button("Confirm and Prepare Questionnaire", type="primary", use_container_width=True):
+    for questionnaire in st.session_state.questionnaires:
+        questionnaire.prepare_questionnaire(
             question_stem=question_stem_input,
             answer_options=survey_options,
             randomized_item_order=randomize_order_bool,

@@ -1,6 +1,6 @@
 import streamlit as st
 from qstn.survey_manager import SurveyOptionGenerator
-from qstn.llm_interview import LLMInterview
+from qstn.llm_questionnaire import LLMQuestionnaire
 from qstn.utilities.prompt_templates import (
     LIST_OPTIONS_DEFAULT,
     SCALE_OPTIONS_DEFAULT,
@@ -15,7 +15,7 @@ st.write(
 )
 st.divider()
 
-if "interviews" not in st.session_state:
+if "questionnaires" not in st.session_state:
     st.error("You need to first upload a questionnaire and the population you want to survey.")
     st.stop()
     disabled = True
@@ -148,7 +148,7 @@ with st.container(border=True):
 
     if st.button("Remove all options", use_container_width=True, icon="❌"):
         st.session_state.survey_options = None
-        st.switch_page("pages/03_Prepare_Prompts.py")
+        st.switch_page("pages/03_Inference_Setting.py")
 
 # --- Processing and Output ---
 if submitted:
@@ -193,6 +193,6 @@ if submitted:
         )
 
         st.session_state.survey_options = survey_options
-        st.switch_page("pages/03_Prepare_Prompts.py")
+        st.switch_page("pages/03_Inference_Setting.py")
 
 
