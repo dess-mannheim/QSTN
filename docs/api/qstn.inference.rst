@@ -1,10 +1,7 @@
-Inference
+Inference & Guided Decoding
 ===========================
 
-Submodules
-----------
-
-qstn.inference.dynamic\_pydantic module
+Dynamic Pydantic
 --------------------------------------------
 
 .. automodule:: qstn.inference.dynamic_pydantic
@@ -12,7 +9,7 @@ qstn.inference.dynamic\_pydantic module
    :undoc-members:
    :show-inheritance:
 
-qstn.inference.response\_generation module
+Response Generation Methods
 -----------------------------------------------
 
 .. automodule:: qstn.inference.response_generation
@@ -20,18 +17,11 @@ qstn.inference.response\_generation module
    :undoc-members:
    :show-inheritance:
 
-qstn.inference.survey\_inference module
+
+Inference
 --------------------------------------------
 
 .. automodule:: qstn.inference.survey_inference
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Module contents
----------------
-
-.. automodule:: qstn.inference
    :members:
    :undoc-members:
    :show-inheritance:

@@ -14,26 +14,18 @@ Subpackages
 Submodules
 ----------
 
-qstn.llm\_interview module
+Prompt Generation
 -------------------------------
 
-.. automodule:: qstn.llm_interview
+.. automodule:: qstn.prompt_builder
    :members:
    :undoc-members:
    :show-inheritance:
 
-qstn.survey\_manager module
+Survey Manager
 --------------------------------
 
 .. automodule:: qstn.survey_manager
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Module contents
----------------
-
-.. automodule:: qstn
    :members:
    :undoc-members:
    :show-inheritance:

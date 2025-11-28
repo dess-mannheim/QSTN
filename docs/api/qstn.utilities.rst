@@ -1,10 +1,7 @@
 Utilities
 ===========================
 
-Submodules
-----------
-
-qstn.utilities.constants module
+Constants
 ------------------------------------
 
 .. automodule:: qstn.utilities.constants
@@ -12,7 +9,7 @@ qstn.utilities.constants module
    :undoc-members:
    :show-inheritance:
 
-qstn.utilities.placeholder module
+Placeholder
 --------------------------------------
 
 .. automodule:: qstn.utilities.placeholder
@@ -20,7 +17,7 @@ qstn.utilities.placeholder module
    :undoc-members:
    :show-inheritance:
 
-qstn.utilities.prompt\_creation module
+Prompt Creation
 -------------------------------------------
 
 .. automodule:: qstn.utilities.prompt_creation
@@ -28,7 +25,7 @@ qstn.utilities.prompt\_creation module
    :undoc-members:
    :show-inheritance:
 
-qstn.utilities.prompt\_templates module
+Prompt Templates
 --------------------------------------------
 
 .. automodule:: qstn.utilities.prompt_templates
@@ -36,7 +33,7 @@ qstn.utilities.prompt\_templates module
    :undoc-members:
    :show-inheritance:
 
-qstn.utilities.survey\_objects module
+Survey Objects
 ------------------------------------------
 
 .. automodule:: qstn.utilities.survey_objects
@@ -44,7 +41,7 @@ qstn.utilities.survey\_objects module
    :undoc-members:
    :show-inheritance:
 
-qstn.utilities.utils module
+Util Functions
 --------------------------------
 
 .. automodule:: qstn.utilities.utils
@@ -52,10 +49,3 @@ qstn.utilities.utils module
    :undoc-members:
    :show-inheritance:
 
-Module contents
----------------
-
-.. automodule:: qstn.utilities
-   :members:
-   :undoc-members:
-   :show-inheritance:
