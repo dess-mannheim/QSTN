@@ -22,9 +22,9 @@ from transformers import AutoTokenizer
 
 class LLMPrompt:
     """
-    Main class for setting up and managing an LLM-based interview or survey.
+    Main class for setting up and managing the prompt in the LLM experiment.
 
-    This class handles loading questions, preparing prompts, managing answer options,
+    This class handles loading questions from a predefined questionnaire, preparing prompts, managing answer options,
     and generating prompt structures for different interview types.
     """
 
@@ -51,14 +51,13 @@ class LLMPrompt:
         seed: int = 42,
     ):
         """
-        Initialize an LLMInterview instance. Either a path to a csv file or a pandas dataframe has to be provided
+        Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe has to be provided to structure the questionnaire.
 
         Args:
-            questionnaire_source (str): Path to the CSV file containing the questionnaire structure and questions.
-            questionnaire_dataframe (pd.Dataframe): A pandas dataframe questionnaire structure and questions.
+            questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the questionnaire structure and questions.
             questionnaire_name (str): Name/ID for the questionnaire.
-            system_prompt (str): System prompt to prepend to all questions.
-            interview_instruction (str): Instructions that will be given to the model before asking the questions.
+            system_prompt (str): System prompt for all questions.
+            prompt (str): Prompt for all questions.
             verbose (bool): If True, enables verbose output.
             seed (int): Random seed for reproducibility.
         """
@@ -94,13 +93,13 @@ class LLMPrompt:
         item_separator: str = "\n",
     ) -> Tuple[str, str]:
         """
-        Generate the full prompt for a given interview type.
+        Generate the full prompt for a given questionnaire presentation.
 
         Args:
-            interview_type (InterviewType): The type of interview prompt to generate.
+            quesitonnaire_type (QuestionnairePresentation): The type of questionnaire prompt to generate.
 
         Returns:
-            str: The constructed prompt for the interview type.
+            str: The constructed prompt for the questionnaire presentation.
         """
         options = ""
         automatic_output_instructions = ""
@@ -175,13 +174,13 @@ class LLMPrompt:
         self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
     ) -> int:
         """
-        Estimate the number of input tokens for the prompt, given a model and interview type.
+        Estimate the number of input tokens for the prompt, given a model and questionnaire type.
         Remember that the model also has to have enough context length to fit its own response
         in case of CONTEXT and ONE_PROMPT type.
 
         Args:
             model_id (str): Huggingface model id.
-            interview_type (InterviewType): Type of interview prompt.
+            questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
 
         Returns:
             int: Estimated number of input tokens.
@@ -200,24 +199,24 @@ class LLMPrompt:
             else len(total_tokens) * 3
         )
 
-    def get_questions(self) -> str:
+    def get_questions(self) -> List[QuestionnaireItem]:
         """
         Get the list of loaded interview questions.
 
         Returns:
-            List[InterviewItem]: The loaded questions.
+            List[QuestionnaireItem]: The loaded questions.
         """
         return self._questions
 
     def load_questionnaire_format(self, questionnaire_source: Union[str, pd.DataFrame]) -> Self:
         """
-        Load interview questions from a CSV file.
+        Load the questionnaire format from a CSV file.
 
-        The CSV should have columns: interview_item_id, question_content
+        The CSV should have columns: questionnaire_item_id, question_content
         Optionally it can also have question_stem.
 
         Args:
-            interview_source (str or pd.Dataframe): Path to a valid CSV file or pd.Dataframe.
+            questionnaire_source (str or pd.Dataframe): Path to a valid CSV file or pd.Dataframe.
 
         Returns:
             Self: The updated instance with loaded questions.
@@ -288,7 +287,6 @@ class LLMPrompt:
         Args:
             question_stem (str or List[str], optional): Single or list of question stems.
             answer_options (AnswerOptions or Dict[int, AnswerOptions], optional): Answer options for all or per question.
-            global_options (bool): If True, the answer options will be specified once at the end of the task instructions. Otherwise, they will be specified once per question.
             prefilled_responses (Dict[int, str], optional): If you provide prefilled responses, they will be used
             to fill the answers instead of prompting the LLM for that question.
             randomized_item_order (bool): If True, randomize the order of questions.
@@ -395,7 +393,7 @@ class LLMPrompt:
         Generate the prompt string for a single interview question.
 
         Args:
-            interview_question (InterviewItem): The question to prompt.
+            questionnaire_items (InterviewItem): The question to prompt.
 
         Returns:
             str: The formatted prompt for the question.

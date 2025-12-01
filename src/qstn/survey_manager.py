@@ -2,32 +2,49 @@
 Module for managing and conducting surveys using LLM models.
 
 This module provides functions to conduct surveys in different ways:
-- Question by question
-- Whole survey in one prompt
-- In-context learning
+- Single-item
+- battery
+- sequential
 
 Usage example:
 -------------
 ```python
-from surveygen import LLMInterview, conduct_survey_question_by_question
-from surveygen.parser.llm_answer_parser import raw_responses
+from qstn import survey_manager
+from qstn.prompt_builder import LLMPrompt
+from qstn.utilities import placeholder
 from vllm import LLM
 
-# Initialize model and interview
-model = LLM(model="meta-llama/Meta-Llama-3-8B-Instruct")
-interview = LLMInterview(interview_path="questions.csv")
-interview.prepare_interview(question_stem="How do you feel towards {QUESTION_CONTENT_PLACEHOLDER}?")
+import pandas as pd
 
-# Conduct survey
-results = conduct_survey_question_by_question(
-    model=model,
-    interviews=interview,
-    print_progress=True
+questionnaire = [
+    {"questionnaire_item_id": 1, "question_content": "The Democratic Party?"},
+    {"questionnaire_item_id": 2, "question_content": "The Republican Party?"},
+]
+party_questionnaire = pd.DataFrame(questionnaire)
+
+
+system_prompt = "Act as if you were a black middle aged man from New York! Answer in a single short sentence!"
+prompt = f"Please tell us how you feel about the following parties:\n{placeholder.PROMPT_QUESTIONS}"
+
+questionnaire = LLMPrompt(
+    questionnaire_name="political_parties",
+    questionnaire_source=party_questionnaire,
+    system_prompt=system_prompt,
+    prompt=prompt,
 )
 
-# Access results
-for result in results:
-    raw_responses = raw_responses(survey_answers)
+model_id = "meta-llama/Llama-3.2-3B-Instruct"
+chat_generator = LLM(model_id, max_model_len=5000, seed=42)
+
+results = survey_manager.conduct_survey_single_item(
+    chat_generator,
+    questionnaire,
+    client_model_name=model_id,
+    print_conversation=True,
+    # We can use the same inference arguments for inference, as we would for vllm or OpenAI
+    temperature=0.8,
+    max_tokens=5000,
+)
 ```
 """
 
@@ -37,13 +54,10 @@ from typing import (
     Optional,
     Union,
     Any,
-    Literal,
 )
 
 from .utilities.survey_objects import (
-    AnswerOptions,
     QuestionLLMResponseTuple,
-    AnswerTexts,
 )
 from .utilities import constants
 from .utilities import utils
@@ -58,7 +72,7 @@ from .inference.response_generation import (
 
 from .prompt_builder import LLMPrompt, QuestionnairePresentation
 
-from .utilities.survey_objects import AnswerOptions, InferenceResult
+from .utilities.survey_objects import InferenceResult
 
 from vllm import LLM
 
@@ -69,7 +83,6 @@ import os
 
 import pandas as pd
 
-import random
 
 from tqdm.auto import tqdm
 
@@ -89,25 +102,24 @@ def conduct_survey_single_item(
     **generation_kwargs: Any,
 ) -> List[InferenceResult]:
     """
-    Conducts a survey by asking questions one at a time.
+    Conducts a survey by asking each question in a new context (Single Item presentation).
 
     Args:
-        model: LLM instance or AsyncOpenAI client.
-        questionnaires: Single questionnaire or list of questionnaires to conduct as a survey.
-        answer_production_method: Options for structured output format.
+        model: vllm.LLM instance or AsyncOpenAI client.
+        llm_prompts: Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
-        print_conversation: If True, prints all conversations.
-        print_progress: If True, shows progress bar.
+        print_conversation: If True, prints all conversations to stdout.
+        print_progress: If True, shows a tqdm progress bar.
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
-        chat_template: Optionally pass a specific chat template
-        chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
-        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
+        chat_template: Optionally pass a specific chat template string.
+        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
+        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
     Returns:
-        List[QuestionnaireResult]: Results for each questionnaire.
+        List[InferenceResult]: A list of results containing the survey data and LLM responses for each provided prompt.
     """
 
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
@@ -191,7 +203,6 @@ def conduct_survey_single_item(
                 }
             )
 
-        # TODO: check that this works with logprobs
         _intermediate_saves(
             llm_prompts,
             n_save_step,
@@ -285,25 +296,25 @@ def conduct_survey_battery(
     **generation_kwargs: Any,
 ) -> List[InferenceResult]:
     """
-    Conducts the entire survey in one single LLM prompt.
+    Conducts the entire survey in one single LLM prompt (battery presentation).
 
     Args:
-        model: LLM instance or AsyncOpenAI client.
-        questionnaires: Single questionnaire or list of questionnaires to conduct.
-        answer_production_method: Options for structured output format.
+        model: vllm.LLM instance or AsyncOpenAI client.
+        llm_prompts: Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
+        print_conversation: If True, prints all conversations to stdout.
+        print_progress: If True, shows a tqdm progress bar.
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
-        print_conversation: If True, prints the conversation.
-        print_progress: If True, shows progress bar.
         seed: Random seed for reproducibility.
-        chat_template: Optionally pass a specific chat template
-        chat_template_kwargs: Arguments to pass to the chat template, e.g., to disable reasoning
-        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
+        chat_template: Optionally pass a specific chat template string.
+        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
+        item_seperator: Which String should separate the items, defaults to "\n".
+        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
     Returns:
-        List[QuestionnaireResult]: Results for each questionnaire.
+        List[InferenceResult]: A list of results containing the survey data and LLM responses for each provided prompt.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
@@ -334,7 +345,7 @@ def conduct_survey_battery(
 
         system_messages, prompts = zip(
             *[
-                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.BATTERY, i)
+                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.BATTERY, i, item_separator=item_separator)
                 for questionnaire in current_batch
             ]
         )
@@ -408,23 +419,25 @@ def conduct_survey_sequential(
     **generation_kwargs: Any,
 ) -> List[InferenceResult]:
     """
-    Conducts surveys using in-context learning approach.
+    Conducts the survey in multiple chat calls, where all questions and answers are kept in context (sequential presentation).
 
     Args:
-        model: LLM instance or AsyncOpenAI client.
-        questionnaires: Single questionnaire or list of questionnaires to conduct.
-        answer_production_method: Options for structured output format.
+        model: vllm.LLM instance or AsyncOpenAI client.
+        llm_prompts: Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
         client_model_name: Name of model when using OpenAI client.
         api_concurrency: Number of concurrent API requests.
-        print_conversation: If True, prints the conversation.
-        print_progress: If True, shows progress bar.
+        print_conversation: If True, prints all conversations to stdout.
+        print_progress: If True, shows a tqdm progress bar.
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
-        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or  client.chat.completions.create().
+        chat_template: Optionally pass a specific chat template string.
+        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
+        item_seperator: Which String should separate the items, defaults to "\n".
+        **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
     Returns:
-        List[QuestionnaireResult]: Results for each questionnaire.
+        List[InferenceResult]: A list of results containing the survey data and LLM responses for each provided prompt.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
     if isinstance(llm_prompts, LLMPrompt):
