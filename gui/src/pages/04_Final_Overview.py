@@ -8,6 +8,7 @@ import queue
 import time
 import threading
 import asyncio
+import pandas as pd
 
 import logging
 
@@ -147,20 +148,39 @@ with col_prompt_display:
     selected_method_name, selected_questionnaire_type = survey_method_options[survey_method_display]
 
     with st.container(border=True):
-        current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
-        current_system_prompt = current_system_prompt.replace("\n", "  \n")
-        current_prompt = current_prompt.replace("\n", "  \n")
-        st.write(current_system_prompt)
-        st.write(current_prompt)
-
-model_name = state.create(
-    st.text_input,
-    "save_file",
-    "Save File",
-    # initial_value="meta-llama/Llama-3.1-70B-Instruct",
-    # placeholder="meta-llama/Llama-3.1-70B-Instruct",
-    help="The save file to write your results to. Should be a csv file.",
-)
+        # For single item mode, show multiple previews (up to 3 items)
+        if selected_questionnaire_type == QuestionnairePresentation.SINGLE_ITEM:
+            num_questions = len(questionnaires._questions)
+            num_previews = min(3, num_questions)  # Show up to 3 previews
+            
+            if num_previews > 1:
+                st.write(f"**Preview of first {num_previews} items:**")
+            else:
+                st.write("**Preview:**")
+            
+            for i in range(num_previews):
+                if num_previews > 1:
+                    st.write(f"**Item {i+1}:**")
+                
+                current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(
+                    selected_questionnaire_type, 
+                    item_id=i
+                )
+                current_system_prompt = current_system_prompt.replace("\n", "  \n")
+                current_prompt = current_prompt.replace("\n", "  \n")
+                st.write(current_system_prompt)
+                st.write(current_prompt)
+                
+                # Add separator between items (except for the last one)
+                if i < num_previews - 1:
+                    st.divider()
+        else:
+            # For battery and sequential, show single preview as before
+            current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
+            current_system_prompt = current_system_prompt.replace("\n", "  \n")
+            current_prompt = current_prompt.replace("\n", "  \n")
+            st.write(current_system_prompt)
+            st.write(current_prompt)
 
 
 if st.button("Confirm and Run Questionnaire", type="primary", use_container_width=True):
@@ -276,14 +296,47 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
     except queue.Empty:
         st.error("Could not retrieve result from the asynchronous task.")
 
-    st.success("Finished inferencing! Saving results...")
+    st.success("Finished inferencing!")
 
     responses = raw_responses(final_output)
 
     df = create_one_dataframe(responses)
 
+    # Store the dataframe in session state for saving later
+    st.session_state.results_dataframe = df
+    st.session_state.inference_completed = True
+
     st.dataframe(df)
 
-    df.to_csv(st.session_state.save_file, index=False)
-
-    st.success(f"File saved to {st.session_state.save_file}!")
+# Show save button if inference is completed
+if "inference_completed" in st.session_state and st.session_state.inference_completed:
+    st.divider()
+    st.subheader("💾 Save Results")
+    
+    # Text input for filename
+    if "save_filename" not in st.session_state:
+        st.session_state.save_filename = "questionnaire_results.csv"
+    
+    save_filename = st.text_input(
+        "Save File",
+        value=st.session_state.save_filename,
+        key="save_filename_input",
+        help="Enter the filename for the results. Should be a CSV file (e.g., results.csv)."
+    )
+    
+    # Ensure filename ends with .csv
+    if save_filename and not save_filename.endswith('.csv'):
+        save_filename = save_filename + '.csv'
+    
+    # Convert dataframe to CSV string for download
+    csv = st.session_state.results_dataframe.to_csv(index=False)
+    
+    st.download_button(
+        label="Save Results",
+        data=csv,
+        file_name=save_filename if save_filename else "questionnaire_results.csv",
+        mime="text/csv",
+        type="primary",
+        use_container_width=True,
+        help="Click to save the results to your computer. You can choose the directory and filename in the save dialog."
+    )

@@ -145,9 +145,9 @@ with st.container(border=True):
     # The submit button for the form
     submitted = st.button("Confirm and Generate Options", disabled=disabled, type="primary", use_container_width=True)
 
-    if st.button("Remove all options", use_container_width=True, icon="❌"):
+    if st.button("Skip", use_container_width=True, icon="❌"):
         st.session_state.survey_options = None
-        st.switch_page("pages/03_Inference_Setting.py")
+        st.switch_page("pages/02_Prompt_Configuration.py")
 
 # --- Processing and Output ---
 if submitted:
@@ -192,6 +192,6 @@ if submitted:
         )
 
         st.session_state.survey_options = survey_options
-        st.switch_page("pages/03_Inference_Setting.py")
+        st.switch_page("pages/02_Prompt_Configuration.py")
 
 
