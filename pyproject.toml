@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qstn"
-version = "0.1.0"
+version = "0.1.1"
 description = "Questionnaire and Survey Evaluation Toolkit for NLP Research"
 authors = [
     { name = "Maximilian Kreutner", email = "maximilian.kreutner@uni-mannheim.de" }
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 dependencies = [
     "pandas>=2.2.3",

@@ -7,7 +7,7 @@ from qstn.survey_manager import SurveyCreator
 from qstn.prompt_builder import LLMPrompt
 
 st.set_page_config(layout="wide")
-st.title("Questionnaire")
+st.title("QSTN")
 
 # Demo section showing expected CSV format
 with st.expander("📋 View Example CSV Format", expanded=False):
