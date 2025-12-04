@@ -176,11 +176,11 @@ with col_prompt_display:
                     st.divider()
         else:
             # For battery and sequential, show single preview as before
-            current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
-            current_system_prompt = current_system_prompt.replace("\n", "  \n")
-            current_prompt = current_prompt.replace("\n", "  \n")
-            st.write(current_system_prompt)
-            st.write(current_prompt)
+        current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
+        current_system_prompt = current_system_prompt.replace("\n", "  \n")
+        current_prompt = current_prompt.replace("\n", "  \n")
+        st.write(current_system_prompt)
+        st.write(current_prompt)
 
 
 if st.button("Confirm and Run Questionnaire", type="primary", use_container_width=True):
