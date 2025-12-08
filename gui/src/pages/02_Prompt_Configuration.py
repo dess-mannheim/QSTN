@@ -160,10 +160,12 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.warning(st.session_state.unified_placeholder_warning)
             st.session_state.unified_placeholder_warning = None  # Clear after displaying
         
+        # Get current value from session state if it exists, otherwise use default
+        current_system_prompt_value = st.session_state.get(system_prompt_key, questionnaire.system_prompt)
         new_system_prompt = st.text_area(
             label=system_prompt_field,
             key=system_prompt_key,
-            value=questionnaire.system_prompt,
+            value=current_system_prompt_value,
             help="The system prompt the model is prompted with."
         )
 
@@ -172,10 +174,12 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.warning(st.session_state.main_prompt_warning)
             st.session_state.main_prompt_warning = None  # Clear after displaying
         
+        # Get current value from session state if it exists, otherwise use default
+        current_prompt_value = st.session_state.get(prompt_key, questionnaire.prompt)
         new_prompt = st.text_area(
             label=prompt_field,
             key=prompt_key,
-            value=questionnaire.prompt,
+            value=current_prompt_value,
             help="Instructions that are given to the model before the questions."
         )
 
@@ -251,9 +255,14 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.warning(st.session_state.question_stem_warning)
             st.session_state.question_stem_warning = None  # Clear after displaying
         
+        # Get current value from session state if it exists, otherwise use default
+        input_key = f"input_{question_stem_field}"
+        default_question_stem = st.session_state.temporary_questionnaire._questions[0].question_stem if st.session_state.temporary_questionnaire._questions else ""
+        current_question_stem_value = st.session_state.get(input_key, default_question_stem)
         question_stem_input = st.text_area(
             question_stem_field,
-            key=f"input_{question_stem_field}",
+            key=input_key,
+            value=current_question_stem_value,
             # placeholder="e.g., How would you rate the following aspects of our service?",
             #on_change=handle_change,
             kwargs={'field_id': question_stem_field},

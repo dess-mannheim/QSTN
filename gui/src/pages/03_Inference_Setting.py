@@ -228,3 +228,4 @@ if st.button("Generate Configuration & Code", type="primary", use_container_widt
     st.session_state.inference_config = inference_config
 
     st.success("Configuration generated successfully!")
+    st.switch_page("pages/04_Final_Overview.py")
