@@ -100,7 +100,7 @@ with col2:
         st.write(df_population)
 
 # Button is always enabled now (using defaults if no files uploaded)
-disabled = False
+    disabled = False
         
 st.divider()
 

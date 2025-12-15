@@ -60,6 +60,73 @@ def clear_questionnaire_keys(questionnaire_id):
         if key in st.session_state:
             del st.session_state[key]
 
+def extract_placeholders(text):
+    """Extract all placeholder strings from text."""
+    all_placeholders = [
+        placeholder.PROMPT_QUESTIONS,
+        placeholder.PROMPT_OPTIONS,
+        placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS,
+        placeholder.QUESTION_CONTENT,
+        placeholder.JSON_TEMPLATE,
+    ]
+    found_placeholders = []
+    for ph in all_placeholders:
+        if ph in text:
+            found_placeholders.append(ph)
+    return found_placeholders
+
+def add_missing_placeholders(target_text, placeholders_to_add, source_text):
+    """Add or update placeholders in target text to match source formatting."""
+    if not placeholders_to_add:
+        return target_text
+    
+    result = target_text.rstrip()
+    
+    # First, remove any existing placeholders from the target to avoid duplicates
+    # and to allow re-formatting them
+    for ph in placeholders_to_add:
+        if ph in result:
+            # Remove the placeholder and any surrounding whitespace/newlines
+            # This allows us to re-add it in the correct format
+            result = result.replace(ph, '')
+            # Clean up extra whitespace/newlines that might be left
+            result = result.replace('\n\n\n', '\n\n')  # Remove triple newlines
+            result = result.replace('  ', ' ')  # Remove double spaces
+            result = result.rstrip()
+    
+    # Determine formatting from source text
+    # Check if any placeholder in source appears on the same line (not after a newline)
+    same_line_format = False
+    for ph in placeholders_to_add:
+        if ph in source_text:
+            # Find the placeholder in source
+            ph_index = source_text.find(ph)
+            # Check the character immediately before the placeholder
+            # If it's a newline, the placeholder is on a new line
+            # If it's a space or other character (not newline), it's on the same line
+            if ph_index > 0:
+                char_before = source_text[ph_index - 1]
+                if char_before != '\n':
+                    # Placeholder is on same line (not preceded by newline)
+                    same_line_format = True
+                    break
+            # If placeholder is at start of text (ph_index == 0), treat as new line
+            # If preceded by newline, also treat as new line
+    
+    # Add placeholders in the correct format
+    if same_line_format:
+        # Add placeholders on same line with space before
+        if result:
+            result += ' '
+        result += ' '.join(placeholders_to_add)
+    else:
+        # Add placeholders on new line(s)
+        if result and not result.endswith('\n'):
+            result += '\n'
+        result += '\n'.join(placeholders_to_add)
+    
+    return result
+
 def generate_preview(questionnaire, survey_options, randomize_order):
     """Helper to generate preview content."""
     temp_q = questionnaire.duplicate()
@@ -191,7 +258,6 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
         
         new_system_prompt = st.text_area(
             label=system_prompt_field,
-            value=st.session_state[system_prompt_key],
             help="The system prompt the model is prompted with.",
             key=system_prompt_key,
         )
@@ -205,7 +271,6 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
         
         new_prompt = st.text_area(
             label=prompt_field,
-            value=st.session_state[prompt_key],
             help="Instructions that are given to the model before the questions.",
             key=prompt_key,
         )
@@ -288,15 +353,12 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.warning(st.session_state.question_stem_warning)
             st.session_state.question_stem_warning = None  # Clear after displaying
         
-        # Get current value from session state if it exists, otherwise use default
         # Use questionnaire-specific key (consistent with system_prompt and prompt)
+        # Streamlit will automatically use the session_state value when key is provided
         input_key = f"input_{question_stem_field}_{current_questionnaire_id}"
-        default_question_stem = st.session_state.temporary_questionnaire._questions[0].question_stem if st.session_state.temporary_questionnaire._questions else ""
-        current_question_stem_value = st.session_state.get(input_key, default_question_stem)
         question_stem_input = st.text_area(
             question_stem_field,
             key=input_key,
-            value=current_question_stem_value,
             height=100,
         )
         # Sync from session state to temporary_questionnaire (captures user edits)
@@ -383,7 +445,7 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
 
     st.divider()
 
-    if st.button("Update Prompt(s)", type="secondary", use_container_width=True):
+    if st.button("Update Preview", type="secondary", use_container_width=True):
         # Update the preview when Update Prompt(s) is clicked
         # Use temporary_questionnaire directly (already has all the edits)
         preview_key = f"preview_{current_questionnaire_id}"
@@ -418,23 +480,35 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             else ""
         )
         
+        # Extract placeholders from current system prompt if "change all System Prompts" is checked
+        placeholders_to_add = []
+        if change_all_system:
+            placeholders_to_add = extract_placeholders(current_system_value)
+        
         for idx, questionnaire in enumerate(st.session_state.questionnaires):
             # Determine if this questionnaire should be updated
-            # System prompt should NEVER be updated for all questionnaires - each keeps its own
-            # Only update system prompt for the current questionnaire
+            # System prompt: current questionnaire gets full update, others get placeholders added (if checkbox checked)
             should_update_system = (idx == current_questionnaire_id)
             should_update_prompt = change_all_questionnaire or (idx == current_questionnaire_id)
-            should_update = should_update_system or should_update_prompt
+            should_update = should_update_system or should_update_prompt or (change_all_system and idx != current_questionnaire_id)
             
             if should_update:
-                # Update system prompt only for current questionnaire (never for all)
+                # Update system prompt: full update for current, add placeholders for others
                 if should_update_system:
+                    # Current questionnaire: update entire system prompt
                     questionnaire.system_prompt = current_system_value
+                elif change_all_system and idx != current_questionnaire_id:
+                    # Other questionnaires: add missing placeholders while preserving base content
+                    questionnaire.system_prompt = add_missing_placeholders(
+                        questionnaire.system_prompt,
+                        placeholders_to_add,
+                        current_system_value
+                    )
                 
                 if should_update_prompt:
                     questionnaire.prompt = current_prompt_value
                 
-                # Only call prepare_prompt for questionnaires being updated
+                # Call prepare_prompt for questionnaires being updated
                 # Use question stem from temporary_questionnaire (consistent with other fields)
                 questionnaire.prepare_prompt(
                     question_stem=current_question_stem,
