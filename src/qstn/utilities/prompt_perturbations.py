@@ -4,6 +4,11 @@ import string
 def key_typos(text: str, probability: float = 0.1) -> str:
     """
     Randomly replaces characters with random alphabet letters to simulate typos.
+    Args:
+        text (str): The input text to perturb.
+        probability (float): The probability of replacing each character.
+    Returns:
+        str: The text with random character replacements based on the given probability.
     """
     if not text: 
         return text
@@ -24,6 +29,11 @@ def key_typos(text: str, probability: float = 0.1) -> str:
 def keyboard_typos(text: str, probability: float = 0.1) -> str:
         """
         Introduces typos based on keyboard proximity.
+        Args:
+            text (str): The input text to perturb.
+            probability (float): The probability of introducing a typo for each character.
+        Returns:
+            str: The text with keyboard-based typos introduced based on the given probability.
         """
         keyboard_neighbors = {
             'a': 'qwsz', 'b': 'vghn', 'c': 'xdfv', 'd': 'ersfcx', 'e': 'wsdr', 
@@ -53,6 +63,11 @@ def keyboard_typos(text: str, probability: float = 0.1) -> str:
 def letter_swaps(text: str, probability: float = 0.1) -> str:
         """
         Randomly swaps adjacent letters in the text.
+        Args:
+            text (str): The input text to perturb.
+            probability (float): The probability of swapping each adjacent letter pair.
+        Returns:
+            str: The text with adjacent letters swapped based on the given probability.
         """
         if not text: return text
         
@@ -74,25 +89,37 @@ def letter_swaps(text: str, probability: float = 0.1) -> str:
 # def make_paraphrase(self, text: str) -> str:
 
 
-def apply_safe_perturbation(text: str, perturbation_func) -> str:
+def apply_safe_perturbation(prompts: list, perturbation_func, **kwargs):
         """
-        Splits text by curly brace placeholders (e.g., {PROMPT_OPTIONS}).
-        Applies the perturbation_func ONLY to the text segments, protecting the keys.
+        Splits list of prompts by curly brace placeholders (e.g., {PROMPT_OPTIONS}).
+        Applies the perturbation_func ONLY to the prompts segments, protecting the keys.
+        
+        Args:
+            prompts (List[str]): The input prompts containing placeholders.
+            perturbation_func (function): The function to apply to non-placeholder text.
+            **kwargs: Additional keyword arguments to pass to the perturbation function (e.g., probability).
+        Returns:
+            str: The prompts with perturbations applied safely.
         """
         import re
-        if not text:
-            return text
-
-        parts = re.split(r'(\{.*?\})', text)
+        if not prompts:
+            return prompts
         
-        processed_parts = []
-        for part in parts:
-            # Check if this part is a placeholder
-            if part.startswith("{") and part.endswith("}"):
-                # SAFE ZONE: Append exactly as is
-                processed_parts.append(part)
-            else:
-                # PERTURB ZONE: Apply the typo function
-                processed_parts.append(perturbation_func(part))
+        perturbed_prompts = []
+        for prompt in prompts:
+
+            parts = re.split(r'(\{.*?\})', prompt)
+            
+            processed_parts = []
+            for part in parts:
+                # Check if this part is a placeholder
+                if part.startswith("{") and part.endswith("}"):
+                    # Append exactly as is
+                    processed_parts.append(part)
+                else:
+                    # Apply the typo function
+                    processed_parts.append(perturbation_func(part, **kwargs))
                 
-        return "".join(processed_parts)
+            perturbed_prompts.append("".join(processed_parts))
+
+        return perturbed_prompts

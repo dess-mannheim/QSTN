@@ -51,7 +51,6 @@ class LLMPrompt:
         prompt: str = DEFAULT_PROMPT_STRUCTURE,
         verbose=False,
         seed: int = 42,
-        enable_perturbations: Union[str, List[str]] =  [],
     ):
         """
         Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe has to be provided to structure the questionnaire.
@@ -63,9 +62,6 @@ class LLMPrompt:
             prompt (str): Prompt for all questions.
             verbose (bool): If True, enables verbose output.
             seed (int): Random seed for reproducibility.
-            enable_perturbations (bool/str/List[str]): If a string or list of strings is provided, only those perturbations are enabled. 
-                Valid perturbation names are: "key_typos", "keyboard_typos", "letter_swaps", "synonyms", "paraphrase".
-
           """
         random.seed(seed)
 
@@ -405,15 +401,6 @@ class LLMPrompt:
         Returns:
             str: The formatted prompt for the question.
         """
-        # Logic to normalize the input into a list of active perturbations
-        self.perturbations: List[str] = []
-
-        if isinstance(self.enable_perturbations, str):
-            self.perturbations = [self.enable_perturbations]
-        elif isinstance(self.enable_perturbations, list):
-            self.perturbations = self.enable_perturbations
-        else:
-            self.perturbations = []
 
         if questionnaire_items.question_stem:
             if placeholder.QUESTION_CONTENT in questionnaire_items.question_stem:
@@ -428,23 +415,6 @@ class LLMPrompt:
         else:
             question_prompt = f"""{questionnaire_items.question_content}"""
         
-        if self.perturbations: 
-                    perturbation_map = {
-                        "key_typos": key_typos,
-                        "keyboard_typos": keyboard_typos,
-                        "letter_swaps": letter_swaps,
-                        #"synonyms": make_synonyms,  #TODO
-                        #"paraphrase": make_paraphrase #TODO
-                    }
-
-                    for p_name in self.perturbations:
-                        if p_name in perturbation_map:
-                            # Pass the current string and the specific function to the helper
-                            question_prompt = apply_safe_perturbation(
-                                question_prompt, 
-                                perturbation_map[p_name]
-                            )
-
         
         if questionnaire_items.answer_options:
             _options_str = questionnaire_items.answer_options.create_options_str()
