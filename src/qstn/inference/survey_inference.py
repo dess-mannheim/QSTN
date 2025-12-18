@@ -723,9 +723,9 @@ async def _run_api_batch_async(
                 elif isinstance(
                     response_generation_method, ChoiceResponseGenerationMethod
                 ):
-                    # TODO: add warning if this is not running against vllm, i.e., guided_choice is not supported
+                    # TODO: add warning if this is not running against vllm, i.e., choice is not supported
                     request_kwargs["extra_body"] = {
-                        "guided_choice": sampling_params
+                        "structured_outputs": {"choice" : sampling_params}
                     }
 
             return await client.chat.completions.create(**request_kwargs)
