@@ -516,6 +516,11 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
                     randomized_item_order=randomize_order_bool,
                 )
         st.success("Changed the prompts!")
+        
+        # Auto-save session
+        from gui_elements.session_cache import save_session_state
+        save_session_state()
+        
         st.switch_page("pages/03_Inference_Setting.py")
 else:
     st.warning("No data found. Please upload a CSV file on the 'Start Page' first.")

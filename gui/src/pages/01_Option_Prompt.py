@@ -16,6 +16,7 @@ from qstn.utilities import constants
 from gui_elements.stateful_widget import StatefulWidgets
 
 st.set_page_config(layout="wide")
+
 st.title("Likert Scale Options Generator")
 st.write(
     "This interface allows you to configure and generate Likert scale answer options by adjusting the parameters below."
@@ -334,6 +335,11 @@ if submitted:
         )
 
         st.session_state.survey_options = survey_options
+        
+        # Auto-save session
+        from gui_elements.session_cache import save_session_state
+        save_session_state()
+        
         st.switch_page("pages/02_Prompt_Configuration.py")
 
 
