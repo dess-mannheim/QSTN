@@ -97,7 +97,6 @@ def make_synonyms(all_prompts: List[str], model: str, instruction: str) -> str:
     """
     system_msg = "You are a helpful assistant that replaces words with their synonyms while preserving the original meaning."        
     
-    # 1. Map out the structure of all prompts
     all_segments_to_perturb = []
     prompt_maps = []
 
@@ -106,8 +105,7 @@ def make_synonyms(all_prompts: List[str], model: str, instruction: str) -> str:
         structure = [] # Stores (is_placeholder, content)
         for part in parts:
             is_placeholder = part.startswith("{") and part.endswith("}")
-            if not is_placeholder and part.strip(): # Only perturb non-empty, non-placeholders
-                # Record index in the flat batch list
+            if not is_placeholder and part.strip():
                 structure.append((False, len(all_segments_to_perturb)))
                 all_segments_to_perturb.append(part)
             else:
@@ -122,7 +120,6 @@ def make_synonyms(all_prompts: List[str], model: str, instruction: str) -> str:
         max_tokens=1024
     )
 
-    # 3. Reconstruct the prompts
     final_prompts = []
     for structure in prompt_maps:
         reconstructed = []
@@ -130,7 +127,6 @@ def make_synonyms(all_prompts: List[str], model: str, instruction: str) -> str:
             if is_placeholder:
                 reconstructed.append(content)
             else:
-                # 'content' here is the index in our flat_results list
                 reconstructed.append(flat_results[content])
         final_prompts.append("".join(reconstructed))
 
@@ -149,7 +145,6 @@ def make_paraphrase(all_prompts: List[str], model: str, instruction: str) -> str
     """
     system_msg = "You are a helpful assistant that paraphrases text while preserving the original meaning."
     
-    # 1. Map out the structure of all prompts
     all_segments_to_perturb = []
     prompt_maps = []
 
@@ -158,8 +153,7 @@ def make_paraphrase(all_prompts: List[str], model: str, instruction: str) -> str
         structure = [] # Stores (is_placeholder, content)
         for part in parts:
             is_placeholder = part.startswith("{") and part.endswith("}")
-            if not is_placeholder and part.strip(): # Only perturb non-empty, non-placeholders
-                # Record index in the flat batch list
+            if not is_placeholder and part.strip(): 
                 structure.append((False, len(all_segments_to_perturb)))
                 all_segments_to_perturb.append(part)
             else:
@@ -174,7 +168,6 @@ def make_paraphrase(all_prompts: List[str], model: str, instruction: str) -> str
         max_tokens=1024
     )
 
-    # 3. Reconstruct the prompts
     final_prompts = []
     for structure in prompt_maps:
         reconstructed = []
@@ -182,7 +175,6 @@ def make_paraphrase(all_prompts: List[str], model: str, instruction: str) -> str
             if is_placeholder:
                 reconstructed.append(content)
             else:
-                # 'content' here is the index in our flat_results list
                 reconstructed.append(flat_results[content])
         final_prompts.append("".join(reconstructed))
 
@@ -208,7 +200,6 @@ def apply_safe_perturbation(prompts: list, perturbation_func, **kwargs):
         
         if perturbation_func in [make_synonyms, make_paraphrase]:
             print("Using batch perturbation function:", perturbation_func)
-            # 2. Call the perturbation function in batch
             if perturbation_func == make_synonyms:
                 final_prompts = make_synonyms(
                     all_prompts=prompts,
