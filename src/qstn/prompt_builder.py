@@ -79,8 +79,6 @@ class LLMPrompt:
 
         self._same_options = False
 
-        self.enable_perturbations = enable_perturbations
-
     def duplicate(self):
         """
         Create a deep copy of the current interview instance.

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qstn"
-version = "0.1.1"
-description = "Questionnaire and Survey Evaluation Toolkit for NLP Research"
+version = "0.1.2"
+description = " A Modular Framework for Robust Questionnaire Inference with Large Language Models"
 authors = [
     { name = "Maximilian Kreutner", email = "maximilian.kreutner@uni-mannheim.de" }
 ]
@@ -17,7 +17,7 @@ dependencies = [
     "pydantic>=2.11.4",
     "torch>=2.6.0",
     "transformers>=4.51.3",
-    "vllm>=0.9.0",
+    "vllm>=0.11",
     "json_repair"
 ]
 

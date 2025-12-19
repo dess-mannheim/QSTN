@@ -1,5 +1,5 @@
 from vllm import LLM, SamplingParams
-from vllm.sampling_params import GuidedDecodingParams
+from vllm.sampling_params import StructuredOutputsParams
 from vllm.outputs import RequestOutput
 
 import torch
@@ -210,45 +210,46 @@ def batch_generation(
             )
             plain_results.append(output_text.split(reasoning_end_token)[-1].strip())
 
-        for rgm in response_generation_method:
-            # TODO This is not implemented correcty yet
-            if isinstance(rgm, LogprobResponseGenerationMethod):
-                logprob_result = []
-                # ignore the first k tokens that belong to the reasoning
-                if rgm.ignore_reasoning:
-                    tokenizer = model.get_tokenizer()
-                    logprob_positions = [
-                        (
-                            len(
-                                tokenizer.tokenize(
-                                    f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+        if response_generation_method:
+            for rgm in response_generation_method:
+                # TODO This is not implemented correcty yet
+                if isinstance(rgm, LogprobResponseGenerationMethod):
+                    logprob_result = []
+                    # ignore the first k tokens that belong to the reasoning
+                    if rgm.ignore_reasoning:
+                        tokenizer = model.get_tokenizer()
+                        logprob_positions = [
+                            (
+                                len(
+                                    tokenizer.tokenize(
+                                        f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
+                                    )
                                 )
+                                + 1
+                                + rgm.token_position
+                                if _reasoning is not None
+                                else rgm.token_position
                             )
-                            + 1
-                            + rgm.token_position
-                            if _reasoning is not None
-                            else rgm.token_position
-                        )
-                        for _reasoning in raw_reasonings
-                    ]
-                else:
-                    logprob_positions = [rgm.token_position] * len(outputs)
+                            for _reasoning in raw_reasonings
+                        ]
+                    else:
+                        logprob_positions = [rgm.token_position] * len(outputs)
 
-                for req_output, logprob_position in zip(outputs, logprob_positions):
-                    try:
-                        answer_dict = {
-                            x.decoded_token.lstrip(
-                                space_char
-                            ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
-                            for x in req_output.outputs[0]
-                            .logprobs[logprob_position]
-                            .values()
-                        }
-                    except (
-                        IndexError
-                    ):  # less than [logprob_position] tokens in the output!
-                        answer_dict = {}
-                    logprob_result.append(answer_dict)
+                    for req_output, logprob_position in zip(outputs, logprob_positions):
+                        try:
+                            answer_dict = {
+                                x.decoded_token.lstrip(
+                                    space_char
+                                ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+                                for x in req_output.outputs[0]
+                                .logprobs[logprob_position]
+                                .values()
+                            }
+                        except (
+                            IndexError
+                        ):  # less than [logprob_position] tokens in the output!
+                            answer_dict = {}
+                        logprob_result.append(answer_dict)
 
         # print the first result returned from vllm
         # if print_conversation:
@@ -354,7 +355,7 @@ def _structured_sampling_params(
     **generation_kwargs: Any,
 ) -> Union[List[SamplingParams], Dict[str, Any]]:
 
-    guided_decodings = []
+    structured_output = []
 
     if isinstance(response_generation_method, ResponseGenerationMethod):
         if isinstance(response_generation_method, JSONResponseGenerationMethod):
@@ -364,10 +365,10 @@ def _structured_sampling_params(
             )
             json_schema = pydantic_model.model_json_schema()
             if use_vllm:
-                global_guided_decoding = GuidedDecodingParams(json=json_schema)
-                guided_decodings = [global_guided_decoding] * batch_size
+                global_structured_output = StructuredOutputsParams(json=json_schema)
+                structured_output = [global_structured_output] * batch_size
             else:
-                guided_decodings = [json_schema] * batch_size
+                structured_output = [json_schema] * batch_size
         elif (
             isinstance(
                 response_generation_method,
@@ -379,14 +380,14 @@ def _structured_sampling_params(
                 str(c) for c in response_generation_method.allowed_choices
             ]
             if use_vllm:
-                global_guided_decoding = GuidedDecodingParams(choice=_allowed_choices)
-                guided_decodings = [global_guided_decoding] * batch_size
+                global_structured_output = StructuredOutputsParams(choice=_allowed_choices)
+                structured_output = [global_structured_output] * batch_size
             else:
-                guided_decodings = [_allowed_choices] * batch_size
+                structured_output = [_allowed_choices] * batch_size
 
     else:
-        guided_decodings = []
-        cache: Dict[str, GuidedDecodingParams] = {}
+        structured_output = []
+        cache: Dict[str, StructuredOutputsParams] = {}
         for i in range(batch_size):
             if isinstance(response_generation_method[i], JSONResponseGenerationMethod):
                 fields = response_generation_method[i].json_fields
@@ -400,11 +401,11 @@ def _structured_sampling_params(
                     )
                     json_schema = pydantic_model.model_json_schema()
                     if use_vllm:
-                        cache[key] = GuidedDecodingParams(json=json_schema)
+                        cache[key] = StructuredOutputsParams(json=json_schema)
                     else:
                         cache[key] = json_schema
 
-                guided_decodings.append(cache[key])
+                structured_output.append(cache[key])
             elif (
                 isinstance(
                     response_generation_method[i],
@@ -419,18 +420,18 @@ def _structured_sampling_params(
                 key = _make_cache_key(_allowed_choices, None)
                 if key not in cache:
                     if use_vllm:
-                        cache[key] = GuidedDecodingParams(choice=_allowed_choices)
+                        cache[key] = StructuredOutputsParams(choice=_allowed_choices)
                     else:
                         cache[key] = _allowed_choices
-                guided_decodings.append(cache[key])
+                structured_output.append(cache[key])
             else:
-                guided_decodings.append(None)
+                structured_output.append(None)
 
-    if use_vllm and len(guided_decodings) == batch_size:
+    if use_vllm and len(structured_output) == batch_size:
         sampling_params_list = [
             SamplingParams(
                 seed=seeds[i],
-                guided_decoding=guided_decodings[i],
+                structured_outputs=structured_output[i],
                 **generation_kwargs,
             )
             for i in range(batch_size)
@@ -441,7 +442,7 @@ def _structured_sampling_params(
             for i in range(batch_size)
         ]
     else:
-        return guided_decodings
+        return structured_output
 
     return sampling_params_list
 
@@ -641,7 +642,7 @@ def _run_async_in_thread(
 ):
     result_container = {}
 
-    guided_decoding_params = _create_sampling_params(
+    sampling_params = _create_sampling_params(
         batch_size=len(batch_messages),
         seeds=seeds,
         response_generation_method=response_generation_method,
@@ -660,7 +661,7 @@ def _run_async_in_thread(
                     concurrency_limit=concurrency_limit,
                     print_progress=print_progress,
                     response_generation_method=response_generation_method,
-                    guided_decoding_params=guided_decoding_params,
+                    sampling_params=sampling_params,
                     **generation_kwargs,
                 )
             )
@@ -685,7 +686,7 @@ async def _run_api_batch_async(
     seeds: List[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    guided_decoding_params: List[Dict[str, Any]] = [],
+    sampling_params: List[Dict[str, Any]] = [],
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
@@ -696,7 +697,7 @@ async def _run_api_batch_async(
     async def get_completion(
         messages: list,
         seed: int,
-        guided_decoding_params: Optional[Union[Dict[str, Any], List[str]]] = None,
+        sampling_params: Optional[Union[Dict[str, Any], List[str]]] = None,
         response_generation_method: Optional[
             Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
         ] = None,
@@ -716,28 +717,28 @@ async def _run_api_batch_async(
                         "type": "json_schema",
                         "json_schema": {
                             "name": "json_schema",
-                            "schema": guided_decoding_params,
+                            "schema": sampling_params,
                         },
                     }
                 elif isinstance(
                     response_generation_method, ChoiceResponseGenerationMethod
                 ):
-                    # TODO: add warning if this is not running against vllm, i.e., guided_choice is not supported
+                    # TODO: add warning if this is not running against vllm, i.e., choice is not supported
                     request_kwargs["extra_body"] = {
-                        "guided_choice": guided_decoding_params
+                        "structured_outputs": {"choice" : sampling_params}
                     }
 
             return await client.chat.completions.create(**request_kwargs)
 
     # pbar = tqdm.tqdm if print_progress else lambda x: x
 
-    if len(guided_decoding_params) > 0:
+    if len(sampling_params) > 0:
         tasks = [
             get_completion(messages, seed, struct_output, rgm, **generation_kwargs)
             for messages, seed, struct_output, rgm in zip(
                 batch_messages,
                 seeds,
-                guided_decoding_params,
+                sampling_params,
                 response_generation_method,
             )
         ]
