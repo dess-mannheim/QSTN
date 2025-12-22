@@ -11,10 +11,35 @@ from gui_elements.session_cache import (
     list_available_sessions,
     delete_session,
     generate_session_id,
+    require_hf_login,
+    handle_oauth_callback,
+    login_button,
+    get_user_id,
 )
 
 st.set_page_config(layout="wide")
 st.title("QSTN")
+
+# Handle OAuth callback first (before checking login)
+handle_oauth_callback()
+
+# Check if login is required (for Hugging Face Spaces)
+login_required, login_error_message = require_hf_login()
+if login_required:
+    # Center the login UI in a container
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.container(border=True):
+            st.markdown("### 🔐 Sign In Required")
+            st.markdown("This application requires Hugging Face authentication to provide personalized session management.")
+            st.markdown("")
+            login_button()
+    st.stop()  # Stop execution - user must log in
+
+# User is logged in - show username (optional)
+user_id = get_user_id()
+if user_id:
+    st.caption(f"👤 Logged in as: {user_id}")
 
 # Check for saved sessions on startup
 if "session_loaded" not in st.session_state:
@@ -44,6 +69,40 @@ if "session_loaded" not in st.session_state:
                 # Open the dialog
                 st.session_state.show_new_session_dialog_start = True
                 st.rerun()
+        
+        # Show dialog if requested (BEFORE st.stop())
+        if st.session_state.get("show_new_session_dialog_start", False):
+            with st.container(border=True):
+                st.subheader("Create New Session")
+                st.write("**Enter session name:**")
+                new_session_name = st.text_input(
+                    "Session Name",
+                    value=f"Session {generate_session_id()}",
+                    key="new_session_dialog_name_start_with_sessions"
+                )
+                
+                col_dialog1, col_dialog2 = st.columns(2)
+                with col_dialog1:
+                    if st.button("Cancel", use_container_width=True, key="cancel_new_session_start_with_sessions"):
+                        st.session_state.show_new_session_dialog_start = False
+                        st.rerun()
+                with col_dialog2:
+                    if st.button("Create", type="primary", use_container_width=True, key="create_new_session_start_with_sessions"):
+                        if new_session_name and new_session_name.strip():
+                            # Generate new session ID
+                            new_session_id = generate_session_id()
+                            st.session_state.current_session_id = new_session_id
+                            st.session_state.current_session_name = new_session_name.strip()
+                            st.session_state.session_loaded = True
+                            
+                            # Save to default location
+                            save_session_state(new_session_id, new_session_name.strip())
+                            
+                            st.session_state.show_new_session_dialog_start = False
+                            st.rerun()
+                        else:
+                            st.error("Please enter a session name.")
+            st.stop()  # Stop execution when dialog is open
         
         # Show session details
         with st.expander("📋 View Saved Sessions"):
