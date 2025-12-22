@@ -16,6 +16,7 @@ from qstn.utilities import constants
 from gui_elements.stateful_widget import StatefulWidgets
 
 st.set_page_config(layout="wide")
+
 st.title("Likert Scale Options Generator")
 st.write(
     "This interface allows you to configure and generate Likert scale answer options by adjusting the parameters below."
@@ -32,7 +33,11 @@ else:
 #if 'answer_texts_input' not in st.session_state:
     #st.session_state.answer_texts_input = "Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree"
 
-state = StatefulWidgets()
+@st.cache_data
+def create_stateful_widget() -> StatefulWidgets:
+    return StatefulWidgets()
+
+state = create_stateful_widget()
 
 # Use a form to batch all inputs together
 with st.container(border=True):
@@ -119,7 +124,7 @@ with st.container(border=True):
         "answer_texts",
         "Enter Answer Texts (one per line)",
         initial_value="Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree",
-        height=150,
+        height=170,
         help="Enter the labels for each answer option.",
     )
 
@@ -278,17 +283,14 @@ if submitted:
         response_generation_method = None
         if rgm_type == "JSON Single Answer":
             response_generation_method = JSONSingleResponseGenerationMethod(
-                automatic_output_instructions=True,
                 output_index_only=output_index_only,
             )
         elif rgm_type == "JSON All Options (Probabilities)":
             response_generation_method = JSONVerbalizedDistribution(
-                automatic_system_prompt=False,
                 output_index_only=output_index_only,
             )
         elif rgm_type == "JSON with Reasoning":
             response_generation_method = JSONReasoningResponseGenerationMethod(
-                automatic_output_instructions=True,
                 output_index_only=output_index_only,
             )
         elif rgm_type == "Choice":
@@ -303,7 +305,6 @@ if submitted:
             
             response_generation_method = ChoiceResponseGenerationMethod(
                 allowed_choices=allowed_choices_list,
-                automatic_output_instructions=True,
                 output_index_only=output_index_only,
             )
         # Logprob - commented out until fully implemented
@@ -334,6 +335,11 @@ if submitted:
         )
 
         st.session_state.survey_options = survey_options
+        
+        # Auto-save session
+        from gui_elements.session_cache import save_session_state
+        save_session_state()
+        
         st.switch_page("pages/02_Prompt_Configuration.py")
 
 
