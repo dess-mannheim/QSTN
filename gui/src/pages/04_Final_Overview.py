@@ -14,9 +14,10 @@ import logging
 
 from contextlib import redirect_stderr, redirect_stdout
 
-from qstn.parser.llm_answer_parser import raw_responses
+from qstn.parser.llm_answer_parser import raw_responses, parse_json, parse_json_battery
 from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities.utils import create_one_dataframe
+from qstn.inference.response_generation import JSONResponseGenerationMethod
 from qstn.survey_manager import (
     conduct_survey_sequential,
     conduct_survey_battery,
@@ -62,8 +63,6 @@ with col_llm:
             st.text_input,
             "model_name",
             "Model Name",
-            # initial_value="meta-llama/Llama-3.1-70B-Instruct",
-            # placeholder="meta-llama/Llama-3.1-70B-Instruct",
             disabled=True,
             help="The model to use for the inference call.",
         )
@@ -118,7 +117,6 @@ with col_llm:
                 "advanced_inference_params_str",
                 "JSON for other inference parameters",
                 initial_value="",
-                # placeholder='{\n  "stop": ["\\n", " Human:"],\n  "presence_penalty": 0\n}',
                 height=150,
                 disabled=True,
                 help='Enter any other valid inference parameters like "stop", "logit_bias", or "frequency_penalty" as a JSON object.',
@@ -148,6 +146,10 @@ with col_prompt_display:
     selected_method_name, selected_questionnaire_type = survey_method_options[survey_method_display]
 
     with st.container(border=True):
+        # Add a visible questionnaire identifier to force Streamlit to update when switching
+        # This ensures the preview updates even when "change all" makes content identical
+        st.caption(f"📋 Questionnaire {current_index + 1} of {len(st.session_state.questionnaires)}")
+        
         # For single item mode, show multiple previews (up to 3 items)
         if selected_questionnaire_type == QuestionnairePresentation.SINGLE_ITEM:
             num_questions = len(questionnaires._questions)
@@ -168,19 +170,25 @@ with col_prompt_display:
                 )
                 current_system_prompt = current_system_prompt.replace("\n", "  \n")
                 current_prompt = current_prompt.replace("\n", "  \n")
-                st.write(current_system_prompt)
-                st.write(current_prompt)
+                # Use a unique container key for each questionnaire/item to force Streamlit to update when switching
+                # This ensures the preview updates even when content is identical
+                with st.container(key=f"preview_container_{current_index}_{i}"):
+                    st.markdown(current_system_prompt)
+                    st.write(current_prompt)
                 
                 # Add separator between items (except for the last one)
                 if i < num_previews - 1:
                     st.divider()
         else:
             # For battery and sequential, show single preview as before
-        current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
-        current_system_prompt = current_system_prompt.replace("\n", "  \n")
-        current_prompt = current_prompt.replace("\n", "  \n")
-        st.write(current_system_prompt)
-        st.write(current_prompt)
+            current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
+            current_system_prompt = current_system_prompt.replace("\n", "  \n")
+            current_prompt = current_prompt.replace("\n", "  \n")
+            # Use a unique container key for each questionnaire to force Streamlit to update when switching
+            # This ensures the preview updates even when content is identical
+            with st.container(key=f"preview_container_{current_index}"):
+                st.markdown(current_system_prompt)
+                st.write(current_prompt)
 
 
 if st.button("Confirm and Run Questionnaire", type="primary", use_container_width=True):
@@ -298,7 +306,33 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
 
     st.success("Finished inferencing!")
 
-    responses = raw_responses(final_output)
+    # Check if any questionnaire uses JSON response generation methods
+    has_json_rgm = False
+    if isinstance(final_output, list) and len(final_output) > 0:
+        for result in final_output:
+            if hasattr(result, 'questionnaire') and hasattr(result.questionnaire, '_questions'):
+                for question in result.questionnaire._questions:
+                    if (hasattr(question, 'answer_options') and 
+                        question.answer_options and 
+                        hasattr(question.answer_options, 'response_generation_method') and
+                        question.answer_options.response_generation_method):
+                        rgm = question.answer_options.response_generation_method
+                        if isinstance(rgm, JSONResponseGenerationMethod):
+                            has_json_rgm = True
+                            break
+                if has_json_rgm:
+                    break
+
+    # Use appropriate parser based on response generation method
+    if has_json_rgm:
+        # Check survey method to use correct parser
+        survey_method_display = st.session_state.get("survey_method", "Single item")
+        if survey_method_display == "Battery":
+            responses = parse_json_battery(final_output)
+        else:
+            responses = parse_json(final_output)
+    else:
+        responses = raw_responses(final_output)
 
     df = create_one_dataframe(responses)
 

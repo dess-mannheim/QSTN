@@ -3,6 +3,7 @@ from qstn.prompt_builder import LLMPrompt
 from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities import placeholder
 from typing import Any
+import json
 
 from gui_elements.paginator import paginator
 from gui_elements.stateful_widget import StatefulWidgets
@@ -35,70 +36,157 @@ state = create_stateful_widget()
 if "questionnaires" not in st.session_state:
     st.error("You need to first upload a questionnaire and the population you want to survey.")
     st.stop()
-    disabled = True
-else:
-    disabled = False
 
-if 'current_index' not in st.session_state:
-    st.session_state.current_index = 0
-
-#current_questionnaire_id = paginator(st.session_state.questionnaires, "current_questionnaire_index_prepare")
 current_questionnaire_id = paginator(st.session_state.questionnaires, "current_questionnaire_index_prompt")
 
-if not "temporary_questionnaire" in st.session_state:
-    st.session_state.temporary_questionnaire = st.session_state.questionnaires[0].duplicate()
+# Helper functions
+def get_survey_options():
+    """Helper to get survey options from session state."""
+    return st.session_state.get("survey_options")
+
+def get_randomize_order_bool():
+    """Helper to get randomize order boolean."""
+    return st.session_state.get(f"input_{randomize_order_tick}", False)
+
+def clear_questionnaire_keys(questionnaire_id):
+    """Helper to clear session state keys for a questionnaire."""
+    keys_to_clear = [
+        f"system_prompt_textarea_{questionnaire_id}",
+        f"prompt_textarea_{questionnaire_id}",
+        f"input_{question_stem_field}_{questionnaire_id}",
+        f"preview_{questionnaire_id}"
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+
+def extract_placeholders(text):
+    """Extract all placeholder strings from text."""
+    all_placeholders = [
+        placeholder.PROMPT_QUESTIONS,
+        placeholder.PROMPT_OPTIONS,
+        placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS,
+        placeholder.QUESTION_CONTENT,
+        placeholder.JSON_TEMPLATE,
+    ]
+    found_placeholders = []
+    for ph in all_placeholders:
+        if ph in text:
+            found_placeholders.append(ph)
+    return found_placeholders
+
+def add_missing_placeholders(target_text, placeholders_to_add, source_text):
+    """Add or update placeholders in target text to match source formatting."""
+    if not placeholders_to_add:
+        return target_text
+    
+    result = target_text.rstrip()
+    
+    # First, remove any existing placeholders from the target to avoid duplicates
+    # and to allow re-formatting them
+    for ph in placeholders_to_add:
+        if ph in result:
+            # Remove the placeholder and any surrounding whitespace/newlines
+            # This allows us to re-add it in the correct format
+            result = result.replace(ph, '')
+            # Clean up extra whitespace/newlines that might be left
+            result = result.replace('\n\n\n', '\n\n')  # Remove triple newlines
+            result = result.replace('  ', ' ')  # Remove double spaces
+            result = result.rstrip()
+    
+    # Determine formatting from source text
+    # Check if any placeholder in source appears on the same line (not after a newline)
+    same_line_format = False
+    for ph in placeholders_to_add:
+        if ph in source_text:
+            # Find the placeholder in source
+            ph_index = source_text.find(ph)
+            # Check the character immediately before the placeholder
+            # If it's a newline, the placeholder is on a new line
+            # If it's a space or other character (not newline), it's on the same line
+            if ph_index > 0:
+                char_before = source_text[ph_index - 1]
+                if char_before != '\n':
+                    # Placeholder is on same line (not preceded by newline)
+                    same_line_format = True
+                    break
+            # If placeholder is at start of text (ph_index == 0), treat as new line
+            # If preceded by newline, also treat as new line
+    
+    # Add placeholders in the correct format
+    if same_line_format:
+        # Add placeholders on same line with space before
+        if result:
+            result += ' '
+        result += ' '.join(placeholders_to_add)
+    else:
+        # Add placeholders on new line(s)
+        if result and not result.endswith('\n'):
+            result += '\n'
+        result += '\n'.join(placeholders_to_add)
+    
+    return result
+
+def generate_preview(questionnaire, survey_options, randomize_order):
+    """Helper to generate preview content."""
+    temp_q = questionnaire.duplicate()
+    current_question_stem = (
+        questionnaire._questions[0].question_stem 
+        if questionnaire._questions else ""
+    )
+    temp_q.prepare_prompt(
+        question_stem=current_question_stem,
+        answer_options=survey_options,
+        randomized_item_order=randomize_order,
+    )
+    temp_q.system_prompt = questionnaire.system_prompt
+    temp_q.prompt = questionnaire.prompt
+    system_prompt, prompt = temp_q.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
+    return system_prompt.replace("\n", "  \n"), prompt.replace("\n", "  \n")
+
+# Initialize or update temporary_questionnaire to match current questionnaire
+if "temporary_questionnaire" not in st.session_state:
+    st.session_state.temporary_questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
+    st.session_state.temporary_questionnaire_id = current_questionnaire_id
+elif st.session_state.get("temporary_questionnaire_id") != current_questionnaire_id:
+    # User switched questionnaires, store old ID before updating
+    old_questionnaire_id = st.session_state.get("temporary_questionnaire_id")
+    st.session_state.temporary_questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
+    st.session_state.temporary_questionnaire_id = current_questionnaire_id
+    
+    # Clear old text area keys so they get re-initialized from the new temporary_questionnaire
+    if old_questionnaire_id is not None:
+        clear_questionnaire_keys(old_questionnaire_id)
+    
+    # Clear keys for the NEW questionnaire so they get re-initialized from temporary_questionnaire
+    # This ensures we use fresh values from the actual questionnaire, not stale session state
+    new_system_key = f"system_prompt_textarea_{current_questionnaire_id}"
+    new_prompt_key = f"prompt_textarea_{current_questionnaire_id}"
+    new_question_stem_key = f"input_{question_stem_field}_{current_questionnaire_id}"
+    clear_questionnaire_keys(current_questionnaire_id)
+    
+    # Explicitly set the keys to values from temporary_questionnaire after clearing
+    # This ensures the widgets initialize with the correct values, not stale session state
+    st.session_state[new_system_key] = st.session_state.temporary_questionnaire.system_prompt
+    st.session_state[new_prompt_key] = st.session_state.temporary_questionnaire.prompt
+    new_question_stem_default = st.session_state.temporary_questionnaire._questions[0].question_stem if st.session_state.temporary_questionnaire._questions else ""
+    st.session_state[new_question_stem_key] = new_question_stem_default
 
 if not "base_questionnaire" in st.session_state:
     st.session_state.base_questionnaire = st.session_state.temporary_questionnaire.duplicate()
-
-def process_inputs(input: Any, field_id: str) -> str:
-    if "survey_options" in st.session_state:
-        survey_options = st.session_state.survey_options
-    else:
-        survey_options = None
-
-    if field_id == question_stem_field:
-        LLMPrompt.prepare_prompt
-        st.session_state.temporary_questionnaire.prepare_prompt(
-            question_stem=input,
-            answer_options=survey_options,
-            randomized_item_order=randomize_order_bool,
-        )
-        st.session_state.base_questionnaire.prepare_prompt(
-            question_stem=input,
-            answer_options=survey_options,
-            randomized_item_order=randomize_order_bool,
-        )
-    elif field_id == randomize_order_tick:
-        if input == True:
-            st.session_state.temporary_questionnaire.prepare_prompt(
-                question_stem=question_stem_input,
-                answer_options=survey_options,
-                randomized_item_order=input,
-            )
-        else:
-            st.session_state.temporary_questionnaire = st.session_state.base_questionnaire.duplicate()
-
-def handle_change(field_id: str):
-    """
-    This single callback handles changes from any text field.
-    It reads the input from session state using the unique key,
-    processes it, and saves the output to session state.
-    """
-    input_key = f"input_{field_id}"
-
-    with st.spinner(f"Processing {field_id}..."):
-        # time.sleep(0.5) # Simulate work
-        process_inputs(st.session_state[input_key], field_id)
-
+elif st.session_state.get("temporary_questionnaire_id") != current_questionnaire_id:
+    # Update base_questionnaire when switching questionnaires
+    st.session_state.base_questionnaire = st.session_state.temporary_questionnaire.duplicate()
 
 if "questionnaires" in st.session_state and st.session_state.questionnaires is not None:
     try:
-        questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
+        # Validate questionnaire index
+        _ = st.session_state.questionnaires[current_questionnaire_id]
     except IndexError:
         st.error("Index is out of range. Resetting to the first item.")
         current_questionnaire_id = 0
-        questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
+        st.session_state.temporary_questionnaire = st.session_state.questionnaires[current_questionnaire_id].duplicate()
+        st.session_state.temporary_questionnaire_id = current_questionnaire_id
 
     col1, col2 = st.columns(2, gap="large")
 
@@ -124,14 +212,11 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
         
         st.divider()
 
-        # System prompt and main prompt section (from Basic Prompt Settings)
-        system_prompt_key = f"{system_prompt_field}{current_questionnaire_id}"
-        prompt_key = f"{prompt_field}{current_questionnaire_id}"
-        
+        # System prompt and main prompt section
         # Handle placeholder replacement for both textboxes before widgets are created
         if "unified_placeholder_to_replace" in st.session_state and st.session_state.unified_placeholder_to_replace:
-            current_system_text = st.session_state.get(system_prompt_key, questionnaire.system_prompt)
-            current_prompt_text = st.session_state.get(prompt_key, questionnaire.prompt)
+            current_system_text = st.session_state.temporary_questionnaire.system_prompt
+            current_prompt_text = st.session_state.temporary_questionnaire.prompt
             placeholder_shortcut = st.session_state.unified_placeholder_to_replace["shortcut"]
             placeholder_value = st.session_state.unified_placeholder_to_replace["value"]
             target_textbox = st.session_state.unified_placeholder_to_replace.get("target", "prompt")  # "system" or "prompt"
@@ -142,15 +227,15 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             else:
                 # Check for shortcut in both textboxes - replace where found
                 if placeholder_shortcut in current_system_text:
-                    st.session_state[system_prompt_key] = current_system_text.replace(placeholder_shortcut, placeholder_value)
+                    st.session_state.temporary_questionnaire.system_prompt = current_system_text.replace(placeholder_shortcut, placeholder_value)
                 elif placeholder_shortcut in current_prompt_text:
-                    st.session_state[prompt_key] = current_prompt_text.replace(placeholder_shortcut, placeholder_value)
+                    st.session_state.temporary_questionnaire.prompt = current_prompt_text.replace(placeholder_shortcut, placeholder_value)
                 else:
                     # No shortcut found, add to the target textbox (default based on which was clicked)
                     if target_textbox == "system":
-                        st.session_state[system_prompt_key] = current_system_text + f" {placeholder_value} "
+                        st.session_state.temporary_questionnaire.system_prompt = current_system_text + f" {placeholder_value} "
                     else:
-                        st.session_state[prompt_key] = current_prompt_text + f" {placeholder_value} "
+                        st.session_state.temporary_questionnaire.prompt = current_prompt_text + f" {placeholder_value} "
             
             st.session_state.unified_placeholder_to_replace = None
             st.rerun()
@@ -160,28 +245,37 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.warning(st.session_state.unified_placeholder_warning)
             st.session_state.unified_placeholder_warning = None  # Clear after displaying
         
-        # Get current value from session state if it exists, otherwise use default
-        current_system_prompt_value = st.session_state.get(system_prompt_key, questionnaire.system_prompt)
+        # Use temporary_questionnaire for text areas (temporary edits)
+        system_prompt_key = f"system_prompt_textarea_{current_questionnaire_id}"
+        prompt_key = f"prompt_textarea_{current_questionnaire_id}"
+        
+        # Initialize session state keys from temporary_questionnaire if they don't exist
+        # (This happens on first load or when switching to a new questionnaire)
+        if system_prompt_key not in st.session_state:
+            st.session_state[system_prompt_key] = st.session_state.temporary_questionnaire.system_prompt
+        if prompt_key not in st.session_state:
+            st.session_state[prompt_key] = st.session_state.temporary_questionnaire.prompt
+        
         new_system_prompt = st.text_area(
             label=system_prompt_field,
+            help="The system prompt the model is prompted with.",
             key=system_prompt_key,
-            value=current_system_prompt_value,
-            help="The system prompt the model is prompted with."
         )
+        # Sync from session state to temporary_questionnaire (captures user edits)
+        st.session_state.temporary_questionnaire.system_prompt = st.session_state[system_prompt_key]
 
         # Display warning for main prompt if it exists
         if "main_prompt_warning" in st.session_state and st.session_state.main_prompt_warning:
             st.warning(st.session_state.main_prompt_warning)
             st.session_state.main_prompt_warning = None  # Clear after displaying
         
-        # Get current value from session state if it exists, otherwise use default
-        current_prompt_value = st.session_state.get(prompt_key, questionnaire.prompt)
         new_prompt = st.text_area(
             label=prompt_field,
+            help="Instructions that are given to the model before the questions.",
             key=prompt_key,
-            value=current_prompt_value,
-            help="Instructions that are given to the model before the questions."
         )
+        # Sync from session state to temporary_questionnaire (captures user edits)
+        st.session_state.temporary_questionnaire.prompt = st.session_state[prompt_key]
 
         # Unified placeholder insertion buttons (work for both system prompt and main prompt)
         st.write("**Insert Placeholder:**")
@@ -220,16 +314,20 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
 
         st.divider()
 
+        # Initialize field keys if they don't exist
         for field_id in field_ids:
-            input_key = f"input_{field_id}"
-            if not input_key in st.session_state:
+            if field_id == question_stem_field:
+                input_key = f"input_{field_id}_{current_questionnaire_id}"
+            else:
+                input_key = f"input_{field_id}"
+            if input_key not in st.session_state:
                 if field_id == question_stem_field:
-                    st.session_state[input_key] = st.session_state.temporary_questionnaire ._questions[0].question_stem
+                    st.session_state[input_key] = st.session_state.temporary_questionnaire._questions[0].question_stem
                 if field_id == randomize_order_tick:
                     st.session_state[input_key] = False
 
         # Handle placeholder replacement before widget is created
-        input_key = f"input_{question_stem_field}"
+        input_key = f"input_{question_stem_field}_{current_questionnaire_id}"
         if "placeholder_to_replace" in st.session_state and st.session_state.placeholder_to_replace:
             current_text = st.session_state.get(input_key, "")
             placeholder_shortcut = st.session_state.placeholder_to_replace["shortcut"]
@@ -249,24 +347,28 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             st.session_state.placeholder_to_replace = None
             st.rerun()
 
-        # --- Input Widgets (No Form) ---
+        # --- Input Widgets ---
         # Display warning for question stem if it exists
         if "question_stem_warning" in st.session_state and st.session_state.question_stem_warning:
             st.warning(st.session_state.question_stem_warning)
             st.session_state.question_stem_warning = None  # Clear after displaying
         
-        # Get current value from session state if it exists, otherwise use default
-        input_key = f"input_{question_stem_field}"
-        default_question_stem = st.session_state.temporary_questionnaire._questions[0].question_stem if st.session_state.temporary_questionnaire._questions else ""
-        current_question_stem_value = st.session_state.get(input_key, default_question_stem)
+        # Use questionnaire-specific key (consistent with system_prompt and prompt)
+        # Streamlit will automatically use the session_state value when key is provided
+        input_key = f"input_{question_stem_field}_{current_questionnaire_id}"
         question_stem_input = st.text_area(
             question_stem_field,
             key=input_key,
-            value=current_question_stem_value,
-            # placeholder="e.g., How would you rate the following aspects of our service?",
-            #on_change=handle_change,
-            kwargs={'field_id': question_stem_field},
             height=100,
+        )
+        # Sync from session state to temporary_questionnaire (captures user edits)
+        # This ensures consistency with system_prompt and prompt fields
+        survey_options = get_survey_options()
+        randomize_order_bool = get_randomize_order_bool()
+        st.session_state.temporary_questionnaire.prepare_prompt(
+            question_stem=st.session_state[input_key],
+            answer_options=survey_options,
+            randomized_item_order=randomize_order_bool,
         )
 
         # --- Placeholder Replacement Buttons ---
@@ -307,132 +409,57 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
             randomize_order_tick,
             key=f"input_{randomize_order_tick}",
             value=False,
-            #on_change=handle_change,
-            kwargs={'field_id': randomize_order_tick} 
         )
 
         st.divider()
 
-        
-
     # Place the corresponding output in the second column
     with col2:
         st.subheader("📄 Live Preview")
-    # --- The Dynamic Preview Logic ---
-    # This block re-runs on every widget interaction.
-    # --- The Preview Logic ---
-    # Preview only updates when "Update Prompt(s)" is clicked
+        # Preview only updates when "Update Prompt(s)" is clicked
         with st.container(border=True):
-
-            
-            #             # Update temporary questionnaire with question stem
-            # if "survey_options" in st.session_state:
-            #     survey_options = st.session_state.survey_options
-            # else:
-            #     survey_options = None
-
-            # if randomize_order_bool:
-            #     st.session_state.temporary_questionnaire.prepare_prompt(
-            #         question_stem=question_stem_input,
-            #         answer_options=survey_options,
-            #         randomized_item_order=randomize_order_bool,
-            #     )
-            # st.session_state.base_questionnaire.prepare_prompt(
-            #     question_stem=question_stem_input,
-            #     answer_options=survey_options,
-            #     randomized_item_order=False,
-            # )
-
-            # if not randomize_order_bool:
-            #     st.session_state.temporary_questionnaire = st.session_state.base_questionnaire.duplicate()
-
-            # # Update system prompt and main prompt for preview (apply to temporary_questionnaire)
-            # st.session_state.temporary_questionnaire.system_prompt = new_system_prompt
-            # st.session_state.temporary_questionnaire.prompt = new_prompt
-            # current_system_prompt, current_prompt = st.session_state.temporary_questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
-            # current_system_prompt = current_system_prompt.replace("\n", "  \n")
-            # current_prompt = current_prompt.replace("\n", "  \n")
-            # st.write(current_system_prompt)
-            # st.write(current_prompt)
-            
-            
             # Initialize preview state if it doesn't exist
             preview_key = f"preview_{current_questionnaire_id}"
             if preview_key not in st.session_state:
                 # Create initial preview
-                if "survey_options" in st.session_state:
-                    survey_options = st.session_state.survey_options
-                else:
-                    survey_options = None
-                
-                temp_questionnaire = st.session_state.temporary_questionnaire.duplicate()
-                temp_questionnaire.prepare_prompt(
-                    question_stem=question_stem_input,
-                    answer_options=survey_options,
-                    randomized_item_order=False,
+                survey_options = get_survey_options()
+                system_prompt, prompt = generate_preview(
+                    st.session_state.temporary_questionnaire,
+                    survey_options,
+                    False
                 )
-                temp_questionnaire.system_prompt = questionnaire.system_prompt
-                temp_questionnaire.prompt = questionnaire.prompt
-                current_system_prompt, current_prompt = temp_questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
-                current_system_prompt = current_system_prompt.replace("\n", "  \n")
-                current_prompt = current_prompt.replace("\n", "  \n")
                 st.session_state[preview_key] = {
-                    "system_prompt": current_system_prompt,
-                    "prompt": current_prompt
+                    "system_prompt": system_prompt,
+                    "prompt": prompt
                 }
             
             # Display the stored preview
-            st.write(st.session_state[preview_key]["system_prompt"])
-            st.write(st.session_state[preview_key]["prompt"])
+            # Add a visible questionnaire identifier to force Streamlit to update when switching
+            # This ensures the preview updates even when "change all" makes content identical
+            st.caption(f"📋 Questionnaire {current_questionnaire_id + 1} of {len(st.session_state.questionnaires)}")
+            # Use a unique container key for each questionnaire to force Streamlit to update when switching
+            # This ensures the preview updates even when content is identical
+            with st.container(key=f"preview_container_{current_questionnaire_id}"):
+                st.markdown(st.session_state[preview_key]["system_prompt"])
+                st.write(st.session_state[preview_key]["prompt"])
 
     st.divider()
 
-    if st.button("Update Prompt(s)", type="secondary", use_container_width=True):
-        # Get current values from text areas (they're already in session state via the keys)
-        current_system_value = st.session_state.get(system_prompt_key, new_system_prompt)
-        current_prompt_value = st.session_state.get(prompt_key, new_prompt)
-        
-        if change_all_system:
-            for questionnaire in st.session_state.questionnaires:
-                questionnaire.system_prompt = current_system_value
-        else:
-            st.session_state.questionnaires[current_questionnaire_id].system_prompt = current_system_value
-
-        if change_all_questionnaire:
-            for questionnaire in st.session_state.questionnaires:
-                questionnaire.prompt = current_prompt_value
-        else:
-            st.session_state.questionnaires[current_questionnaire_id].prompt = current_prompt_value
-        
+    if st.button("Update Preview", type="secondary", use_container_width=True):
         # Update the preview when Update Prompt(s) is clicked
+        # Use temporary_questionnaire directly (already has all the edits)
         preview_key = f"preview_{current_questionnaire_id}"
-        if "survey_options" in st.session_state:
-            survey_options = st.session_state.survey_options
-        else:
-            survey_options = None
+        survey_options = get_survey_options()
+        randomize_order_bool = get_randomize_order_bool()
         
-        temp_questionnaire = st.session_state.temporary_questionnaire.duplicate()
-        if randomize_order_bool:
-            temp_questionnaire.prepare_prompt(
-                question_stem=question_stem_input,
-                answer_options=survey_options,
-                randomized_item_order=randomize_order_bool,
-            )
-        else:
-            temp_questionnaire.prepare_prompt(
-                question_stem=question_stem_input,
-                answer_options=survey_options,
-                randomized_item_order=False,
-            )
-        
-        temp_questionnaire.system_prompt = current_system_value
-        temp_questionnaire.prompt = current_prompt_value
-        preview_system_prompt, preview_prompt = temp_questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
-        preview_system_prompt = preview_system_prompt.replace("\n", "  \n")
-        preview_prompt = preview_prompt.replace("\n", "  \n")
+        system_prompt, prompt = generate_preview(
+            st.session_state.temporary_questionnaire,
+            survey_options,
+            randomize_order_bool
+        )
         st.session_state[preview_key] = {
-            "system_prompt": preview_system_prompt,
-            "prompt": preview_prompt
+            "system_prompt": system_prompt,
+            "prompt": prompt
         }
              
         st.success("Prompt(s) updated!")
@@ -440,38 +467,60 @@ if "questionnaires" in st.session_state and st.session_state.questionnaires is n
 
     if st.button("Confirm and Prepare Questionnaire", type="primary", use_container_width=True):
         # Get survey options if they exist
-        if "survey_options" in st.session_state:
-            survey_options = st.session_state.survey_options
-        else:
-            survey_options = None
+        survey_options = get_survey_options()
+        randomize_order_bool = get_randomize_order_bool()
         
-        # Get current system prompt and main prompt values
-        current_system_value = st.session_state.get(system_prompt_key, new_system_prompt)
-        current_prompt_value = st.session_state.get(prompt_key, new_prompt)
+        # Copy from temporary_questionnaire to actual questionnaires
+        # All values come from temporary_questionnaire (now fully synced with all edits)
+        current_system_value = st.session_state.temporary_questionnaire.system_prompt
+        current_prompt_value = st.session_state.temporary_questionnaire.prompt
+        current_question_stem = (
+            st.session_state.temporary_questionnaire._questions[0].question_stem 
+            if st.session_state.temporary_questionnaire._questions 
+            else ""
+        )
         
-        for questionnaire in st.session_state.questionnaires:
-            # Update system prompt and main prompt
-            if change_all_system:
-                questionnaire.system_prompt = current_system_value
-            else:
-                # Only update if it's the current questionnaire or if we're updating all
-                if questionnaire == st.session_state.questionnaires[current_questionnaire_id]:
+        # Extract placeholders from current system prompt if "change all System Prompts" is checked
+        placeholders_to_add = []
+        if change_all_system:
+            placeholders_to_add = extract_placeholders(current_system_value)
+        
+        for idx, questionnaire in enumerate(st.session_state.questionnaires):
+            # Determine if this questionnaire should be updated
+            # System prompt: current questionnaire gets full update, others get placeholders added (if checkbox checked)
+            should_update_system = (idx == current_questionnaire_id)
+            should_update_prompt = change_all_questionnaire or (idx == current_questionnaire_id)
+            should_update = should_update_system or should_update_prompt or (change_all_system and idx != current_questionnaire_id)
+            
+            if should_update:
+                # Update system prompt: full update for current, add placeholders for others
+                if should_update_system:
+                    # Current questionnaire: update entire system prompt
                     questionnaire.system_prompt = current_system_value
-            
-            if change_all_questionnaire:
-                questionnaire.prompt = current_prompt_value
-            else:
-                # Only update if it's the current questionnaire or if we're updating all
-                if questionnaire == st.session_state.questionnaires[current_questionnaire_id]:
+                elif change_all_system and idx != current_questionnaire_id:
+                    # Other questionnaires: add missing placeholders while preserving base content
+                    questionnaire.system_prompt = add_missing_placeholders(
+                        questionnaire.system_prompt,
+                        placeholders_to_add,
+                        current_system_value
+                    )
+                
+                if should_update_prompt:
                     questionnaire.prompt = current_prompt_value
-            
-            # Update question stem and answer options
-            questionnaire.prepare_prompt(
-                question_stem=question_stem_input,
-                answer_options=survey_options,
-                randomized_item_order=randomize_order_bool,
-            )
+                
+                # Call prepare_prompt for questionnaires being updated
+                # Use question stem from temporary_questionnaire (consistent with other fields)
+                questionnaire.prepare_prompt(
+                    question_stem=current_question_stem,
+                    answer_options=survey_options,
+                    randomized_item_order=randomize_order_bool,
+                )
         st.success("Changed the prompts!")
+        
+        # Auto-save session
+        from gui_elements.session_cache import save_session_state
+        save_session_state()
+        
         st.switch_page("pages/03_Inference_Setting.py")
 else:
     st.warning("No data found. Please upload a CSV file on the 'Start Page' first.")

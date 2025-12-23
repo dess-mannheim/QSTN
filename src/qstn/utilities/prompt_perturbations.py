@@ -1,6 +1,8 @@
 import random
 import string
 
+from qstn.inference.survey_inference import *
+
 def key_typos(text: str, probability: float = 0.1) -> str:
     """
     Randomly replaces characters with random alphabet letters to simulate typos.
@@ -83,10 +85,101 @@ def letter_swaps(text: str, probability: float = 0.1) -> str:
 
 
 
-# def make_synonyms(self, text: str, synonym_dict: Optional[dict] = None) -> str:
+def make_synonyms(all_prompts: List[str], model: str, instruction: str) -> str:
+    """
+    Uses a language model to replace words with their synonyms.
+    Args:
+        all_prompts (List[str]): The input prompts as a list to perturb.
+        model (str): The language model to use for generating synonyms as a vllm LLM object.
+        instruction (str): The instruction prompt for the model.
+    Returns:
+        List[str]: The prompts with words replaced by their synonyms as a list of strings.
+    """
+    system_msg = "You are a helpful assistant that replaces words with their synonyms while preserving the original meaning."        
+    
+    all_segments_to_perturb = []
+    prompt_maps = []
+
+    for prompt in all_prompts:
+        parts = re.split(r'(\{.*?\})', prompt)
+        structure = [] # Stores (is_placeholder, content)
+        for part in parts:
+            is_placeholder = part.startswith("{") and part.endswith("}")
+            if not is_placeholder and part.strip():
+                structure.append((False, len(all_segments_to_perturb)))
+                all_segments_to_perturb.append(part)
+            else:
+                structure.append((True, part))
+        prompt_maps.append(structure)
+    
+    flat_results, _, _ = batch_generation(
+        model=model,
+        system_messages=[system_msg] * len(all_segments_to_perturb),
+        prompts=[instruction + text for text in all_segments_to_perturb],
+        response_generation_method=[ResponseGenerationMethod()] * len(all_segments_to_perturb),
+        max_tokens=1024
+    )
+
+    final_prompts = []
+    for structure in prompt_maps:
+        reconstructed = []
+        for is_placeholder, content in structure:
+            if is_placeholder:
+                reconstructed.append(content)
+            else:
+                reconstructed.append(flat_results[content])
+        final_prompts.append("".join(reconstructed))
+
+    return final_prompts
      
 
-# def make_paraphrase(self, text: str) -> str:
+def make_paraphrase(all_prompts: List[str], model: str, instruction: str) -> str:
+    """
+    Uses a language model to paraphrase the input text.
+    Args:
+        all_prompts (List[str]): The input prompts as a list to perturb.
+        model (str): The language model to use for paraphrasing as a vllm LLM object.
+        instruction (str): The instruction prompt for the model.
+    Returns:
+        List[str]: The paraphrased text as a list of strings.
+    """
+    system_msg = "You are a helpful assistant that paraphrases text while preserving the original meaning."
+    
+    all_segments_to_perturb = []
+    prompt_maps = []
+
+    for prompt in all_prompts:
+        parts = re.split(r'(\{.*?\})', prompt)
+        structure = [] # Stores (is_placeholder, content)
+        for part in parts:
+            is_placeholder = part.startswith("{") and part.endswith("}")
+            if not is_placeholder and part.strip(): 
+                structure.append((False, len(all_segments_to_perturb)))
+                all_segments_to_perturb.append(part)
+            else:
+                structure.append((True, part))
+        prompt_maps.append(structure)
+    
+    flat_results, _, _ = batch_generation(
+        model=model,
+        system_messages=[system_msg] * len(all_segments_to_perturb),
+        prompts=[instruction + text for text in all_segments_to_perturb],
+        response_generation_method=[ResponseGenerationMethod()] * len(all_segments_to_perturb),
+        max_tokens=1024
+    )
+
+    final_prompts = []
+    for structure in prompt_maps:
+        reconstructed = []
+        for is_placeholder, content in structure:
+            if is_placeholder:
+                reconstructed.append(content)
+            else:
+                reconstructed.append(flat_results[content])
+        final_prompts.append("".join(reconstructed))
+
+    return final_prompts
+
 
 
 def apply_safe_perturbation(prompts: list, perturbation_func, **kwargs):
@@ -99,27 +192,43 @@ def apply_safe_perturbation(prompts: list, perturbation_func, **kwargs):
             perturbation_func (function): The function to apply to non-placeholder text.
             **kwargs: Additional keyword arguments to pass to the perturbation function (e.g., probability).
         Returns:
-            str: The prompts with perturbations applied safely.
+            List[str]: The prompts with perturbations applied safely.
         """
         import re
         if not prompts:
             return prompts
         
-        perturbed_prompts = []
-        for prompt in prompts:
+        if perturbation_func in [make_synonyms, make_paraphrase]:
+            print("Using batch perturbation function:", perturbation_func)
+            if perturbation_func == make_synonyms:
+                final_prompts = make_synonyms(
+                    all_prompts=prompts,
+                    model=kwargs.get("model"),
+                    instruction=kwargs.get("instruction")
+                )
+            elif perturbation_func == make_paraphrase:
+                final_prompts = make_paraphrase(
+                    all_prompts=prompts,
+                    model=kwargs.get("model"),
+                    instruction=kwargs.get("instruction")
+                )
+            return final_prompts   
+        else:
+            perturbed_prompts = []
+            for prompt in prompts:
 
-            parts = re.split(r'(\{.*?\})', prompt)
-            
-            processed_parts = []
-            for part in parts:
-                # Check if this part is a placeholder
-                if part.startswith("{") and part.endswith("}"):
-                    # Append exactly as is
-                    processed_parts.append(part)
-                else:
-                    # Apply the typo function
-                    processed_parts.append(perturbation_func(part, **kwargs))
+                parts = re.split(r'(\{.*?\})', prompt)
                 
-            perturbed_prompts.append("".join(processed_parts))
+                processed_parts = []
+                for part in parts:
+                    # Check if this part is a placeholder
+                    if part.startswith("{") and part.endswith("}"):
+                        # Append exactly as is
+                        processed_parts.append(part)
+                    else:
+                        # Apply the typo function
+                        processed_parts.append(perturbation_func(part, **kwargs))
+                    
+                perturbed_prompts.append("".join(processed_parts))
 
-        return perturbed_prompts
+            return perturbed_prompts
