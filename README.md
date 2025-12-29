@@ -61,7 +61,7 @@ parsed_results = qstn.parser.raw_responses(results)
 
 ## Citation
 
-If you find QSTN useful in your work, please cite the following paper:
+If you find QSTN useful in your work, please cite our [paper](https://arxiv.org/abs/2512.08646):
 
 ```bibtex
 @misc{kreutner2025qstnmodularframeworkrobust,
