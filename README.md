@@ -63,7 +63,7 @@ parsed_results = qstn.parser.raw_responses(results)
 
 If you find QSTN useful in your work, please cite the following paper:
 
-'''bibtex
+```bibtex
 @misc{kreutner2025qstnmodularframeworkrobust,
       title={QSTN: A Modular Framework for Robust Questionnaire Inference with Large Language Models}, 
       author={Maximilian Kreutner and Jens Rupprecht and Georg Ahnert and Ahmed Salem and Markus Strohmaier},
