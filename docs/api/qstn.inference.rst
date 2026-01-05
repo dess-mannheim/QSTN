@@ -25,3 +25,15 @@ Inference
    :members:
    :undoc-members:
    :show-inheritance:
+
+
+.. automodule:: qstn.inference.local_inference
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
+.. automodule:: qstn.inference.remote_inference
+   :members:
+   :undoc-members:
+   :show-inheritance:

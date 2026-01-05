@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, List, Optional, Union, Dict, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Union, Tuple
 
 import random
 
@@ -25,11 +25,8 @@ try:
 except ImportError:
     AsyncOpenAI = Any
 
-from .dynamic_pydantic import _generate_pydantic_model
 from .response_generation import (
     ResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
 

@@ -270,7 +270,7 @@ async def _run_api_batch_async(
             for messages, seed in zip(batch_messages, seeds)
         ]
     if print_progress:
-        responses = await tqdm_asyncio.gather(*tasks, desc="Processing Prompts")
+        responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Processing Prompts")
     else:
         responses = await asyncio.gather(
             *tasks, return_exceptions=True, desc="Processing Prompts"
