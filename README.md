@@ -61,6 +61,15 @@ parsed_results = qstn.parser.raw_responses(results)
 
 ## Citation
 
-Authors: Maximilian Kreutner, Jens Rupprecht, Georg Ahnert, Ahmed Salem, and Markus Strohmaier
+If you find QSTN useful in your work, please cite our [paper](https://arxiv.org/abs/2512.08646):
 
-This package will soon have a arxiv paper.
+```bibtex
+@misc{kreutner2025qstnmodularframeworkrobust,
+      title={QSTN: A Modular Framework for Robust Questionnaire Inference with Large Language Models}, 
+      author={Maximilian Kreutner and Jens Rupprecht and Georg Ahnert and Ahmed Salem and Markus Strohmaier},
+      year={2025},
+      eprint={2512.08646},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2512.08646}, 
+}
