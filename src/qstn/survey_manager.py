@@ -501,17 +501,20 @@ def conduct_survey_sequential(
 
         for index, surv in enumerate(current_batch):
             prefilled_answer = surv._questions[i].prefilled_response
-            if prefilled_answer:
+            if prefilled_answer is not None:
                 current_assistant_messages.append(prefilled_answer)
                 missing_indeces.append(index)
 
-        current_batch = [
+        needed_batch = [
             item for a, item in enumerate(current_batch) if a not in missing_indeces
         ]
 
-        if len(current_batch) == 0:
+        if len(needed_batch) == 0:
             for c in range(len(current_batch)):
                 assistant_messages[c].append(current_assistant_messages[c])
+            
+            logprobs = [None] * len(current_batch)
+            reasoning_output = [None] * len(current_batch)
             for (
                 survey_id,
                 question,
@@ -553,17 +556,17 @@ def conduct_survey_sequential(
 
         # avoid errors when zipping
         if logprobs is None or len(logprobs) == 0:
-            logprobs = [None] * len(current_batch)
+            logprobs = [None] * len(needed_batch)
 
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
         for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            range(len(current_batch)),
+            range(len(needed_batch)),
             questions,
             output,
             logprobs,
             reasoning_output,
-            current_batch,
+            needed_batch,
         ):
             question_llm_response[survey_id].update(
                 {

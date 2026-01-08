@@ -273,7 +273,7 @@ async def _run_api_batch_async(
         responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Processing Prompts")
     else:
         responses = await asyncio.gather(
-            *tasks, return_exceptions=True, desc="Processing Prompts"
+            *tasks, return_exceptions=True
         )
 
     final_results = []
