@@ -13,6 +13,7 @@ st.markdown("Use the widgets below to configure the `AsyncOpenAI` client and the
 
 st.divider()
 
+
 # --- Column Layout ---
 col1, col2 = st.columns(2)
 
@@ -31,8 +32,11 @@ for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
+@st.cache_data
+def create_stateful_widget() -> StatefulWidgets:
+    return StatefulWidgets()
 
-state = StatefulWidgets()
+state = create_stateful_widget()
 
 # ==============================================================================
 # COLUMN 1: OPENAI CLIENT CONFIGURATION
@@ -227,4 +231,9 @@ if st.button("Generate Configuration & Code", type="primary", use_container_widt
     st.session_state.client_config = client_config
     st.session_state.inference_config = inference_config
 
+    # Auto-save session
+    from gui_elements.session_cache import save_session_state
+    save_session_state()
+
     st.success("Configuration generated successfully!")
+    st.switch_page("pages/04_Final_Overview.py")

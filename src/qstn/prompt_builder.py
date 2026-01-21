@@ -8,6 +8,8 @@ from .utilities import constants, placeholder, prompt_templates
 from .utilities.constants import QuestionnairePresentation
 from .utilities.utils import safe_format_with_regex
 
+from .utilities.prompt_perturbations import * 
+
 from .inference.response_generation import ResponseGenerationMethod
 
 import pandas as pd
@@ -17,7 +19,7 @@ import random
 import copy
 
 
-from transformers import AutoTokenizer
+#from transformers import AutoTokenizer
 
 
 class LLMPrompt:
@@ -60,7 +62,7 @@ class LLMPrompt:
             prompt (str): Prompt for all questions.
             verbose (bool): If True, enables verbose output.
             seed (int): Random seed for reproducibility.
-        """
+          """
         random.seed(seed)
 
         if questionnaire_source is None:
@@ -170,34 +172,34 @@ class LLMPrompt:
 
         return system_prompt, prompt
 
-    def calculate_input_token_estimate(
-        self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
-    ) -> int:
-        """
-        Estimate the number of input tokens for the prompt, given a model and questionnaire type.
-        Remember that the model also has to have enough context length to fit its own response
-        in case of CONTEXT and ONE_PROMPT type.
+    # def calculate_input_token_estimate(
+    #     self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
+    # ) -> int:
+    #     """
+    #     Estimate the number of input tokens for the prompt, given a model and questionnaire type.
+    #     Remember that the model also has to have enough context length to fit its own response
+    #     in case of CONTEXT and ONE_PROMPT type.
 
-        Args:
-            model_id (str): Huggingface model id.
-            questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
+    #     Args:
+    #         model_id (str): Huggingface model id.
+    #         questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
 
-        Returns:
-            int: Estimated number of input tokens.
-        """
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
-        system_prompt, prompt = self.get_prompt_for_questionnaire_type(
-            questionnaire_type=questionnaire_type
-        )
-        system_tokens = tokenizer.encode(system_prompt)
-        tokens = tokenizer.encode(prompt)
-        total_tokens = len(system_tokens) + len(tokens)
+    #     Returns:
+    #         int: Estimated number of input tokens.
+    #     """
+    #     tokenizer = AutoTokenizer.from_pretrained(model_id)
+    #     system_prompt, prompt = self.get_prompt_for_questionnaire_type(
+    #         questionnaire_type=questionnaire_type
+    #     )
+    #     system_tokens = tokenizer.encode(system_prompt)
+    #     tokens = tokenizer.encode(prompt)
+    #     total_tokens = len(system_tokens) + len(tokens)
 
-        return (
-            total_tokens
-            if questionnaire_type != QuestionnairePresentation.SEQUENTIAL
-            else len(total_tokens) * 3
-        )
+    #     return (
+    #         total_tokens
+    #         if questionnaire_type != QuestionnairePresentation.SEQUENTIAL
+    #         else len(total_tokens) * 3
+    #     )
 
     def get_questions(self) -> List[QuestionnaireItem]:
         """
@@ -290,7 +292,6 @@ class LLMPrompt:
             prefilled_responses (Dict[int, str], optional): If you provide prefilled responses, they will be used
             to fill the answers instead of prompting the LLM for that question.
             randomized_item_order (bool): If True, randomize the order of questions.
-
         Returns:
             Self: The updated instance with prepared questions.
         """
@@ -381,7 +382,7 @@ class LLMPrompt:
                     ),
                 )
                 updated_questions.append(new_questionnaire_question)
-
+        
         if randomized_item_order:
             random.shuffle(updated_questions)
 
@@ -411,6 +412,8 @@ class LLMPrompt:
                 question_prompt = f"""{questionnaire_items.question_stem} {questionnaire_items.question_content}"""
         else:
             question_prompt = f"""{questionnaire_items.question_content}"""
+        
+        
         if questionnaire_items.answer_options:
             _options_str = questionnaire_items.answer_options.create_options_str()
             if _options_str is not None:
@@ -418,6 +421,7 @@ class LLMPrompt:
                 question_prompt = safe_format_with_regex(
                     question_prompt, safe_formatter
                 )
+        
         return question_prompt
     
 
@@ -430,6 +434,10 @@ def generate_likert_options(
     random_order: bool = False,
     reversed_order: bool = False,
     even_order: bool = False,
+    add_middle_category: bool = False,
+    str_middle_cat: str = "Neutral",
+    add_refusal: bool = False,
+    refusal_code: str = "-99",
     start_idx: int = 1,
     list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
     scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
@@ -455,6 +463,14 @@ def generate_likert_options(
             Defaults to False.
         even_order (bool, optional): If True, options the center option will be removed.
             E.g., for n=5: 1, 2, 4, 5
+        add_middle_category (bool, optional): If True, a middle category will be added. The name can be specified,
+            by default it is "Neutral". E.g., for n=4: 1, 2, 3: Neutral, 4, 5
+        str_middle_cat (str, optional): The label for the middle category if `add_middle_category` is True.
+            Defaults to "Neutral".
+        add_refusal (bool, optional): If True, an additional option for "Don't know / Refuse to answer" will be added.
+            Defaults to False.
+        refusal_code (str, optional): The code assigned to the refusal option if `add_refusal` is True.
+            Defaults to "-99".
         start_idx (int, optional): The starting index for the scale (usually 0 or 1).
             Defaults to 1.
         list_prompt_template (str, optional): The template for prompts that list all options.
@@ -501,7 +517,7 @@ def generate_likert_options(
                     f"answer_texts and n need to be the same length, but answer_texts has length {len(answer_texts)} and n was given as {n}."
                 )
     if even_order:
-        if n % 2 != 0:
+        if n % 2 == 0:
             raise ValueError(
                 "If you want to turn a scale even, it should be odd before."
             )
@@ -510,6 +526,15 @@ def generate_likert_options(
             answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
         )
         n = n - 1
+    if add_middle_category:
+        if n % 2 != 0:
+            raise ValueError(
+                "If you want to add a middle category, it should be even before."
+            )
+        middle_index = n // 2
+        answer_texts = answer_texts[:middle_index] + [str_middle_cat] + answer_texts[middle_index :]
+        n = n + 1
+
     if random_order:
         if len(answer_texts) < 2:
             raise ValueError(
@@ -523,16 +548,26 @@ def generate_likert_options(
             raise ValueError(
                 "There must be at least two answer options to reorder in reverse."
             )
-        answer_options = answer_options[::-1]
+        answer_texts = answer_texts[::-1]
+    
+    if add_refusal:
+        answer_texts.append("Don't know / Refuse to answer")
+        n += 1
 
     answer_option_indices = []
     if idx_type == "no_index":
         # no index, just the answer options directly
         answer_option_indices = None
     elif idx_type == "integer":
-        for i in range(n):
-            answer_code = i + start_idx
-            answer_option_indices.append(str(answer_code))
+        if add_refusal: # if refusal is added, assign it a common code -99
+            for i in range(n - 1):
+                answer_code = i + start_idx
+                answer_option_indices.append(str(answer_code))
+            answer_option_indices.append(refusal_code)  # common code for refusal
+        else:
+            for i in range(n):
+                answer_code = i + start_idx
+                answer_option_indices.append(str(answer_code))
     else:
         # TODO @Jens add these to constants.py
         if idx_type == "char_lower":
@@ -542,6 +577,8 @@ def generate_likert_options(
             for i in range(n):
                 answer_option_indices.append(ascii_uppercase[(i + start_idx) % 26])
 
+
+    
     answer_texts_object = AnswerTexts(
         answer_texts=answer_texts,
         indices=answer_option_indices,

@@ -193,19 +193,20 @@ class AnswerOptions:
                                 fields[key] = ", ".join(answer_texts.full_answers)
 
                 constraints = self.response_generation_method.constraints
-                for key in constraints:
-                    if constraints[key] == constants.OPTIONS_ADJUST:
-                        if self.response_generation_method.output_index_only:
-                            numbers = []
-                            for index in answer_texts.indices:
-                                try:
-                                    number = int(index)
-                                except:
-                                    number = index
-                                numbers.append(number)
-                            constraints[key] = numbers
-                        else:
-                            constraints[key] = answer_texts.full_answers
+                if constraints:
+                    for key in constraints:
+                        if constraints[key] == constants.OPTIONS_ADJUST:
+                            if self.response_generation_method.output_index_only:
+                                numbers = []
+                                for index in answer_texts.indices:
+                                    try:
+                                        number = int(index)
+                                    except:
+                                        number = index
+                                    numbers.append(number)
+                                constraints[key] = numbers
+                            else:
+                                constraints[key] = answer_texts.full_answers
 
             elif isinstance(
                 self.response_generation_method, ChoiceResponseGenerationMethod

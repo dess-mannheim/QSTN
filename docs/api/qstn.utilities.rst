@@ -25,6 +25,14 @@ Prompt Creation
    :undoc-members:
    :show-inheritance:
 
+Prompt Perturbation
+-------------------------------------------
+
+.. automodule:: qstn.utilities.prompt_perturbations
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Prompt Templates
 --------------------------------------------
 

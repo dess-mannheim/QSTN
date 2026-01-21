@@ -7,7 +7,7 @@ from ..inference.survey_inference import batch_generation, ResponseGenerationMet
 
 from ..utilities import constants
 
-from vllm import LLM
+#from vllm import LLM
 
 import pandas as pd
 import numpy as np
@@ -208,77 +208,77 @@ def raw_responses(
 #     return all_results
 
 
-def parse_with_llm(
-    model: LLM,
-    survey_results: List[InferenceResult],
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-    prompt: str = DEFAULT_PROMPT,
-    answer_production_method: Optional[ResponseGenerationMethod] = None,
-    print_conversation: bool = False,
-    print_progress: bool = True,
-    seed=42,
-    **generation_kwargs,
-) -> Dict[LLMPrompt, pd.DataFrame]:
-    all_items_to_process = []
-    for survey_result in survey_results:
-        for item_id, question_llm_response_tuple in survey_result.results.items():
-            all_items_to_process.append(
-                {
-                    constants.QUESTIONNAIRE_NAME: survey_result.questionnaire,
-                    constants.QUESTIONNAIRE_ITEM_ID: item_id,
-                    constants.QUESTION: question_llm_response_tuple.question,
-                    constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
-                    "prompt": prompt.format(
-                        question=question_llm_response_tuple.question,
-                        llm_response=question_llm_response_tuple.llm_response,
-                    ),
-                }
-            )
+# def parse_with_llm(
+#     model: LLM,
+#     survey_results: List[InferenceResult],
+#     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+#     prompt: str = DEFAULT_PROMPT,
+#     answer_production_method: Optional[ResponseGenerationMethod] = None,
+#     print_conversation: bool = False,
+#     print_progress: bool = True,
+#     seed=42,
+#     **generation_kwargs,
+# ) -> Dict[LLMPrompt, pd.DataFrame]:
+#     all_items_to_process = []
+#     for survey_result in survey_results:
+#         for item_id, question_llm_response_tuple in survey_result.results.items():
+#             all_items_to_process.append(
+#                 {
+#                     constants.QUESTIONNAIRE_NAME: survey_result.questionnaire,
+#                     constants.QUESTIONNAIRE_ITEM_ID: item_id,
+#                     constants.QUESTION: question_llm_response_tuple.question,
+#                     constants.LLM_RESPONSE: question_llm_response_tuple.llm_response,
+#                     "prompt": prompt.format(
+#                         question=question_llm_response_tuple.question,
+#                         llm_response=question_llm_response_tuple.llm_response,
+#                     ),
+#                 }
+#             )
 
-    if not all_items_to_process:
-        all_results = {}
-    # or handle as you see fit, e.g., return {}
-    else:
-        # 2. BATCH: Prepare prompts for a single batch generation call.
-        all_prompts = [item["prompt"] for item in all_items_to_process]
-        system_messages = [system_prompt] * len(all_prompts)
+#     if not all_items_to_process:
+#         all_results = {}
+#     # or handle as you see fit, e.g., return {}
+#     else:
+#         # 2. BATCH: Prepare prompts for a single batch generation call.
+#         all_prompts = [item["prompt"] for item in all_items_to_process]
+#         system_messages = [system_prompt] * len(all_prompts)
 
-        # Perform the single, efficient batch inference.
-        llm_parsed_results, logprobs, reasoning_output = batch_generation(
-            model,
-            system_messages=system_messages,
-            prompts=all_prompts,
-            response_generation_method=answer_production_method,  # TODO: fix automatic system prompt
-            seed=seed,
-            print_conversation=print_conversation,
-            print_progress=print_progress,
-            chat_template_kwargs={
-                "enable_thinking": False
-            },  # disable reasoning to facilitate parsing
-            **generation_kwargs,
-        )
+#         # Perform the single, efficient batch inference.
+#         llm_parsed_results, logprobs, reasoning_output = batch_generation(
+#             model,
+#             system_messages=system_messages,
+#             prompts=all_prompts,
+#             response_generation_method=answer_production_method,  # TODO: fix automatic system prompt
+#             seed=seed,
+#             print_conversation=print_conversation,
+#             print_progress=print_progress,
+#             chat_template_kwargs={
+#                 "enable_thinking": False
+#             },  # disable reasoning to facilitate parsing
+#             **generation_kwargs,
+#         )
 
-    for item, parsed_result in zip(all_items_to_process, llm_parsed_results):
-        item[constants.PARSED_RESPONSE] = parsed_result
+#     for item, parsed_result in zip(all_items_to_process, llm_parsed_results):
+#         item[constants.PARSED_RESPONSE] = parsed_result
 
-    # Group the results by survey_name to build the final DataFrames.
-    # defaultdict is perfect for this task.
-    grouped_data = defaultdict(list)
-    for item in all_items_to_process:
-        grouped_data[item[constants.QUESTIONNAIRE_NAME]].append(
-            {
-                constants.QUESTIONNAIRE_ITEM_ID: item[constants.QUESTIONNAIRE_ITEM_ID],
-                constants.QUESTION: item[constants.QUESTION],
-                constants.LLM_RESPONSE: item[constants.LLM_RESPONSE],
-                constants.PARSED_RESPONSE: item[constants.PARSED_RESPONSE],
-            }
-        )
-    all_results = {
-        survey_name: pd.DataFrame(data_list)
-        for survey_name, data_list in grouped_data.items()
-    }
+#     # Group the results by survey_name to build the final DataFrames.
+#     # defaultdict is perfect for this task.
+#     grouped_data = defaultdict(list)
+#     for item in all_items_to_process:
+#         grouped_data[item[constants.QUESTIONNAIRE_NAME]].append(
+#             {
+#                 constants.QUESTIONNAIRE_ITEM_ID: item[constants.QUESTIONNAIRE_ITEM_ID],
+#                 constants.QUESTION: item[constants.QUESTION],
+#                 constants.LLM_RESPONSE: item[constants.LLM_RESPONSE],
+#                 constants.PARSED_RESPONSE: item[constants.PARSED_RESPONSE],
+#             }
+#         )
+#     all_results = {
+#         survey_name: pd.DataFrame(data_list)
+#         for survey_name, data_list in grouped_data.items()
+#     }
 
-    return all_results
+#     return all_results
 
 
 def _filter_logprobs_by_choices(

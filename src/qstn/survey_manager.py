@@ -74,7 +74,7 @@ from .prompt_builder import LLMPrompt, QuestionnairePresentation
 
 from .utilities.survey_objects import InferenceResult
 
-from vllm import LLM
+#from vllm import LLM
 
 from openai import AsyncOpenAI
 
@@ -88,7 +88,7 @@ from tqdm.auto import tqdm
 
 
 def conduct_survey_single_item(
-    model: Union[LLM, AsyncOpenAI],
+    model: Union["LLM", AsyncOpenAI],
     llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
@@ -97,8 +97,6 @@ def conduct_survey_single_item(
     n_save_step: Optional[int] = None,
     intermediate_save_file: Optional[str] = None,
     seed: int = 42,
-    chat_template: Optional[str] = None,
-    chat_template_kwargs: Dict[str, Any] = {},
     **generation_kwargs: Any,
 ) -> List[InferenceResult]:
     """
@@ -114,8 +112,6 @@ def conduct_survey_single_item(
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
-        chat_template: Optionally pass a specific chat template string.
-        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
     Returns:
@@ -167,7 +163,6 @@ def conduct_survey_single_item(
             )
             for questionnaire in current_batch
         ]
-
         output, logprobs, reasoning_output = batch_generation(
             model=model,
             system_messages=system_messages,
@@ -178,8 +173,6 @@ def conduct_survey_single_item(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
-            chat_template=chat_template,
-            chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
 
@@ -281,7 +274,7 @@ def _intermediate_save_path_check(n_save_step: int, intermediate_save_path: str)
 
 
 def conduct_survey_battery(
-    model: Union[LLM, AsyncOpenAI],
+    model: Union["LLM", AsyncOpenAI],
     llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
@@ -290,8 +283,6 @@ def conduct_survey_battery(
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
-    chat_template: Optional[str] = None,
-    chat_template_kwargs: Dict[str, Any] = {},
     item_separator: str = "\n",
     **generation_kwargs: Any,
 ) -> List[InferenceResult]:
@@ -308,8 +299,6 @@ def conduct_survey_battery(
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
-        chat_template: Optionally pass a specific chat template string.
-        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
         item_seperator: Which String should separate the items, defaults to "\n".
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
@@ -372,8 +361,6 @@ def conduct_survey_battery(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
-            chat_template=chat_template,
-            chat_template_kwargs=chat_template_kwargs,
             **generation_kwargs,
         )
 
@@ -407,7 +394,7 @@ def conduct_survey_battery(
 
 
 def conduct_survey_sequential(
-    model: Union[LLM, AsyncOpenAI],
+    model: Union["LLM", AsyncOpenAI],
     llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
     client_model_name: Optional[str] = None,
     api_concurrency: int = 10,
@@ -431,8 +418,6 @@ def conduct_survey_sequential(
         n_save_step: Save intermediate results every n steps.
         intermediate_save_file: Path to save intermediate results.
         seed: Random seed for reproducibility.
-        chat_template: Optionally pass a specific chat template string.
-        chat_template_kwargs: Arguments to pass to the chat template (e.g., to disable reasoning).
         item_seperator: Which String should separate the items, defaults to "\n".
         **generation_kwargs: Additional generation parameters that will be given to vllm.chat() or client.chat.completions.create().
 
@@ -516,17 +501,20 @@ def conduct_survey_sequential(
 
         for index, surv in enumerate(current_batch):
             prefilled_answer = surv._questions[i].prefilled_response
-            if prefilled_answer:
+            if prefilled_answer is not None:
                 current_assistant_messages.append(prefilled_answer)
                 missing_indeces.append(index)
 
-        current_batch = [
+        needed_batch = [
             item for a, item in enumerate(current_batch) if a not in missing_indeces
         ]
 
-        if len(current_batch) == 0:
+        if len(needed_batch) == 0:
             for c in range(len(current_batch)):
                 assistant_messages[c].append(current_assistant_messages[c])
+            
+            logprobs = [None] * len(current_batch)
+            reasoning_output = [None] * len(current_batch)
             for (
                 survey_id,
                 question,
@@ -568,17 +556,17 @@ def conduct_survey_sequential(
 
         # avoid errors when zipping
         if logprobs is None or len(logprobs) == 0:
-            logprobs = [None] * len(current_batch)
+            logprobs = [None] * len(needed_batch)
 
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
         for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            range(len(current_batch)),
+            range(len(needed_batch)),
             questions,
             output,
             logprobs,
             reasoning_output,
-            current_batch,
+            needed_batch,
         ):
             question_llm_response[survey_id].update(
                 {
