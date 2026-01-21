@@ -175,3 +175,5 @@ cython_debug/
 
 # Own Files
 src/surveygen/survey_prompting.ipynb
+src/qstn/utilities/prompt_perturbations.py
+.gitignore
