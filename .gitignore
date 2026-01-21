@@ -175,11 +175,6 @@ cython_debug/
 
 # Own Files
 src/surveygen/survey_prompting.ipynb
-<<<<<<< HEAD
-src/qstn/utilities/prompt_perturbations.py
-.gitignore
-=======
 
 # Session cache
 .session_cache/
->>>>>>> 98ab629fb2434925efe7fd19c835a6e8010a89f2
