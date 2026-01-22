@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "qstn"
-version = "0.1.5"
+version = "0.1.5.1"
 description = "A Modular Framework for Robust Questionnaire Inference with Large Language Models"
 authors = [
     { name = "Maximilian Kreutner", email = "maximilian.kreutner@uni-mannheim.de" }
