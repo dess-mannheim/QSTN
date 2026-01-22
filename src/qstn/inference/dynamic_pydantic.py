@@ -68,6 +68,8 @@ def _generate_pydantic_model(
             # allow for probability distribution across answer options
             elif field in constraints and constraints[field] == "float":
                 model_fields[str(field)] = (float, ...)
+            elif field not in constraints:
+                model_fields[str(field)] = (str, ...)
         else:
             model_fields[str(field)] = (str, ...)
 

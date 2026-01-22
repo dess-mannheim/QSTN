@@ -144,7 +144,7 @@ def conduct_survey_single_item(
 
         system_messages, prompts = zip(
             *[
-                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SINGLE_ITEM, i)
+                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SINGLE_ITEM, questionnaire._questions[i].item_id)
                 for questionnaire in current_batch
             ]
         )
@@ -334,7 +334,7 @@ def conduct_survey_battery(
 
         system_messages, prompts = zip(
             *[
-                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.BATTERY, i, item_separator=item_separator)
+                questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.BATTERY, questionnaire._questions[i].item_id, item_separator=item_separator)
                 for questionnaire in current_batch
             ]
         )
@@ -458,7 +458,7 @@ def conduct_survey_sequential(
         if first_question:
             system_messages, prompts = zip(
                 *[
-                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, i)
+                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, questionnaire._questions[i].item_id)
                     for questionnaire in current_batch
                 ]
             )
@@ -471,7 +471,7 @@ def conduct_survey_sequential(
         else:
             system_messages, _ = zip(
                 *[
-                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, i)
+                    questionnaire.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL, questionnaire._questions[i].item_id)
                     for questionnaire in current_batch
                 ]
             )

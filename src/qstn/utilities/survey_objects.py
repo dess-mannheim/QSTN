@@ -92,7 +92,8 @@ class AnswerTexts:
                     dummy_answer_texts.append("")
                 full_indices.append(index)
             self.indices = full_indices
-            self.answer_texts = dummy_answer_texts
+            if len(self.answer_texts) == 2:
+                self.answer_texts = dummy_answer_texts
         if self.answer_texts and self.indices:
             self.full_answers = [
                 f"{index}{self.index_answer_seperator}{answer_text}"
@@ -287,7 +288,7 @@ class InferenceResult:
 class QuestionnaireItem:
     """Represents a single questionnaire item."""
 
-    item_id: int
+    item_id: str
     question_content: str
     question_stem: Optional[str] = None
     answer_options: Optional[AnswerOptions] = None

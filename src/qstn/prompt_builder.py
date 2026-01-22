@@ -67,6 +67,8 @@ class LLMPrompt:
 
         if questionnaire_source is None:
             raise ValueError("Either a path or a dataframe have to be provided")
+        
+        self._questions: List[QuestionnaireItem] = []
 
         self.load_questionnaire_format(questionnaire_source=questionnaire_source)
 
@@ -78,6 +80,8 @@ class LLMPrompt:
         self.prompt: str = prompt
 
         self._same_options = False
+
+        
 
     def duplicate(self):
         """
@@ -91,7 +95,7 @@ class LLMPrompt:
     def get_prompt_for_questionnaire_type(
         self,
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
-        item_id: int = 0,
+        item_id: str = "FIRST_QUESTION",
         item_separator: str = "\n",
     ) -> Tuple[str, str]:
         """
@@ -105,16 +109,26 @@ class LLMPrompt:
         """
         options = ""
         automatic_output_instructions = ""
+
+        question_map = {question.item_id: question for question in self._questions}
+        if item_id == "FIRST_QUESTION":
+            question_item = self._questions[0]
+        elif item_id not in question_map.keys():
+            raise ValueError("item_id does not exist.")
+        else:
+            question_item = question_map[item_id]
+
         if (
             questionnaire_type == QuestionnairePresentation.SINGLE_ITEM
             or questionnaire_type == QuestionnairePresentation.SEQUENTIAL
         ):
-            question = self.generate_question_prompt(self._questions[item_id])
+            
+            question = self.generate_question_prompt(question_item)
 
-            if self._questions[item_id].answer_options:
-                options = self._questions[item_id].answer_options.create_options_str()
+            if question_item.answer_options:
+                options = question_item.answer_options.create_options_str()
 
-                rgm = self._questions[item_id].answer_options.response_generation_method
+                rgm = question_item.answer_options.response_generation_method
                 if rgm is None:  # by default, no response generation method is required
                     automatic_output_instructions = ""
                 else:
@@ -147,9 +161,9 @@ class LLMPrompt:
                 all_questions.append(current_question_prompt)
 
             all_questions_str = item_separator.join(all_questions)
-            if self._questions[item_id].answer_options:
-                options = self._questions[item_id].answer_options.create_options_str()
-                rgm = self._questions[item_id].answer_options.response_generation_method
+            if question_item.answer_options:
+                options = question_item.answer_options.create_options_str()
+                rgm = question_item.answer_options.response_generation_method
 
                 if rgm is None:  # by default, no response generation method is required
                     automatic_output_instructions = ""
@@ -271,7 +285,7 @@ class LLMPrompt:
     def prepare_prompt(
         self,
         question_stem: Optional[List[str]] = None,
-        answer_options: Optional[Dict[int, AnswerOptions]] = None,
+        answer_options: Optional[Dict[str, AnswerOptions]] = None,
         prefilled_responses: Optional[Dict[int, str]] = None,
         randomized_item_order: bool = False,
     ) -> Self: ...
@@ -279,7 +293,7 @@ class LLMPrompt:
     def prepare_prompt(
         self,
         question_stem: Optional[Union[str, List[str]]] = None,
-        answer_options: Optional[Union[AnswerOptions, Dict[int, AnswerOptions]]] = None,
+        answer_options: Optional[Union[AnswerOptions, Dict[str, AnswerOptions]]] = None,
         prefilled_responses: Optional[Dict[int, str]] = None,
         randomized_item_order: bool = False,
     ) -> Self:
@@ -502,10 +516,10 @@ def generate_likert_options(
     """
 
     if only_from_to_scale:
-        if len(answer_texts) != 2:
-            raise ValueError(
-                f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'."
-            )
+        # if len(answer_texts) != 2:
+        #     raise ValueError(
+        #         f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'."
+        #     )
         if idx_type != "integer":
             raise ValueError(
                 f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'."

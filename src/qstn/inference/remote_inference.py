@@ -221,11 +221,14 @@ async def _run_api_batch_async(
                             "schema": sampling_params,
                         },
                     }
+
                 elif isinstance(
                     response_generation_method, ChoiceResponseGenerationMethod
                 ):
+                    import warnings
+                    warnings.warn("Strict Choice Response Generation is only supported for vllm APIs.")
                     if (
-                        False
+                        True
                     ):  # We could use this if we can ensure that the api is vllm.
                         request_kwargs["extra_body"] = {
                             "structured_outputs": {"choice": sampling_params}
