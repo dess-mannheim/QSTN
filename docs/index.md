@@ -15,7 +15,6 @@ quickstart
 :maxdepth: 2
 
 guides/index
-
 ressources/index
 ```
 
