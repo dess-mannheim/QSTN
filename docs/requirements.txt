@@ -4,7 +4,7 @@ sphinx-notfound-page==1.0.2
 myst-parser
 myst_nb
 standard-imghdr
-
+sphinx-book-theme
 
 # Needed for the base module
 pandas>=2.2.3
