@@ -18,7 +18,7 @@ author = 'Maximilian Kreutner'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-release = '0.1.5'
+release = '0.1.5.1'
 
 extensions = [
     'sphinx.ext.autodoc',      # Core library to pull documentation from docstrings
