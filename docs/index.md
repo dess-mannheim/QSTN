@@ -15,7 +15,7 @@ quickstart
 :maxdepth: 2
 
 guides/index
-ressources/index
+resources/index
 ```
 
 ```{toctree}

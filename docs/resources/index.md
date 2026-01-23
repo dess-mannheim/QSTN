@@ -1,6 +1,6 @@
-# Resource
+# Resources
 
-We show how to use QSTN to conduct large scale persona experiments.
+In this section we show how to use `QSTN` to conduct large scale persona experiments.
 
 ```{toctree}
 :maxdepth: 1
