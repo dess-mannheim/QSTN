@@ -189,6 +189,7 @@ def batch_generation(
         _print_conversation(
             system_messages=system_messages,
             prompts=prompts,
+            assistant_messages=None,
             plain_results=plain_results,
             reasoning_output=reasoning_outputs,
             logprob_result=logprob_result,
