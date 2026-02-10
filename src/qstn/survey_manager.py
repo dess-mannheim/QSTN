@@ -26,7 +26,7 @@ Usage example:
 
 
     system_prompt = "Act as if you were a black middle aged man from New York! Answer in a single short sentence!"
-    prompt = f"Please tell us how you feel about the following parties:\n{placeholder.PROMPT_QUESTIONS}"
+    prompt = "Please tell us how you feel about the following parties:\n" + placeholder.PROMPT_QUESTIONS"
 
     questionnaire = LLMPrompt(
         questionnaire_name="political_parties",
