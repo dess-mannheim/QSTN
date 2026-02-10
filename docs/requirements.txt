@@ -10,6 +10,7 @@ sphinx-book-theme
 pandas>=2.2.3
 pydantic>=2.11.4
 tqdm
+openai
 #torch>=2.6.0 # mock expensive imports
 #transformers>=4.51.3
 #vllm>=0.8.5
