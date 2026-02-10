@@ -173,8 +173,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Own Files
-src/surveygen/survey_prompting.ipynb
-
 # Session cache
 .session_cache/

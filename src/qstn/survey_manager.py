@@ -8,44 +8,43 @@ This module provides functions to conduct surveys in different ways:
 
 Usage example:
 -------------
-```python
-from qstn import survey_manager
-from qstn.prompt_builder import LLMPrompt
-from qstn.utilities import placeholder
-from vllm import LLM
+.. code-block:: python
+    from qstn import survey_manager
+    from qstn.prompt_builder import LLMPrompt
+    from qstn.utilities import placeholder
+    from vllm import LLM
 
-import pandas as pd
+    import pandas as pd
 
-questionnaire = [
-    {"questionnaire_item_id": 1, "question_content": "The Democratic Party?"},
-    {"questionnaire_item_id": 2, "question_content": "The Republican Party?"},
-]
-party_questionnaire = pd.DataFrame(questionnaire)
+    questionnaire = [
+        {"questionnaire_item_id": 1, "question_content": "The Democratic Party?"},
+        {"questionnaire_item_id": 2, "question_content": "The Republican Party?"},
+    ]
+    party_questionnaire = pd.DataFrame(questionnaire)
 
 
-system_prompt = "Act as if you were a black middle aged man from New York! Answer in a single short sentence!"
-prompt = f"Please tell us how you feel about the following parties:\n{placeholder.PROMPT_QUESTIONS}"
+    system_prompt = "Act as if you were a black middle aged man from New York! Answer in a single short sentence!"
+    prompt = f"Please tell us how you feel about the following parties:\n{placeholder.PROMPT_QUESTIONS}"
 
-questionnaire = LLMPrompt(
-    questionnaire_name="political_parties",
-    questionnaire_source=party_questionnaire,
-    system_prompt=system_prompt,
-    prompt=prompt,
-)
+    questionnaire = LLMPrompt(
+        questionnaire_name="political_parties",
+        questionnaire_source=party_questionnaire,
+        system_prompt=system_prompt,
+        prompt=prompt,
+    )
 
-model_id = "meta-llama/Llama-3.2-3B-Instruct"
-chat_generator = LLM(model_id, max_model_len=5000, seed=42)
+    model_id = "meta-llama/Llama-3.2-3B-Instruct"
+    chat_generator = LLM(model_id, max_model_len=5000, seed=42)
 
-results = survey_manager.conduct_survey_single_item(
-    chat_generator,
-    questionnaire,
-    client_model_name=model_id,
-    print_conversation=True,
-    # We can use the same inference arguments for inference, as we would for vllm or OpenAI
-    temperature=0.8,
-    max_tokens=5000,
-)
-```
+    results = survey_manager.conduct_survey_single_item(
+        chat_generator,
+        questionnaire,
+        client_model_name=model_id,
+        print_conversation=True,
+        # We can use the same inference arguments for inference, as we would for vllm or OpenAI
+        temperature=0.8,
+        max_tokens=5000,
+    )
 """
 
 from typing import (
