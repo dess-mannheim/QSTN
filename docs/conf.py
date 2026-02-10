@@ -24,7 +24,7 @@ extensions = [
     'sphinx.ext.autodoc',      # Core library to pull documentation from docstrings
     'sphinx.ext.napoleon',     # Support for Google and NumPy style docstrings
     'sphinx.ext.viewcode',     # Add links to highlighted source code
-    'myst_nb',             # To write documentation in Markdown instead of reStructuredText
+    'myst_nb',                 # To write documentation in Markdown instead of reStructuredText
 ]
 
 templates_path = ['_templates']
@@ -36,6 +36,10 @@ autodoc_default_options = {
     'undoc-members': True,
     'private-members': False,
 }
+
+autosummary_generate = True
+
+autodoc_mock_imports = ["vllm", "torch", "transformers"]
 
 # Use the description for typehints, not the signature
 autodoc_typehints = "description"

@@ -8,7 +8,7 @@ from .utilities import constants, placeholder, prompt_templates
 from .utilities.constants import QuestionnairePresentation
 from .utilities.utils import safe_format_with_regex
 
-from .utilities.prompt_perturbations import * 
+from .utilities.prompt_perturbations import *
 
 from .inference.response_generation import ResponseGenerationMethod
 
@@ -19,7 +19,7 @@ import random
 import copy
 
 
-#from transformers import AutoTokenizer
+# from transformers import AutoTokenizer
 
 
 class LLMPrompt:
@@ -45,7 +45,7 @@ class LLMPrompt:
 
     def __init__(
         self,
-        questionnaire_source=Union[str, pd.DataFrame],
+        questionnaire_source: Union[str, pd.DataFrame] = None,
         questionnaire_name: str = DEFAULT_QUESTIONNAIRE_ID,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         prompt: str = DEFAULT_PROMPT_STRUCTURE,
@@ -53,24 +53,26 @@ class LLMPrompt:
         seed: int = 42,
     ):
         """
-        Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe has to be provided to structure the questionnaire.
+        Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe can be provided to structure the questionnaire.
+        Question structure can later be modified with the magic `__setitem__`, `__getitem__` and `__delitem__` methods. New questions can be inserted with `insert_questions`.
 
         Args:
             questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the questionnaire structure and questions.
             questionnaire_name (str): Name/ID for the questionnaire.
             system_prompt (str): System prompt for all questions.
             prompt (str): Prompt for all questions.
-            verbose (bool): If True, enables verbose output.
+            verbose (bool): If True, enables verbose output. (Not implemented yet)
             seed (int): Random seed for reproducibility.
-          """
+        """
         random.seed(seed)
 
         if questionnaire_source is None:
             raise ValueError("Either a path or a dataframe have to be provided")
-        
+
         self._questions: List[QuestionnaireItem] = []
 
-        self.load_questionnaire_format(questionnaire_source=questionnaire_source)
+        if questionnaire_source:
+            self.load_questionnaire_format(questionnaire_source=questionnaire_source)
 
         self.verbose: bool = verbose
 
@@ -78,10 +80,6 @@ class LLMPrompt:
 
         self.system_prompt: str = system_prompt
         self.prompt: str = prompt
-
-        self._same_options = False
-
-        
 
     def duplicate(self):
         """
@@ -95,7 +93,8 @@ class LLMPrompt:
     def get_prompt_for_questionnaire_type(
         self,
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
-        item_id: str = "FIRST_QUESTION",
+        item_id: Optional[str] = None,
+        item_position: Optional[int] = 0,
         item_separator: str = "\n",
     ) -> Tuple[str, str]:
         """
@@ -103,26 +102,30 @@ class LLMPrompt:
 
         Args:
             quesitonnaire_type (QuestionnairePresentation): The type of questionnaire prompt to generate.
-
+            item_id (str): The id of the questionnaire_item that should be shown. If both item_id and item_position are provided, only item_id is considered.
+            item_position (int): The question at that position will be shown. If both item_id and item_position are provided, only item_id is considered. Defaults to the first question.
+            item_separator (str): For QuestionnairePresentation.BATTERY decides the str that seperates each question.
         Returns:
-            str: The constructed prompt for the questionnaire presentation.
+            Tuple(str, str): The first element corresponds to the system_prompt, the second element to the prompt.
         """
         options = ""
         automatic_output_instructions = ""
 
         question_map = {question.item_id: question for question in self._questions}
-        if item_id == "FIRST_QUESTION":
-            question_item = self._questions[0]
+        if item_id:
+            question_item = question_map[item_id]
         elif item_id not in question_map.keys():
             raise ValueError("item_id does not exist.")
+        elif item_position >= len(self._questions):
+            raise ValueError("item_order_id is bigger than the number of questions")
         else:
-            question_item = question_map[item_id]
+            question_item = question_map[item_position]
 
         if (
             questionnaire_type == QuestionnairePresentation.SINGLE_ITEM
             or questionnaire_type == QuestionnairePresentation.SEQUENTIAL
         ):
-            
+
             question = self.generate_question_prompt(question_item)
 
             if question_item.answer_options:
@@ -186,6 +189,7 @@ class LLMPrompt:
 
         return system_prompt, prompt
 
+    # Currently disallowed to allow lightweight import. This should be reenabled in the future.
     # def calculate_input_token_estimate(
     #     self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
     # ) -> int:
@@ -224,12 +228,14 @@ class LLMPrompt:
         """
         return self._questions
 
-    def load_questionnaire_format(self, questionnaire_source: Union[str, pd.DataFrame]) -> Self:
+    def load_questionnaire_format(
+        self, questionnaire_source: Union[str, pd.DataFrame]
+    ) -> Self:
         """
-        Load the questionnaire format from a CSV file.
+        Load the questionnaire format from a CSV file or a pandas DataFrame.
 
         The CSV should have columns: questionnaire_item_id, question_content
-        Optionally it can also have question_stem.
+        Optionally it can also have a question_stem.
 
         Args:
             questionnaire_source (str or pd.Dataframe): Path to a valid CSV file or pd.Dataframe.
@@ -320,10 +326,10 @@ class LLMPrompt:
         options_dict = False
 
         if isinstance(answer_options, AnswerOptions):
-            self._same_options = True
+            # self._same_options = True # unnecessary
             options_dict = False
         elif isinstance(answer_options, Dict):
-            self._same_options = False
+            # self._same_options = False # unnecessary
             options_dict = True
 
         updated_questions: List[QuestionnaireItem] = []
@@ -359,7 +365,9 @@ class LLMPrompt:
                         if question_stem
                         else questionnaire_questions[i].question_stem
                     ),
-                    answer_options=answer_options.get(questionnaire_questions[i].item_id),
+                    answer_options=answer_options.get(
+                        questionnaire_questions[i].item_id
+                    ),
                     prefilled_response=prefilled_responses.get(
                         questionnaire_questions[i].item_id
                     ),
@@ -390,13 +398,15 @@ class LLMPrompt:
                         if question_stem
                         else questionnaire_questions[i].question_stem
                     ),
-                    answer_options=answer_options.get(questionnaire_questions[i].item_id),
+                    answer_options=answer_options.get(
+                        questionnaire_questions[i].item_id
+                    ),
                     prefilled_response=prefilled_responses.get(
                         questionnaire_questions[i].item_id
                     ),
                 )
                 updated_questions.append(new_questionnaire_question)
-        
+
         if randomized_item_order:
             random.shuffle(updated_questions)
 
@@ -426,8 +436,7 @@ class LLMPrompt:
                 question_prompt = f"""{questionnaire_items.question_stem} {questionnaire_items.question_content}"""
         else:
             question_prompt = f"""{questionnaire_items.question_content}"""
-        
-        
+
         if questionnaire_items.answer_options:
             _options_str = questionnaire_items.answer_options.create_options_str()
             if _options_str is not None:
@@ -435,11 +444,80 @@ class LLMPrompt:
                 question_prompt = safe_format_with_regex(
                     question_prompt, safe_formatter
                 )
-        
+
         return question_prompt
-    
+
+    def __len__(self) -> int:
+        """
+        Returns the number of questions in our LLMPrompt.
+
+        Returns:
+            int: The number of questions.
+        """
+        return len(self._questions)
+
+    def __getitem__(
+        self, position: Union[int, slice]
+    ) -> Union[QuestionnaireItem, List[QuestionnaireItem]]:
+        """
+        Returns the item(s) at the specifed int/slice.
+
+        Returns:
+            Union(QuestionnaireItem, List(QuestionnaireItem)): The QuestionnaireItem at that position.
+        """
+        return self._questions[position]
+
+    def __delitem__(self, position: int) -> None:
+        """
+        Removes the question at that position.
+
+        """
+        del self._questions[position]
+
+    def __setitem__(self, position: int, questionnaireItem: QuestionnaireItem) -> None:
+        """
+        Replaces the QuestionnaireItem at the specified position.
+
+        """
+        self._questions[position] = questionnaireItem
+
+    def __str__(self) -> str:
+        """
+        Creates a human readable display of the system prompt and prompt in default Battery format.
+        """
+        name_str: str = f"=== {self.questionnaire_name} ==="
+        sys_prompt, prompt = self.get_prompt_for_questionnaire_type(
+            questionnaire_type=QuestionnairePresentation.BATTERY
+        )
+        sys_str: str = f"=== SYSTEM_PROMPT ===\n{sys_prompt}"
+        prompt_str: str = f"=== USER_PROMPT_WITH_ALL_QUESTIONS ===\n{prompt}"
+
+        full_str: str = f"{name_str}\n{sys_str}\n{prompt_str}"
+        return full_str
+
+    def insert_questions(
+        self,
+        items: Union[QuestionnaireItem, List[QuestionnaireItem]],
+        position: int = None,
+    ) -> None:
+        """Inserts one or more questions into the questionnaire.
+
+        Args:
+            items (Union[QuestionnaireItem, List[QuestionnaireItem]]): A single
+                QuestionnaireItem or a list of items to insert.
+            position (int): The index where the questions should be inserted. Default [None] adds them at the end.
+        """
+        if position is None:
+            position = len(self._questions)
+
+        if not isinstance(items, (list, tuple)):
+            items = [items]
+        else:
+            self._questions[position:position] = items
+
 
 _IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
+
 
 def generate_likert_options(
     n: int,
@@ -536,9 +614,7 @@ def generate_likert_options(
                 "If you want to turn a scale even, it should be odd before."
             )
         middle_index = n // 2
-        answer_texts = (
-            answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
-        )
+        answer_texts = answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
         n = n - 1
     if add_middle_category:
         if n % 2 != 0:
@@ -546,7 +622,9 @@ def generate_likert_options(
                 "If you want to add a middle category, it should be even before."
             )
         middle_index = n // 2
-        answer_texts = answer_texts[:middle_index] + [str_middle_cat] + answer_texts[middle_index :]
+        answer_texts = (
+            answer_texts[:middle_index] + [str_middle_cat] + answer_texts[middle_index:]
+        )
         n = n + 1
 
     if random_order:
@@ -563,7 +641,7 @@ def generate_likert_options(
                 "There must be at least two answer options to reorder in reverse."
             )
         answer_texts = answer_texts[::-1]
-    
+
     if add_refusal:
         answer_texts.append("Don't know / Refuse to answer")
         n += 1
@@ -573,7 +651,7 @@ def generate_likert_options(
         # no index, just the answer options directly
         answer_option_indices = None
     elif idx_type == "integer":
-        if add_refusal: # if refusal is added, assign it a common code -99
+        if add_refusal:  # if refusal is added, assign it a common code -99
             for i in range(n - 1):
                 answer_code = i + start_idx
                 answer_option_indices.append(str(answer_code))
@@ -591,8 +669,6 @@ def generate_likert_options(
             for i in range(n):
                 answer_option_indices.append(ascii_uppercase[(i + start_idx) % 26])
 
-
-    
     answer_texts_object = AnswerTexts(
         answer_texts=answer_texts,
         indices=answer_option_indices,

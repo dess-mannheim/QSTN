@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, TYPE_CHECKING, NamedTuple
+from typing import List, Optional, Dict, TYPE_CHECKING, NamedTuple, Union
 from ..utilities import constants, prompt_templates
 
 from ..inference.response_generation import (
@@ -289,7 +289,7 @@ class QuestionnaireItem:
     """Represents a single questionnaire item."""
 
     item_id: str
-    question_content: str
+    question_content: Union[str,int]
     question_stem: Optional[str] = None
     answer_options: Optional[AnswerOptions] = None
     prefilled_response: Optional[str] = None
