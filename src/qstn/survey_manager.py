@@ -7,8 +7,10 @@ This module provides functions to conduct surveys in different ways:
 - sequential
 
 Usage example:
--------------
+--------------
+
 .. code-block:: python
+
     from qstn import survey_manager
     from qstn.prompt_builder import LLMPrompt
     from qstn.utilities import placeholder
