@@ -69,9 +69,7 @@ class LLMPrompt:
 
         self._questions: List[QuestionnaireItem] = []
 
-        if questionnaire_source is None:
-
-        if self._check_valid_questionnaire():
+        if self._check_valid_questionnaire(questionnaire_source):
             self.load_questionnaire_format(questionnaire_source=questionnaire_source)
 
         self.verbose: bool = verbose
@@ -95,8 +93,7 @@ class LLMPrompt:
             if questionnaire_source.empty:
                 warnings.warn("The provided Dataframe is empty! No questions are created.")
                 return False
-            else:
-
+            # Optional check if the correct columns are provided?
 
         if isinstance(questionnaire_source,)
 
@@ -255,7 +252,7 @@ class LLMPrompt:
         """
         Load the questionnaire format from a CSV file or a pandas DataFrame.
 
-        The CSV should have columns: questionnaire_item_id, question_content
+        The CSV or pd.Dataframe must have the columns: questionnaire_item_id, question_content
         Optionally it can also have a question_stem.
 
         Args:
