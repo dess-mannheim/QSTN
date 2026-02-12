@@ -89,13 +89,11 @@ class LLMPrompt:
             return False
         
         # Empty Dataframe
-        if isinstance(questionnaire_source, pd.DataFrame) 
+        if isinstance(questionnaire_source, pd.DataFrame):
             if questionnaire_source.empty:
                 warnings.warn("The provided Dataframe is empty! No questions are created.")
                 return False
-            # Optional check if the correct columns are provided?
-
-        if isinstance(questionnaire_source,)
+            # Optional check if the correct columns are provided? Would probably be nice to have that warning here.
 
         return True
 
@@ -265,7 +263,7 @@ class LLMPrompt:
 
         # This is a duplicate check with actual Error here, 
         # because if the method is called on its own it should not run the remaining code
-        if self._check_valid_questionnaire(questionnaire_source=questionnaire_source):
+        if not self._check_valid_questionnaire(questionnaire_source=questionnaire_source):
             raise ValueError("Please provide a non empty DataFrame or a valid String.")
 
         if type(questionnaire_source) == pd.DataFrame:
@@ -532,8 +530,8 @@ class LLMPrompt:
 
         if not isinstance(items, (list, tuple)):
             items = [items]
-        else:
-            self._questions[position:position] = items
+        
+        self._questions[position:position] = items
 
 
 _IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
