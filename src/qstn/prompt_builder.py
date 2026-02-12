@@ -18,6 +18,7 @@ import random
 
 import copy
 
+import warnings
 
 # from transformers import AutoTokenizer
 
@@ -66,12 +67,11 @@ class LLMPrompt:
         """
         random.seed(seed)
 
-        if questionnaire_source is None:
-            raise ValueError("Either a path or a dataframe have to be provided")
-
         self._questions: List[QuestionnaireItem] = []
 
-        if questionnaire_source:
+        if questionnaire_source is None:
+
+        if self._check_valid_questionnaire():
             self.load_questionnaire_format(questionnaire_source=questionnaire_source)
 
         self.verbose: bool = verbose
@@ -80,6 +80,27 @@ class LLMPrompt:
 
         self.system_prompt: str = system_prompt
         self.prompt: str = prompt
+
+    def _check_valid_questionnaire(self, questionnaire_source: Union[str, pd.DataFrame] = None) -> bool:
+        # No Object
+        if questionnaire_source is None:
+            return False
+        
+        # Empty String
+        if isinstance(questionnaire_source, str) and not questionnaire_source:
+            return False
+        
+        # Empty Dataframe
+        if isinstance(questionnaire_source, pd.DataFrame) 
+            if questionnaire_source.empty:
+                warnings.warn("The provided Dataframe is empty! No questions are created.")
+                return False
+            else:
+
+
+        if isinstance(questionnaire_source,)
+
+        return True
 
     def duplicate(self):
         """
@@ -245,8 +266,10 @@ class LLMPrompt:
         """
         questionnaire_questions: List[QuestionnaireItem] = []
 
-        if questionnaire_source is None:
-            raise ValueError("Either a path or a dataframe have to be provided")
+        # This is a duplicate check with actual Error here, 
+        # because if the method is called on its own it should not run the remaining code
+        if self._check_valid_questionnaire(questionnaire_source=questionnaire_source):
+            raise ValueError("Please provide a non empty DataFrame or a valid String.")
 
         if type(questionnaire_source) == pd.DataFrame:
             df = questionnaire_source
