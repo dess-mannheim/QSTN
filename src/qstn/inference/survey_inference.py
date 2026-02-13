@@ -200,6 +200,8 @@ def batch_generation(
             print_progress=print_progress,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
             **generation_kwargs,
         )
 
