@@ -17,7 +17,6 @@ dependencies = [
     "pydantic>=2.11.4",
     "openai",
     "json_repair",
-    "vllm>=0.12"
 ]
 
 classifiers = [
@@ -27,6 +26,9 @@ classifiers = [
 
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.12"]
 
 [project.urls]
 Homepage = "https://github.com/dess-mannheim/QSTN"
