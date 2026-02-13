@@ -14,13 +14,25 @@ Detailed information and guides are available in our [documentation](https://qst
 
 ## Installation
 
-To install the project and dependencies you can use `pip`.
+We support two type of installations:
+    1. The base version, which only installs the dependencies neccessary to use the OpenAI API.
+    2. The full version, which supports both API and local inference via `vllm`.
+
+To install both of these version you can use `pip` or `uv`.
+
+The base version can be installed with the following command:
 
 ```bash
 pip install qstn
 ```
 
-Or install this package from source:
+The full version can be installed with this command:
+
+```bash
+pip install qstn[vllm]
+```
+
+You can also install this package from source:
 
 ```bash
 pip install git+https://github.com/dess-mannheim/QSTN.git
