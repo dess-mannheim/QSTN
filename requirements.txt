@@ -1,7 +1,0 @@
-pandas>=2.2.3
-pydantic>=2.11.4
-torch>=2.6.0
-transformers>=4.51.3
-vllm>=0.8.5
-flashinfer-python>=0.2.5
-json_repair
