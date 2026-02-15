@@ -147,27 +147,36 @@ def _run_async_in_thread(
         response_generation_method=response_generation_method,
     )
 
+    async def _run_api_batch_coroutine():
+        return await _run_api_batch_async(
+            client=client,
+            client_model_name=client_model_name,
+            batch_messages=batch_messages,
+            seeds=seeds,
+            concurrency_limit=concurrency_limit,
+            print_progress=print_progress,
+            response_generation_method=response_generation_method,
+            sampling_params=sampling_params,
+            logprob_config=logprob_config,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            **generation_kwargs,
+        )
+
     def thread_target():
+        loop = asyncio.new_event_loop()
         try:
-            res = asyncio.run(
-                _run_api_batch_async(
-                    client=client,
-                    client_model_name=client_model_name,
-                    batch_messages=batch_messages,
-                    seeds=seeds,
-                    concurrency_limit=concurrency_limit,
-                    print_progress=print_progress,
-                    response_generation_method=response_generation_method,
-                    sampling_params=sampling_params,
-                    logprob_config=logprob_config,
-                    reasoning_start_token=reasoning_start_token,
-                    reasoning_end_token=reasoning_end_token,
-                    **generation_kwargs,
-                )
-            )
+            asyncio.set_event_loop(loop)
+            res = loop.run_until_complete(_run_api_batch_coroutine())
             result_container["result"] = res
         except Exception as e:
             result_container["error"] = e
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                asyncio.set_event_loop(None)
+                loop.close()
 
     thread = threading.Thread(target=thread_target)
     thread.start()
