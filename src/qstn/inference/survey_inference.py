@@ -1,20 +1,27 @@
+
 from typing import TYPE_CHECKING, Any, List, Optional, Union, Tuple
 
 import random
+
+from tqdm.auto import tqdm
+
+from .response_generation import (
+    ResponseGenerationMethod,
+    LogprobResponseGenerationMethod,
+)
 
 if TYPE_CHECKING:
     from vllm import LLM
     from openai import AsyncOpenAI
 
-has_vllm = False
-has_openai = False
+HAS_VLLM = False
+HAS_OPENAI = False
 
 try:
     from vllm import LLM
     from .local_inference import run_vllm_batch, run_vllm_batch_conversation
-    from vllm.outputs import RequestOutput
 
-    has_vllm = True
+    HAS_VLLM = True
 except ImportError:
     LLM = Any
 
@@ -22,19 +29,9 @@ try:
     from openai import AsyncOpenAI
     from .remote_inference import run_openai_batch, run_openai_batch_conversation
 
-    has_openai = True
+    HAS_OPENAI = True
 except ImportError:
     AsyncOpenAI = Any
-
-from .response_generation import (
-    ResponseGenerationMethod,
-    LogprobResponseGenerationMethod,
-)
-
-import re
-
-from tqdm.auto import tqdm
-
 
 def _print_conversation(
     system_messages: List[str],
@@ -46,12 +43,12 @@ def _print_conversation(
     response_generation_method: List[ResponseGenerationMethod],
     number_of_printed_conversations: int = 2,
 ):
-    if reasoning_output == None:
+    if reasoning_output is None:
         reasonings = [None] * len(system_messages)
     else:
         reasonings = reasoning_output
 
-    if logprob_result == None:
+    if logprob_result is None:
         logprobs = [None] * len(system_messages)
     else:
         logprobs = logprob_result
@@ -82,7 +79,7 @@ def _print_conversation(
             round_print = (
                 f"{conversation_print}\n-- System Message --\n{system_message}"
             )
-            for j in range(len(prompt_list)):
+            for j, _ in enumerate(prompt_list):
                 round_print = f"{round_print}\n-- User Message --\n{prompt_list[j]}"
                 if j < len(assistant_list):
                     prefill = assistant_list[j]
@@ -118,8 +115,8 @@ def _print_conversation(
 # TODO Structured output for API calls
 def batch_generation(
     model: Union[LLM, AsyncOpenAI],
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
+    system_messages: List[str] = ("You are a helpful assistant.",),
+    prompts: List[str] = ("Hi there! What is your name?",),
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
@@ -164,20 +161,20 @@ def batch_generation(
     """
 
     model_type = type(model).__name__
-    if model_type == "LLM" and not has_vllm:
+    if model_type == "LLM" and not HAS_VLLM:
         raise ImportError(
             "You are trying to use a vLLM model, but 'vllm' is not installed."
         )
-    elif model_type == "AsyncOpenAI" and not has_openai:
+    if model_type == "AsyncOpenAI" and not HAS_OPENAI:
         raise ImportError(
             "You are trying to use OpenAI, but 'openai' is not installed."
         )
-    elif model_type != "LLM" and model_type != "AsyncOpenAI":
+    if model_type != "LLM" and model_type != "AsyncOpenAI":
         raise ValueError(f"Unsupported model type: {type(model)}")
     random.seed(seed)
 
     # Inference
-    if has_vllm and isinstance(model, LLM):
+    if HAS_VLLM and isinstance(model, LLM):
         plain_results, logprob_result, reasoning_outputs = run_vllm_batch(
             model,
             system_messages=system_messages,
@@ -190,7 +187,7 @@ def batch_generation(
             space_char=space_char,
             **generation_kwargs,
         )
-    elif has_openai and isinstance(model, AsyncOpenAI):
+    elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
         plain_results, logprob_result, reasoning_outputs = run_openai_batch(
             model,
             system_messages=system_messages,
@@ -204,6 +201,8 @@ def batch_generation(
             reasoning_end_token=reasoning_end_token,
             **generation_kwargs,
         )
+    else:
+        raise ValueError("Inference cannot be run without OpenAI or vllm installed.")
 
     if print_conversation:
         _print_conversation(
@@ -222,8 +221,8 @@ def batch_generation(
 
 def batch_turn_by_turn_generation(
     model: LLM,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[List[str]] = [["Hi there! What is your name?", "Interesting"]],
+    system_messages: List[str] = ("You are a helpful assistant.",),
+    prompts: List[List[str]] = (("Hi there! What is your name?", "Interesting",),),
     assistant_messages: Optional[List[List[str]]] = None,
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
@@ -271,11 +270,11 @@ def batch_turn_by_turn_generation(
     """
 
     model_type = type(model).__name__
-    if model_type == "LLM" and not has_vllm:
+    if model_type == "LLM" and not HAS_VLLM:
         raise ImportError(
             "You are trying to use a vLLM model, but 'vllm' is not installed."
         )
-    elif model_type == "AsyncOpenAI" and not has_openai:
+    elif model_type == "AsyncOpenAI" and not HAS_OPENAI:
         raise ImportError(
             "You are trying to use OpenAI, but 'openai' is not installed."
         )
@@ -284,7 +283,7 @@ def batch_turn_by_turn_generation(
     random.seed(seed)
 
     # Inference
-    if has_vllm and isinstance(model, LLM):
+    if HAS_VLLM and isinstance(model, LLM):
         plain_results, logprob_result, reasoning_outputs = run_vllm_batch_conversation(
             model,
             system_messages=system_messages,
@@ -298,7 +297,7 @@ def batch_turn_by_turn_generation(
             space_char=space_char,
             **generation_kwargs,
         )
-    elif has_openai and isinstance(model, AsyncOpenAI):
+    elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
         plain_results, logprob_result, reasoning_outputs = (
             run_openai_batch_conversation(
                 model,
@@ -313,6 +312,9 @@ def batch_turn_by_turn_generation(
                 **generation_kwargs,
             )
         )
+    else:
+        raise ValueError("Inference cannot be run without OpenAI or vllm installed.")
+
 
     if print_conversation:
         _print_conversation(

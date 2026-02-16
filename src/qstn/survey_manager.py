@@ -49,6 +49,8 @@ Usage example:
     )
 """
 
+import warnings
+
 from typing import (
     List,
     Dict,
@@ -56,6 +58,16 @@ from typing import (
     Union,
     Any,
 )
+
+from pathlib import Path
+import os
+from dataclasses import dataclass
+
+import pandas as pd
+
+from openai import AsyncOpenAI
+
+from tqdm.auto import tqdm
 
 from .utilities.survey_objects import (
     QuestionLLMResponseTuple,
@@ -75,27 +87,11 @@ from .prompt_builder import LLMPrompt, QuestionnairePresentation
 
 from .utilities.survey_objects import InferenceResult
 
-# from vllm import LLM
-
-from openai import AsyncOpenAI
-
-from pathlib import Path
-import os
-
-import pandas as pd
-
-import warnings
-
-from tqdm.auto import tqdm
-
-from dataclasses import dataclass
-
-
-@dataclass
-class GenerationFailure:
-    batch_index: int
-    error_type: str
-    error_message: str
+# @dataclass
+# class GenerationFailure:
+#     batch_index: int
+#     error_type: str
+#     error_message: str
 
 
 def conduct_survey_single_item(
@@ -113,19 +109,23 @@ def conduct_survey_single_item(
     """
     Conducts a survey by asking each question in a new context (single item presentation).
 
-    System Prompt -> User Prompt with one question -> LLM Answer for one question -> Reset Context -> New instance with System Prompt
+    System Prompt -> User Prompt with one question -> LLM Answer for one question
+    -> Reset Context -> New instance with System Prompt
 
     Args:
         model (LLM or AsyncOpenAI): vllm.LLM instance or AsyncOpenAI client.
-        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
+        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list of LLMPrompt objects
+            to conduct as a survey.
         client_model_name (str, optional): Name of model when using OpenAI client.
         api_concurrency (int): Number of concurrent API requests. Defaults to 10.
         print_conversation (bool): If True, prints all conversations to stdout. Default False.
         print_progress (bool): If True, shows a tqdm progress bar. Default True.
         n_save_step (int, optional): Save intermediate results every n steps.
-        intermediate_save_file (str, optional): Path to save intermediate results. Has to be provided if n_save_step.
+        intermediate_save_file (str, optional): Path to save intermediate results.
+            Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
-        generation_kwargs: Additional generation parameters that will be given to vllm.chat(), vllm.SamplingParams, or client.chat.completions.create().
+        generation_kwargs: Additional generation parameters that will be given to vllm.chat(),
+            vllm.SamplingParams, or client.chat.completions.create().
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and LLM responses for each provided prompt.
@@ -185,7 +185,7 @@ def conduct_survey_single_item(
         ]
 
         # TODO Implement Retrying for errors.
-        #try:
+        # try:
         output, logprobs, reasoning_output = batch_generation(
             model=model,
             system_messages=system_messages,
@@ -296,7 +296,7 @@ def _intermediate_save_path_check(n_save_step: int, intermediate_save_path: str)
             except Exception as e:
                 raise ValueError(
                     f"Invalid intermediate save path: {intermediate_save_path}. Error: {e}"
-                )
+                ) from e
 
         # Optional: Check it's writable
         if not os.access(parent_dir, os.W_OK):
@@ -644,7 +644,7 @@ def conduct_survey_sequential(
                 }
             )
 
-        for o in range(len(output)):
+        for o, _ in enumerate(output):
             assistant_messages[o].append(output[o])
         # assistant_messages.append(output)
 
@@ -660,7 +660,7 @@ def conduct_survey_sequential(
 
 class SurveyCreator:
     @classmethod
-    def from_path(self, survey_path: str, questionnaire_path: str) -> List[LLMPrompt]:
+    def from_path(cls, survey_path: str, questionnaire_path: str) -> List[LLMPrompt]:
         """
         Generates LLMPrompt objects from two csv files. One fills the surveys, one fills the personas.
 
@@ -672,11 +672,11 @@ class SurveyCreator:
         """
         df = pd.read_csv(survey_path)
         df_questionnaire = pd.read_csv(questionnaire_path)
-        return self._from_dataframe(df, df_questionnaire)
+        return cls._from_dataframe(df, df_questionnaire)
 
     @classmethod
     def from_dataframe(
-        self, survey_dataframe: pd.DataFrame, questionnaire_dataframe: pd.DataFrame
+        cls, survey_dataframe: pd.DataFrame, questionnaire_dataframe: pd.DataFrame
     ) -> List[LLMPrompt]:
         """
         Generates LLMQuestionnaire objects from two pandas DataFrames.
@@ -688,10 +688,10 @@ class SurveyCreator:
         Returns:
             A list of LLMQuestionnaire objects.
         """
-        return self._from_dataframe(survey_dataframe, questionnaire_dataframe)
+        return cls._from_dataframe(survey_dataframe, questionnaire_dataframe)
 
     @classmethod
-    def _create_questionnaire(self, row: pd.Series, df_questionnaire) -> LLMPrompt:
+    def _create_questionnaire(cls, row: pd.Series, df_questionnaire) -> LLMPrompt:
         """
         Internal helper method to create the LLM Prompts.
         """
@@ -704,13 +704,13 @@ class SurveyCreator:
 
     @classmethod
     def _from_dataframe(
-        self, df: pd.DataFrame, df_questionnaire: pd.DataFrame
+        cls, df: pd.DataFrame, df_questionnaire: pd.DataFrame
     ) -> List[LLMPrompt]:
         """
         Internal helper method to process the DataFrame.
         """
         questionnaires = df.apply(
-            lambda row: self._create_questionnaire(row, df_questionnaire), axis=1
+            lambda row: cls._create_questionnaire(row, df_questionnaire), axis=1
         )
         return questionnaires.to_list()
 
