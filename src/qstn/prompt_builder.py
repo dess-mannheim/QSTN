@@ -130,12 +130,12 @@ class LLMPrompt:
         question_map = {question.item_id: question for question in self._questions}
         if item_id:
             question_item = question_map[item_id]
-        elif item_id not in question_map.keys():
+        elif item_id and item_id not in question_map.keys():
             raise ValueError("item_id does not exist.")
         elif item_position >= len(self._questions):
             raise ValueError("item_order_id is bigger than the number of questions")
         else:
-            question_item = question_map[item_position]
+            question_item = self._questions[item_position]
 
         if (
             questionnaire_type == QuestionnairePresentation.SINGLE_ITEM
