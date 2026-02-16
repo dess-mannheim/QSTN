@@ -1,6 +1,10 @@
-from openai import AsyncOpenAI
 
+import asyncio
+import threading
 from typing import Tuple, List, Optional, Union, Any, Dict
+
+from tqdm.asyncio import tqdm_asyncio
+from openai import AsyncOpenAI
 
 from .response_generation import (
     ResponseGenerationMethod,
@@ -15,16 +19,11 @@ from .dynamic_pydantic import _generate_pydantic_model
 
 from .reasoning_parser import parse_reasoning
 
-import asyncio
-import threading
-
-from tqdm.asyncio import tqdm_asyncio
-
 
 def run_openai_batch(
     model: AsyncOpenAI,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
+    system_messages: List[str] = ("You are a helpful assistant.",),
+    prompts: List[str] = ("Hi there! What is your name?",),
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
@@ -68,8 +67,8 @@ def run_openai_batch(
 
 def run_openai_batch_conversation(
     model: AsyncOpenAI,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
+    system_messages: List[str] = ("You are a helpful assistant.",),
+    prompts: List[str] = ("Hi there! What is your name?",),
     assistant_messages: List[List[str]] = None,
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
@@ -186,7 +185,7 @@ async def _run_api_batch_async(
     seeds: List[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    sampling_params: List[Dict[str, Any]] = [],
+    sampling_params: List[Dict[str, Any]] = (),
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
     ] = None,
@@ -299,7 +298,7 @@ async def _run_api_batch_async(
                 msg, "reasoning_content", None
             )
 
-            if reasoning == None:
+            if reasoning is None:
                 # Fallback to parsing manually
                 final_answer, extracted_reasoning = parse_reasoning(
                     msg.content, patterns=patterns

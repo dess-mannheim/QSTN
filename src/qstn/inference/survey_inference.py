@@ -33,6 +33,7 @@ try:
 except ImportError:
     AsyncOpenAI = Any
 
+
 def _print_conversation(
     system_messages: List[str],
     prompts: List[str],

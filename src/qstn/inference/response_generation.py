@@ -15,13 +15,22 @@ if TYPE_CHECKING:
 class ResponseGenerationMethod(ABC):
     """Abstract base class for constraining the model output, e.g., for closed-ended survey questions."""
 
-    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = []):
+    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = ()):
         pass
 
     # NOTE that validation is not required anymore, since we rely on inheritance instead
 
 
 class JSONResponseGenerationMethod(ResponseGenerationMethod):
+    """
+    Base class for constraining the model output using JSON Schema
+
+    Attributes:
+        json_fields: List of field names for JSON output, optionally as dicts of format {"field_name": "explanation"}
+        constraints: Optional constraints for field values
+        system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
+        output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
+    """
     def __init__(
         self,
         json_fields: List[str] | Dict[str, str],  # required
@@ -29,15 +38,6 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         output_template: str = prompt_templates.SYSTEM_JSON_DEFAULT,
         output_index_only: bool = False,
     ):
-        """
-        Base class for constraining the model output using JSON Schema
-
-        Attributes:
-            json_fields: List of field names for JSON output, optionally as dicts of format {"field_name": "explanation"}
-            constraints: Optional constraints for field values
-            system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
-            output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
-        """
         super().__init__()
         if constraints is not None:
             if isinstance(json_fields, dict):
@@ -54,7 +54,7 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         self.output_template = output_template
         self.output_index_only = output_index_only
 
-    def get_json_prompt(self: Self, questions: List["QuestionnaireItem"] = []):
+    def get_json_prompt(self: Self, questions: List["QuestionnaireItem"] = ()):
         num_questions = len(questions)
         if isinstance(self.json_fields, dict):
             json_attributes = list(self.json_fields.keys())
@@ -83,7 +83,7 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
 
         return creator.get_output_prompt()
 
-    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = []):
+    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = ()):
         formatter = {
             qstn.utilities.placeholder.JSON_TEMPLATE: self.get_json_prompt(
                 questions=questions
@@ -92,7 +92,7 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         return utils.safe_format_with_regex(self.output_template, formatter)
 
     def create_new_rgm_with_multiple_questions(
-        self: Self, questions: List["QuestionnaireItem"] = []
+        self: Self, questions: List["QuestionnaireItem"] = ()
     ) -> Self:
         num_questions = len(questions)
         if num_questions <= 1:
@@ -137,30 +137,42 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
 
 
 class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
+    """
+    Base class for constraining the model output using a Choice between answer options
+
+    Attributes:
+        allowed_choices: List of allowed choices for choice output
+        system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
+        output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
+    """
     def __init__(
         self,
         allowed_choices: List[str],  # required
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
-        """
-        Base class for constraining the model output using a Choice between answer options
-
-        Attributes:
-            allowed_choices: List of allowed choices for choice output
-            system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
-            output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
-        """
         super().__init__()
         self.allowed_choices = allowed_choices
         self.output_template = output_template
         self.output_index_only = output_index_only  # TODO: implement
 
-    def get_automatic_prompt(self: Self, num_questions: int = 1):
+    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = ()):
         return self.output_template
 
 
 class LogprobResponseGenerationMethod(ResponseGenerationMethod):
+    """
+    Base class for constraining the model output by requesting token proabilities
+
+    Attributes:
+        token_position: At which position in the output to capture the logprobs, use `0` for first-token probabilities (default)
+        token_limit: Overwrite the number of output tokens, e.g., only produce a single token for first-token probabilities (default)
+        top_logprobs: How many of the logprobs to consider, OpenAI supports at most 20
+        allowed_choices: If not None, restrict output additionally with `guided_choice`
+        ignore_reasoning: If True, only consider tokens after the reasoning output, i.e., after </think>
+        system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
+        output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
+    """
     def __init__(
         self,
         token_position: int = 0,
@@ -171,18 +183,6 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
-        """
-        Base class for constraining the model output by requesting token proabilities
-
-        Attributes:
-            token_position: At which position in the output to capture the logprobs, use `0` for first-token probabilities (default)
-            token_limit: Overwrite the number of output tokens, e.g., only produce a single token for first-token probabilities (default)
-            top_logprobs: How many of the logprobs to consider, OpenAI supports at most 20
-            allowed_choices: If not None, restrict output additionally with `guided_choice`
-            ignore_reasoning: If True, only consider tokens after the reasoning output, i.e., after </think>
-            system_prompt_template: Template to use for formatting the system prompt, e.g., from `..utilities.prompt_templates`
-            output_index_only: If True, constrain output to answer option index rather then the full text of each answer option
-        """
         super().__init__()
         self.token_position = token_position
         self.token_limit = token_limit
@@ -190,9 +190,9 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         self.allowed_choices = allowed_choices  # same name enables re-using code from Choice_AnswerProductionMethod
         self.ignore_reasoning = ignore_reasoning
         self.output_template = output_template
-        self.output_index_only = output_index_only  # TODO: implement
+        self.output_index_only = output_index_only
 
-    def get_automatic_prompt(self: Self, num_questions: int = 1):
+    def get_automatic_prompt(self: Self, questions: List["QuestionnaireItem"] = ()):
         return self.output_template
 
 
@@ -200,13 +200,12 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
 
 
 class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
+    """Response Generation Method: Structured Outputs"""
     def __init__(
         self,
         output_template=prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
-        """Response Generation Method: Structured Outputs"""
-
         super().__init__(
             json_fields={"answer": constants.OPTIONS_ADJUST},
             constraints={"answer": constants.OPTIONS_ADJUST},
@@ -216,12 +215,13 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
 
 
 class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
+    """Response Generation Method: Structured Outputs with Reasoning"""
     def __init__(
         self,
         output_template: str = prompt_templates.SYSTEM_JSON_REASONING,
         output_index_only: bool = False,
     ):
-        """Response Generation Method: Structured Outputs with Reasoning"""
+
 
         json_fields = {
             "reasoning": "your reasoning about the answer options",
@@ -237,12 +237,13 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
 
 
 class JSONVerbalizedDistribution(JSONResponseGenerationMethod):
+    """Response Generation Method: Verbalized Distribution"""
     def __init__(
         self,
         output_template=prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
         output_index_only: bool = False,
     ):
-        """Response Generation Method: Structured Outputs All Options"""
+
 
         super().__init__(
             # will be set when given to answer options
