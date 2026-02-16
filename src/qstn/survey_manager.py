@@ -184,26 +184,27 @@ def conduct_survey_single_item(
             for questionnaire in current_batch.values()
         ]
 
-        try:
-            output, logprobs, reasoning_output = batch_generation(
-                model=model,
-                system_messages=system_messages,
-                prompts=prompts,
-                response_generation_method=response_generation_methods,
-                client_model_name=client_model_name,
-                api_concurrency=api_concurrency,
-                print_conversation=print_conversation,
-                print_progress=print_progress,
-                seed=seed,
-                **generation_kwargs,
-            )
-        except Exception as e:
-            warnings.warn(
-                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
-            )
-            output = [None] * len(current_batch)
-            logprobs = None
-            reasoning_output = [None] * len(current_batch)
+        # TODO Implement Retrying for errors.
+        #try:
+        output, logprobs, reasoning_output = batch_generation(
+            model=model,
+            system_messages=system_messages,
+            prompts=prompts,
+            response_generation_method=response_generation_methods,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
+            print_conversation=print_conversation,
+            print_progress=print_progress,
+            seed=seed,
+            **generation_kwargs,
+        )
+        # except Exception as e:
+        #     warnings.warn(
+        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #     )
+        #     output = [None] * len(current_batch)
+        #     logprobs = None
+        #     reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None:
@@ -387,26 +388,27 @@ def conduct_survey_battery(
                     )
                 response_generation_methods.append(response_generation_method)
 
-        try:
-            output, logprobs, reasoning_output = batch_generation(
-                model=model,
-                system_messages=system_messages,
-                prompts=prompts,
-                response_generation_method=response_generation_methods,
-                client_model_name=client_model_name,
-                api_concurrency=api_concurrency,
-                print_conversation=print_conversation,
-                print_progress=print_progress,
-                seed=seed,
-                **generation_kwargs,
-            )
-        except Exception as e:
-            warnings.warn(
-                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
-            )
-            output = [None] * len(current_batch)
-            logprobs = None
-            reasoning_output = [None] * len(current_batch)
+        # TODO Implement Retrying for errors.
+        # try:
+        output, logprobs, reasoning_output = batch_generation(
+            model=model,
+            system_messages=system_messages,
+            prompts=prompts,
+            response_generation_method=response_generation_methods,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
+            print_conversation=print_conversation,
+            print_progress=print_progress,
+            seed=seed,
+            **generation_kwargs,
+        )
+        # except Exception as e:
+        #     warnings.warn(
+        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #     )
+        #     output = [None] * len(current_batch)
+        #     logprobs = None
+        #     reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None:
@@ -597,27 +599,28 @@ def conduct_survey_sequential(
             continue
             # TODO: add support for automatic system prompt for other answer production methods
 
-        try:
-            output, logprobs, reasoning_output = batch_turn_by_turn_generation(
-                model=model,
-                system_messages=system_messages,
-                prompts=all_prompts,
-                assistant_messages=assistant_messages,
-                response_generation_method=response_generation_methods,
-                client_model_name=client_model_name,
-                api_concurrency=api_concurrency,
-                print_conversation=print_conversation,
-                print_progress=print_progress,
-                seed=seed,
-                **generation_kwargs,
-            )
-        except Exception as e:
-            warnings.warn(
-                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
-            )
-            output = [None] * len(current_batch)
-            logprobs = None
-            reasoning_output = [None] * len(current_batch)
+        # TODO Implement Retrying for errors.
+        # try:
+        output, logprobs, reasoning_output = batch_turn_by_turn_generation(
+            model=model,
+            system_messages=system_messages,
+            prompts=all_prompts,
+            assistant_messages=assistant_messages,
+            response_generation_method=response_generation_methods,
+            client_model_name=client_model_name,
+            api_concurrency=api_concurrency,
+            print_conversation=print_conversation,
+            print_progress=print_progress,
+            seed=seed,
+            **generation_kwargs,
+        )
+        # except Exception as e:
+        #     warnings.warn(
+        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #     )
+        #     output = [None] * len(current_batch)
+        #     logprobs = None
+        #     reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None or len(logprobs) == 0:
