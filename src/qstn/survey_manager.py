@@ -84,8 +84,18 @@ import os
 
 import pandas as pd
 
+import warnings
 
 from tqdm.auto import tqdm
+
+from dataclasses import dataclass
+
+
+@dataclass
+class GenerationFailure:
+    batch_index: int
+    error_type: str
+    error_message: str
 
 
 def conduct_survey_single_item(
@@ -143,11 +153,11 @@ def conduct_survey_single_item(
         if print_progress
         else range(max_survey_length)
     ):
-        current_batch: List[LLMPrompt] = [
-            questionnaire
-            for questionnaire in llm_prompts
+        current_batch: Dict[int, LLMPrompt] = {
+            pos: questionnaire
+            for pos, questionnaire in enumerate(llm_prompts)
             if len(questionnaire._questions) > i
-        ]
+        }
 
         system_messages, prompts = zip(
             *[
@@ -155,7 +165,7 @@ def conduct_survey_single_item(
                     QuestionnairePresentation.SINGLE_ITEM,
                     questionnaire._questions[i].item_id,
                 )
-                for questionnaire in current_batch
+                for questionnaire in current_batch.values()
             ]
         )
 
@@ -163,7 +173,7 @@ def conduct_survey_single_item(
             questionnaire.generate_question_prompt(
                 questionnaire_items=questionnaire._questions[i]
             )
-            for questionnaire in current_batch
+            for questionnaire in current_batch.values()
         ]
         response_generation_methods = [
             (
@@ -171,32 +181,41 @@ def conduct_survey_single_item(
                 if questionnaire._questions[i].answer_options
                 else None
             )
-            for questionnaire in current_batch
+            for questionnaire in current_batch.values()
         ]
-        output, logprobs, reasoning_output = batch_generation(
-            model=model,
-            system_messages=system_messages,
-            prompts=prompts,
-            response_generation_method=response_generation_methods,
-            client_model_name=client_model_name,
-            api_concurrency=api_concurrency,
-            print_conversation=print_conversation,
-            print_progress=print_progress,
-            seed=seed,
-            **generation_kwargs,
-        )
+
+        try:
+            output, logprobs, reasoning_output = batch_generation(
+                model=model,
+                system_messages=system_messages,
+                prompts=prompts,
+                response_generation_method=response_generation_methods,
+                client_model_name=client_model_name,
+                api_concurrency=api_concurrency,
+                print_conversation=print_conversation,
+                print_progress=print_progress,
+                seed=seed,
+                **generation_kwargs,
+            )
+        except Exception as e:
+            warnings.warn(
+                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+            )
+            output = [None] * len(current_batch)
+            logprobs = None
+            reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None:
             logprobs = [None] * len(current_batch)
 
         for survey_id, question, answer, logprob_answer, reasoning, item in zip(
-            range(len(current_batch)),
+            current_batch.keys(),
             questions,
             output,
             logprobs,
             reasoning_output,
-            current_batch,
+            current_batch.values(),
         ):
             question_llm_response_pairs[survey_id].update(
                 {
@@ -340,12 +359,11 @@ def conduct_survey_battery(
         if print_progress
         else range(max_survey_length)
     ):
-        current_batch = [
-            questionnaire
-            for questionnaire in llm_prompts
+        current_batch: Dict[int, LLMPrompt] = {
+            pos: questionnaire
+            for pos, questionnaire in enumerate(llm_prompts)
             if len(questionnaire._questions) > i
-        ]
-
+        }
         system_messages, prompts = zip(
             *[
                 questionnaire.get_prompt_for_questionnaire_type(
@@ -353,12 +371,12 @@ def conduct_survey_battery(
                     questionnaire._questions[i].item_id,
                     item_separator=item_separator,
                 )
-                for questionnaire in current_batch
+                for questionnaire in current_batch.values()
             ]
         )
         # questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
         response_generation_methods: List[ResponseGenerationMethod] = []
-        for questionnaire in current_batch:
+        for questionnaire in current_batch.values():
             if questionnaire._questions[i].answer_options:
                 response_generation_method = questionnaire._questions[
                     i
@@ -369,25 +387,33 @@ def conduct_survey_battery(
                     )
                 response_generation_methods.append(response_generation_method)
 
-        output, logprobs, reasoning_output = batch_generation(
-            model=model,
-            system_messages=system_messages,
-            prompts=prompts,
-            response_generation_method=response_generation_methods,
-            client_model_name=client_model_name,
-            api_concurrency=api_concurrency,
-            print_conversation=print_conversation,
-            print_progress=print_progress,
-            seed=seed,
-            **generation_kwargs,
-        )
+        try:
+            output, logprobs, reasoning_output = batch_generation(
+                model=model,
+                system_messages=system_messages,
+                prompts=prompts,
+                response_generation_method=response_generation_methods,
+                client_model_name=client_model_name,
+                api_concurrency=api_concurrency,
+                print_conversation=print_conversation,
+                print_progress=print_progress,
+                seed=seed,
+                **generation_kwargs,
+            )
+        except Exception as e:
+            warnings.warn(
+                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+            )
+            output = [None] * len(current_batch)
+            logprobs = None
+            reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None:
             logprobs = [None] * len(current_batch)
 
         for survey_id, prompt, answer, logprob_answer, reasoning in zip(
-            range(len(current_batch)), prompts, output, logprobs, reasoning_output
+            current_batch.keys(), prompts, output, logprobs, reasoning_output
         ):
             question_llm_response_pairs[survey_id].update(
                 {
@@ -470,11 +496,11 @@ def conduct_survey_sequential(
         if print_progress
         else range(max_survey_length)
     ):
-        current_batch = [
-            questionnaire
-            for questionnaire in llm_prompts
+        current_batch: Dict[int, LLMPrompt] = {
+            pos: questionnaire
+            for pos, questionnaire in enumerate(llm_prompts)
             if len(questionnaire._questions) > i
-        ]
+        }
 
         first_question: bool = i == 0
 
@@ -485,14 +511,14 @@ def conduct_survey_sequential(
                         QuestionnairePresentation.SEQUENTIAL,
                         questionnaire._questions[i].item_id,
                     )
-                    for questionnaire in current_batch
+                    for questionnaire in current_batch.values()
                 ]
             )
             questions = [
                 questionnaire.generate_question_prompt(
                     questionnaire_items=questionnaire._questions[i]
                 )
-                for questionnaire in current_batch
+                for questionnaire in current_batch.values()
             ]
         else:
             system_messages, _ = zip(
@@ -501,14 +527,14 @@ def conduct_survey_sequential(
                         QuestionnairePresentation.SEQUENTIAL,
                         questionnaire._questions[i].item_id,
                     )
-                    for questionnaire in current_batch
+                    for questionnaire in current_batch.values()
                 ]
             )
             prompts = [
                 questionnaire.generate_question_prompt(
                     questionnaire_items=questionnaire._questions[i]
                 )
-                for questionnaire in current_batch
+                for questionnaire in current_batch.values()
             ]
             questions = prompts
 
@@ -518,32 +544,34 @@ def conduct_survey_sequential(
                 if questionnaire._questions[i].answer_options
                 else None
             )
-            for questionnaire in current_batch
+            for questionnaire in current_batch.values()
         ]
 
-        for c in range(len(current_batch)):
+        for c in range(len(current_batch.values())):
             all_prompts[c].append(prompts[c])
 
         current_assistant_messages: List[str] = []
 
         missing_indeces = []
 
-        for index, surv in enumerate(current_batch):
+        for index, surv in enumerate(current_batch.values()):
             prefilled_answer = surv._questions[i].prefilled_response
             if prefilled_answer is not None:
                 current_assistant_messages.append(prefilled_answer)
                 missing_indeces.append(index)
 
         needed_batch = [
-            item for a, item in enumerate(current_batch) if a not in missing_indeces
+            item
+            for a, item in enumerate(current_batch.values())
+            if a not in missing_indeces
         ]
 
         if len(needed_batch) == 0:
-            for c in range(len(current_batch)):
+            for c in range(len(current_batch.values())):
                 assistant_messages[c].append(current_assistant_messages[c])
 
-            logprobs = [None] * len(current_batch)
-            reasoning_output = [None] * len(current_batch)
+            logprobs = [None] * len(current_batch.values())
+            reasoning_output = [None] * len(current_batch.values())
             for (
                 survey_id,
                 question,
@@ -552,12 +580,12 @@ def conduct_survey_sequential(
                 reasoning,
                 item,
             ) in zip(
-                range(len(current_batch)),
+                current_batch.keys(),
                 questions,
                 current_assistant_messages,
                 logprobs,
                 reasoning_output,
-                current_batch,
+                current_batch.values(),
             ):
                 question_llm_response[survey_id].update(
                     {
@@ -569,19 +597,27 @@ def conduct_survey_sequential(
             continue
             # TODO: add support for automatic system prompt for other answer production methods
 
-        output, logprobs, reasoning_output = batch_turn_by_turn_generation(
-            model=model,
-            system_messages=system_messages,
-            prompts=all_prompts,
-            assistant_messages=assistant_messages,
-            response_generation_method=response_generation_methods,
-            client_model_name=client_model_name,
-            api_concurrency=api_concurrency,
-            print_conversation=print_conversation,
-            print_progress=print_progress,
-            seed=seed,
-            **generation_kwargs,
-        )
+        try:
+            output, logprobs, reasoning_output = batch_turn_by_turn_generation(
+                model=model,
+                system_messages=system_messages,
+                prompts=all_prompts,
+                assistant_messages=assistant_messages,
+                response_generation_method=response_generation_methods,
+                client_model_name=client_model_name,
+                api_concurrency=api_concurrency,
+                print_conversation=print_conversation,
+                print_progress=print_progress,
+                seed=seed,
+                **generation_kwargs,
+            )
+        except Exception as e:
+            warnings.warn(
+                f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+            )
+            output = [None] * len(current_batch)
+            logprobs = None
+            reasoning_output = [None] * len(current_batch)
 
         # avoid errors when zipping
         if logprobs is None or len(logprobs) == 0:
@@ -590,7 +626,7 @@ def conduct_survey_sequential(
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
         for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            range(len(needed_batch)),
+            current_batch.keys(),
             questions,
             output,
             logprobs,
