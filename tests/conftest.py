@@ -1,4 +1,48 @@
+"""Shared test fixtures and lightweight dependency stubs for the test suite."""
+
 # tests/conftest.py
+import sys
+import types
+
+# Keep test imports lightweight: allow `qstn` import paths without pulling full vLLM/torch stack.
+if "vllm" not in sys.modules:
+    vllm_stub = types.ModuleType("vllm")
+
+    class _LLM:
+        pass
+
+    # minimal stubs for testing; additional attributes added later if needed
+    vllm_stub.LLM = _LLM
+
+    # SamplingParams and StructuredOutputsParams are used by our inference helpers
+    class SamplingParams:
+        def __init__(self, **kwargs):
+            # store everything so tests can inspect attributes
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    vllm_stub.SamplingParams = SamplingParams
+    # create a submodule sampling_params inside vllm
+    sampling_params_mod = types.ModuleType("vllm.sampling_params")
+    sampling_params_mod.StructuredOutputsParams = lambda **kwargs: kwargs
+    sys.modules["vllm.sampling_params"] = sampling_params_mod
+    vllm_stub.sampling_params = sampling_params_mod
+
+    # stub outputs.RequestOutput with minimal attributes used by inference
+    class RequestOutput:
+        def __init__(self, text=""):
+            class Out:
+                def __init__(self, text):
+                    self.text = text
+                    self.logprobs = []
+            self.outputs = [Out(text)]
+    outputs_mod = types.ModuleType("vllm.outputs")
+    outputs_mod.RequestOutput = RequestOutput
+    sys.modules["vllm.outputs"] = outputs_mod
+    vllm_stub.outputs = outputs_mod
+
+    sys.modules["vllm"] = vllm_stub
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 

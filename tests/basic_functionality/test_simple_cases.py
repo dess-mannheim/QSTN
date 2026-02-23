@@ -1,3 +1,9 @@
+"""End-to-end smoke tests for core survey execution modes.
+
+These tests validate that single-item, sequential, and battery survey flows
+produce expected dataframe outputs with mocked API responses.
+"""
+
 import pytest
 import pandas as pd
 
@@ -11,8 +17,6 @@ from openai import AsyncOpenAI
 def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client):
     # --- SETUP ---
     interviews = llm_prompt_factory(mock_personas, mock_questionnaires)
-
-    print(interviews)
 
     # Add additional question only to the first interview
     interview = interviews[0]
@@ -59,8 +63,6 @@ def test_simple_sequential(mock_questionnaires, mock_personas, llm_prompt_factor
     # --- SETUP ---
     interviews = llm_prompt_factory(mock_personas, mock_questionnaires)
 
-    print(interviews)
-
     # Add additional question only to the first interview
     interview = interviews[0]
     new_item = QuestionnaireItem(item_id=3, question_content="How do you feel about Green?")
@@ -105,8 +107,6 @@ def test_simple_battery(mock_questionnaires, mock_personas, llm_prompt_factory, 
     # --- SETUP ---
     interviews = llm_prompt_factory(mock_personas, mock_questionnaires)
 
-    print(interviews)
-
     # Add additional question only to the first interview
     interview = interviews[0]
     new_item = QuestionnaireItem(item_id=3, question_content="How do you feel about Green?")
@@ -130,6 +130,10 @@ def test_simple_battery(mock_questionnaires, mock_personas, llm_prompt_factory, 
     assert isinstance(first_interview, pd.DataFrame)
     assert not first_interview.empty
 
-    
-    # 4. Check if the mocked answer came through (just to test if it was actually called)
+    # 2. Battery mode aggregates into a single questionnaire row.
+    assert len(first_interview) == 1
+    assert first_interview["questionnaire_item_id"].iloc[0] == -1
+    assert "How do you feel about Green?" in first_interview["question"].iloc[0]
+
+    # 3. Check if the mocked answer came through.
     assert first_interview.iloc[0]['llm_response'] == "I feel neutral about this."

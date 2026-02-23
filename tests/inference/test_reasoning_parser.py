@@ -1,3 +1,5 @@
+"""Integration tests for reasoning token parsing through survey execution helpers."""
+
 import pytest
 
 import pandas as pd
