@@ -13,8 +13,8 @@ def test_load_questionnaire_and_len(mock_questionnaires):
     prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
 
     assert len(prompt) == 2
-    assert prompt[0].item_id == 1
-    assert prompt[0].question_content == "How do you feel about Red?"
+    assert prompt.get_question(0).item_id == 1
+    assert prompt.get_question(0).question_content == "How do you feel about Red?"
 
 
 def test_prepare_prompt_applies_per_item_configuration(mock_questionnaires):
@@ -30,10 +30,10 @@ def test_prepare_prompt_applies_per_item_configuration(mock_questionnaires):
         prefilled_responses={2: "Already answered"},
     )
 
-    assert prompt[0].answer_options is options
-    assert prompt[0].prefilled_response is None
-    assert prompt[1].answer_options is None
-    assert prompt[1].prefilled_response == "Already answered"
+    assert prompt.get_question(0).answer_options is options
+    assert prompt.get_question(0).prefilled_response is None
+    assert prompt.get_question(1).answer_options is None
+    assert prompt.get_question(1).prefilled_response == "Already answered"
 
 
 def test_get_prompt_single_item_renders_question_and_options(mock_questionnaires):
@@ -80,12 +80,12 @@ def test_insert_set_and_delete_questions(mock_questionnaires):
     inserted = QuestionnaireItem(item_id=3, question_content="How do you feel about Green?")
     replacement = QuestionnaireItem(item_id=99, question_content="Replacement")
     prompt.insert_questions(inserted, 1)
-    prompt[0] = replacement
-    del prompt[2]
+    prompt.replace_question(0, replacement)
+    prompt.remove_question(2)
 
     assert len(prompt) == 2
-    assert prompt[0].item_id == 99
-    assert prompt[1].item_id == 3
+    assert prompt.get_question(0).item_id == 99
+    assert prompt.get_question(1).item_id == 3
 
 
 def test_load_questionnaire_format_rejects_empty_dataframe():

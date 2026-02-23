@@ -215,7 +215,7 @@ def test_notebook_like_sequential_keeps_history_and_respects_prefill(monkeypatch
     assert parsed["llm_response"].tolist() == ["GEN_0", "GEN_0"]
 
     prompt_prefilled = prompt.duplicate()
-    prompt_prefilled._questions[1].prefilled_response = "PREFILLED_PIZZA"
+    prompt_prefilled.get_question(1).prefilled_response = "PREFILLED_PIZZA"
     recorded_calls.clear()
 
     prefilled_results = survey_manager.conduct_survey_sequential(

@@ -38,9 +38,9 @@ def test_load_questionnaire_format_from_csv_without_optional_columns(tmp_path):
     prompt.load_questionnaire_format(str(csv_path))
 
     assert len(prompt) == 1
-    assert prompt[0].item_id == 9
-    assert prompt[0].question_content is None
-    assert prompt[0].question_stem is None
+    assert prompt.get_question(0).item_id == 9
+    assert prompt.get_question(0).question_content is None
+    assert prompt.get_question(0).question_stem is None
 
 
 def test_prepare_prompt_other_combinations_and_randomized_order(monkeypatch):
@@ -58,16 +58,16 @@ def test_prepare_prompt_other_combinations_and_randomized_order(monkeypatch):
         question_stem="Stem",
         answer_options={1: opt_1, 2: opt_2},
     )
-    assert p1[0].answer_options is opt_1
-    assert p1[1].answer_options is opt_2
+    assert p1.get_question(0).answer_options is opt_1
+    assert p1.get_question(1).answer_options is opt_2
 
     p2 = LLMPrompt(questionnaire_source=df).prepare_prompt(
         question_stem=["S1", "S2"],
         answer_options=shared_options,
     )
-    assert p2[0].question_stem == "S1"
-    assert p2[1].question_stem == "S2"
-    assert p2[0].answer_options is shared_options
+    assert p2.get_question(0).question_stem == "S1"
+    assert p2.get_question(1).question_stem == "S2"
+    assert p2.get_question(0).answer_options is shared_options
 
     shuffled = {"called": False}
 
@@ -82,7 +82,7 @@ def test_prepare_prompt_other_combinations_and_randomized_order(monkeypatch):
         randomized_item_order=True,
     )
     assert shuffled["called"] is True
-    assert p3[0].item_id == 2
+    assert p3.get_question(0).item_id == 2
 
 
 def test_get_prompt_for_questionnaire_type_error_and_battery_auto_instructions():
@@ -162,7 +162,7 @@ def test_str_and_insert_questions_default_position():
     )
     rendered = str(prompt)
 
-    assert prompt[-1].item_id == 4
+    assert prompt.get_question(-1).item_id == 4
     assert "=== Demo ===" in rendered
     assert "=== SYSTEM_PROMPT ===" in rendered
     assert "=== USER_PROMPT_WITH_ALL_QUESTIONS ===" in rendered
