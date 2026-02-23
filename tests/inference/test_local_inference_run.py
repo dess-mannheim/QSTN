@@ -58,7 +58,7 @@ def test_run_vllm_batch_conversation_and_errors(monkeypatch):
     )
     assert len(out) == 3
     assert out[0] == ["a", "b"]
-    assert out[1] is None
+    assert out[1] == [None, None]
     assert out[2] == [None, None]
 
     # Unsupported type in survey_inference.batch_generation should raise.

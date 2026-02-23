@@ -23,34 +23,22 @@ import torch
 import json
 import re
 
-def run_vllm_batch(
+
+def _run_vllm_chat_pipeline(
     model: LLM,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
+    batch_messages: List[List[Dict[str, str]]],
     response_generation_method: Optional[
         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
-    seed: int = 42,
-    # number_of_printed_conversation: int = 2,
-    print_progress: bool = True,
-    # <think>...</think> tokens are used by Qwen3 to separate reasoning
-    reasoning_start_token: str = "<think>",
-    reasoning_end_token: str = "</think>",
-    space_char: str = "Ġ",
+    ],
+    seed: int,
+    print_progress: bool,
+    reasoning_start_token: str,
+    reasoning_end_token: str,
+    space_char: str,
     **generation_kwargs: Any,
 ) -> Tuple[List[str], List[str], List[str]]:
-
-    # Prepare batch of messages
-    batch_messages: List[List[Dict[str, str]]] = [
-        [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt},
-        ]
-        for system_message, prompt in zip(system_messages, prompts)
-    ]
-
-    batch_size: int = len(system_messages)
-
+    """Run the shared vLLM chat pipeline for single and conversation batching."""
+    batch_size = len(batch_messages)
     seeds = generate_seeds(seed, batch_size=batch_size)
 
     logprob_result = None
@@ -58,7 +46,7 @@ def run_vllm_batch(
         response_generation_method, generation_kwargs
     )
 
-    # If users specify use_tqdm themselves, we use that flag instead
+    # If users specify use_tqdm themselves, we use that flag instead.
     print_progress = generation_kwargs.pop("use_tqdm", print_progress)
 
     if "sampling_params" in generation_kwargs.keys():
@@ -106,6 +94,45 @@ def run_vllm_batch(
     return (plain_results, logprob_result, reasoning_outputs)
 
 
+def run_vllm_batch(
+    model: LLM,
+    system_messages: List[str] = ["You are a helpful assistant."],
+    prompts: List[str] = ["Hi there! What is your name?"],
+    response_generation_method: Optional[
+        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
+    ] = None,
+    seed: int = 42,
+    # number_of_printed_conversation: int = 2,
+    print_progress: bool = True,
+    # <think>...</think> tokens are used by Qwen3 to separate reasoning
+    reasoning_start_token: str = "<think>",
+    reasoning_end_token: str = "</think>",
+    space_char: str = "Ġ",
+    **generation_kwargs: Any,
+) -> Tuple[List[str], List[str], List[str]]:
+
+    # Prepare batch of messages
+    batch_messages: List[List[Dict[str, str]]] = [
+        [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt},
+        ]
+        for system_message, prompt in zip(system_messages, prompts)
+    ]
+
+    return _run_vllm_chat_pipeline(
+        model=model,
+        batch_messages=batch_messages,
+        response_generation_method=response_generation_method,
+        seed=seed,
+        print_progress=print_progress,
+        reasoning_start_token=reasoning_start_token,
+        reasoning_end_token=reasoning_end_token,
+        space_char=space_char,
+        **generation_kwargs,
+    )
+
+
 def run_vllm_batch_conversation(
     model: LLM,
     system_messages: List[str] = ["You are a helpful assistant."],
@@ -146,57 +173,17 @@ def run_vllm_batch_conversation(
 
         batch_messages.append(messages)
 
-    seeds = generate_seeds(seed, batch_size=batch_size)
-
-    logprob_result = None
-    logprob_config = _update_logprob_kwargs(
-        response_generation_method, generation_kwargs
-    )
-
-    # If users specify use_tqdm themselves, we use that flag instead
-    print_progress = generation_kwargs.pop("use_tqdm", print_progress)
-
-    if "sampling_params" in generation_kwargs.keys():
-        import warnings
-
-        warnings.warn(
-            "Do not specify sampling_params for vllm inference. If you want to use hyperparameters, "
-            "add them directly to the generation kwargs. Given argument sampling_params will be ignored."
-        )
-        generation_kwargs.pop("sampling_params")
-
-    gen_kwargs, chat_kwargs = _split_kwargs(generation_kwargs)
-
-    sampling_params_list = _create_sampling_params(
-        batch_size=batch_size,
-        seeds=seeds,
+    return _run_vllm_chat_pipeline(
+        model=model,
+        batch_messages=batch_messages,
         response_generation_method=response_generation_method,
-        **gen_kwargs,
+        seed=seed,
+        print_progress=print_progress,
+        reasoning_start_token=reasoning_start_token,
+        reasoning_end_token=reasoning_end_token,
+        space_char=space_char,
+        **generation_kwargs,
     )
-
-    outputs: List[RequestOutput] = model.chat(
-        batch_messages,
-        sampling_params=sampling_params_list,
-        use_tqdm=print_progress,
-        **chat_kwargs,
-    )
-
-    raw_reasonings, reasoning_outputs, plain_results = _extract_reasoning_and_answer(
-        reasoning_start_token, reasoning_end_token, outputs
-    )
-
-    if logprob_config:
-        logprob_result = _get_logprobs(
-            model,
-            response_generation_method,
-            reasoning_start_token,
-            reasoning_end_token,
-            space_char,
-            outputs,
-            raw_reasonings,
-        )
-
-    return (plain_results, logprob_result, reasoning_outputs)
 
 
 def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
