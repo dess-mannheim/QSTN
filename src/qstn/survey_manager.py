@@ -57,6 +57,7 @@ from typing import (
     Optional,
     Union,
     Any,
+    Iterable,
 )
 
 from pathlib import Path
@@ -92,6 +93,240 @@ from .utilities.survey_objects import InferenceResult
 #     batch_index: int
 #     error_type: str
 #     error_message: str
+
+
+def _normalize_llm_prompts(
+    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
+) -> List[LLMPrompt]:
+    """Normalize a single prompt or list of prompts to a list."""
+    if isinstance(llm_prompts, LLMPrompt):
+        return [llm_prompts]
+    return llm_prompts
+
+
+def _initialize_question_response_pairs(
+    llm_prompts: List[LLMPrompt],
+) -> List[Dict[int, QuestionLLMResponseTuple]]:
+    """Initialize mutable per-questionnaire response maps."""
+    return [{} for _ in llm_prompts]
+
+
+def _iter_survey_steps(max_survey_length: int, print_progress: bool):
+    """Yield step indices, optionally wrapped in tqdm."""
+    if print_progress:
+        return tqdm(range(max_survey_length), desc="Processing questionnaires")
+    return range(max_survey_length)
+
+
+def _get_current_batch(llm_prompts: List[LLMPrompt], i: int) -> Dict[int, LLMPrompt]:
+    """Return questionnaire batch that still has a question at step index i."""
+    return {
+        pos: questionnaire
+        for pos, questionnaire in enumerate(llm_prompts)
+        if len(questionnaire) > i
+    }
+
+
+def _normalize_generation_outputs(
+    output: List[str],
+    logprobs: Optional[List[Any]],
+    reasoning_output: Optional[List[Any]],
+    expected_size: int,
+) -> tuple[List[str], List[Any], List[Any]]:
+    """Normalize optional generation outputs to zip-safe lists."""
+    if logprobs is None:
+        logprobs = [None] * expected_size
+    if reasoning_output is None:
+        reasoning_output = [None] * expected_size
+    return output, logprobs, reasoning_output
+
+
+def _run_batch_generation(
+    model: Union["LLM", AsyncOpenAI],
+    system_messages: List[str],
+    prompts: List[str],
+    response_generation_methods: Optional[List[ResponseGenerationMethod]],
+    client_model_name: Optional[str],
+    api_concurrency: int,
+    print_conversation: bool,
+    print_progress: bool,
+    seed: int,
+    **generation_kwargs: Any,
+) -> tuple[List[str], List[Any], List[Any]]:
+    """Thin wrapper around `batch_generation` with normalized optional outputs."""
+    output, logprobs, reasoning_output = batch_generation(
+        model=model,
+        system_messages=system_messages,
+        prompts=prompts,
+        response_generation_method=response_generation_methods,
+        client_model_name=client_model_name,
+        api_concurrency=api_concurrency,
+        print_conversation=print_conversation,
+        print_progress=print_progress,
+        seed=seed,
+        **generation_kwargs,
+    )
+    return _normalize_generation_outputs(
+        output=output,
+        logprobs=logprobs,
+        reasoning_output=reasoning_output,
+        expected_size=len(system_messages),
+    )
+
+
+def _finalize_survey_results(
+    llm_prompts: List[LLMPrompt],
+    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]],
+) -> List[InferenceResult]:
+    """Convert internal response maps to public `InferenceResult` objects."""
+    return [
+        InferenceResult(survey, question_llm_response_pairs[i])
+        for i, survey in enumerate(llm_prompts)
+    ]
+
+
+def _store_question_responses(
+    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]],
+    survey_ids: Iterable[int],
+    questions: List[str],
+    answers: List[str],
+    logprobs: List[Any],
+    reasoning_output: List[Any],
+    item_ids: Iterable[Any],
+) -> None:
+    """Store question-level answers in the mutable response map."""
+    for survey_id, question, answer, logprob_answer, reasoning, item_id in zip(
+        survey_ids,
+        questions,
+        answers,
+        logprobs,
+        reasoning_output,
+        item_ids,
+    ):
+        question_llm_response_pairs[survey_id].update(
+            {
+                item_id: QuestionLLMResponseTuple(
+                    question, answer, logprob_answer, reasoning
+                )
+            }
+        )
+
+
+def _prepare_single_item_batch(
+    current_batch: Dict[int, LLMPrompt], i: int
+) -> tuple[List[str], List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    """Prepare messages and metadata for a single-item survey step."""
+    system_messages, prompts = zip(
+        *[
+                questionnaire.get_prompt_for_questionnaire_type(
+                    QuestionnairePresentation.SINGLE_ITEM,
+                    questionnaire.get_question_item_id(i),
+                )
+            for questionnaire in current_batch.values()
+        ]
+    )
+
+    questions = [
+        questionnaire.generate_question_prompt(
+            questionnaire_items=questionnaire.get_question(i)
+        )
+        for questionnaire in current_batch.values()
+    ]
+    response_generation_methods = [
+        (
+            questionnaire.get_question(i).answer_options.response_generation_method
+            if questionnaire.get_question(i).answer_options
+            else None
+        )
+        for questionnaire in current_batch.values()
+    ]
+
+    return list(system_messages), list(prompts), questions, response_generation_methods
+
+
+def _prepare_battery_batch(
+    current_batch: Dict[int, LLMPrompt], i: int, item_separator: str
+) -> tuple[List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    """Prepare messages and response-generation methods for battery mode."""
+    system_messages, prompts = zip(
+        *[
+                questionnaire.get_prompt_for_questionnaire_type(
+                    QuestionnairePresentation.BATTERY,
+                    questionnaire.get_question_item_id(i),
+                    item_separator=item_separator,
+                )
+            for questionnaire in current_batch.values()
+        ]
+    )
+
+    response_generation_methods: List[Optional[ResponseGenerationMethod]] = []
+    for questionnaire in current_batch.values():
+        response_generation_method = None
+        if questionnaire.get_question(i).answer_options:
+            response_generation_method = (
+                questionnaire.get_question(i).answer_options.response_generation_method
+            )
+            if isinstance(response_generation_method, JSONResponseGenerationMethod):
+                response_generation_method = (
+                    response_generation_method.create_new_rgm_with_multiple_questions(
+                        questions=list(questionnaire.questions)
+                    )
+                )
+        response_generation_methods.append(response_generation_method)
+
+    return list(system_messages), list(prompts), response_generation_methods
+
+
+def _prepare_sequential_step(
+    current_batch: Dict[int, LLMPrompt], i: int
+) -> tuple[List[str], List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    """Prepare per-step prompts/questions/methods for sequential mode."""
+    first_question: bool = i == 0
+
+    if first_question:
+        system_messages, prompts = zip(
+            *[
+                questionnaire.get_prompt_for_questionnaire_type(
+                    QuestionnairePresentation.SEQUENTIAL,
+                    questionnaire.get_question_item_id(i),
+                )
+                for questionnaire in current_batch.values()
+            ]
+        )
+        questions = [
+            questionnaire.generate_question_prompt(
+                questionnaire_items=questionnaire.get_question(i)
+            )
+            for questionnaire in current_batch.values()
+        ]
+    else:
+        system_messages, _ = zip(
+            *[
+                questionnaire.get_prompt_for_questionnaire_type(
+                    QuestionnairePresentation.SEQUENTIAL,
+                    questionnaire.get_question_item_id(i),
+                )
+                for questionnaire in current_batch.values()
+            ]
+        )
+        prompts = [
+            questionnaire.generate_question_prompt(
+                questionnaire_items=questionnaire.get_question(i)
+            )
+            for questionnaire in current_batch.values()
+        ]
+        questions = prompts
+
+    response_generation_methods = [
+        (
+            questionnaire.get_question(i).answer_options.response_generation_method
+            if questionnaire.get_question(i).answer_options
+            else None
+        )
+        for questionnaire in current_batch.values()
+    ]
+
+    return list(system_messages), list(prompts), questions, response_generation_methods
 
 
 def conduct_survey_single_item(
@@ -133,64 +368,30 @@ def conduct_survey_single_item(
 
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
-    if isinstance(llm_prompts, LLMPrompt):
-        llm_prompts = [llm_prompts]
+    llm_prompts = _normalize_llm_prompts(llm_prompts)
 
     max_survey_length: int = max(
-        len(questionnaire._questions) for questionnaire in llm_prompts
+        len(questionnaire) for questionnaire in llm_prompts
     )
-    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
+    question_llm_response_pairs = _initialize_question_response_pairs(llm_prompts)
 
-    for i in range(len(llm_prompts)):
-        # inference_option = interviews[i]._generate_inference_options()
-        # inference_options.append(inference_opti
-        question_llm_response_pairs.append({})
+    for i in _iter_survey_steps(max_survey_length, print_progress):
+        current_batch = _get_current_batch(llm_prompts, i)
 
-    survey_results: List[InferenceResult] = []
-
-    for i in (
-        tqdm(range(max_survey_length), desc="Processing questionnaires")
-        if print_progress
-        else range(max_survey_length)
-    ):
-        current_batch: Dict[int, LLMPrompt] = {
-            pos: questionnaire
-            for pos, questionnaire in enumerate(llm_prompts)
-            if len(questionnaire._questions) > i
-        }
-
-        system_messages, prompts = zip(
-            *[
-                questionnaire.get_prompt_for_questionnaire_type(
-                    QuestionnairePresentation.SINGLE_ITEM,
-                    questionnaire._questions[i].item_id,
-                )
-                for questionnaire in current_batch.values()
-            ]
-        )
-
-        questions = [
-            questionnaire.generate_question_prompt(
-                questionnaire_items=questionnaire._questions[i]
-            )
-            for questionnaire in current_batch.values()
-        ]
-        response_generation_methods = [
-            (
-                questionnaire._questions[i].answer_options.response_generation_method
-                if questionnaire._questions[i].answer_options
-                else None
-            )
-            for questionnaire in current_batch.values()
-        ]
+        (
+            system_messages,
+            prompts,
+            questions,
+            response_generation_methods,
+        ) = _prepare_single_item_batch(current_batch, i)
 
         # TODO Implement Retrying for errors.
         # try:
-        output, logprobs, reasoning_output = batch_generation(
+        output, logprobs, reasoning_output = _run_batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            response_generation_method=response_generation_methods,
+            response_generation_methods=response_generation_methods,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -206,25 +407,15 @@ def conduct_survey_single_item(
         #     logprobs = None
         #     reasoning_output = [None] * len(current_batch)
 
-        # avoid errors when zipping
-        if logprobs is None:
-            logprobs = [None] * len(current_batch)
-
-        for survey_id, question, answer, logprob_answer, reasoning, item in zip(
-            current_batch.keys(),
-            questions,
-            output,
-            logprobs,
-            reasoning_output,
-            current_batch.values(),
-        ):
-            question_llm_response_pairs[survey_id].update(
-                {
-                    item._questions[i].item_id: QuestionLLMResponseTuple(
-                        question, answer, logprob_answer, reasoning
-                    )
-                }
-            )
+        _store_question_responses(
+            question_llm_response_pairs=question_llm_response_pairs,
+            survey_ids=current_batch.keys(),
+            questions=questions,
+            answers=output,
+            logprobs=logprobs,
+            reasoning_output=reasoning_output,
+            item_ids=[item.get_question_item_id(i) for item in current_batch.values()],
+        )
 
         _intermediate_saves(
             llm_prompts,
@@ -234,10 +425,7 @@ def conduct_survey_single_item(
             i,
         )
 
-    for i, survey in enumerate(llm_prompts):
-        survey_results.append(InferenceResult(survey, question_llm_response_pairs[i]))
-
-    return survey_results
+    return _finalize_survey_results(llm_prompts, question_llm_response_pairs)
 
 
 def _intermediate_saves(
@@ -339,62 +527,29 @@ def conduct_survey_battery(
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
-    if isinstance(llm_prompts, LLMPrompt):
-        llm_prompts = [llm_prompts]
+    llm_prompts = _normalize_llm_prompts(llm_prompts)
     # inference_options: List[InferenceOptions] = []
 
     # We always conduct the survey in one prompt
     max_survey_length: int = 1
 
-    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]] = []
+    question_llm_response_pairs = _initialize_question_response_pairs(llm_prompts)
 
-    # if print_progress:
-    #     print("Constructing prompts")
-    for i in range(len(llm_prompts)):
-        question_llm_response_pairs.append({})
-
-    survey_results: List[InferenceResult] = []
-
-    for i in (
-        tqdm(range(max_survey_length), desc="Processing questionnaires")
-        if print_progress
-        else range(max_survey_length)
-    ):
-        current_batch: Dict[int, LLMPrompt] = {
-            pos: questionnaire
-            for pos, questionnaire in enumerate(llm_prompts)
-            if len(questionnaire._questions) > i
-        }
-        system_messages, prompts = zip(
-            *[
-                questionnaire.get_prompt_for_questionnaire_type(
-                    QuestionnairePresentation.BATTERY,
-                    questionnaire._questions[i].item_id,
-                    item_separator=item_separator,
-                )
-                for questionnaire in current_batch.values()
-            ]
-        )
-        # questions = [interview.generate_question_prompt(interview_question=interview._questions[i]) for interview in current_batch]
-        response_generation_methods: List[ResponseGenerationMethod] = []
-        for questionnaire in current_batch.values():
-            if questionnaire._questions[i].answer_options:
-                response_generation_method = questionnaire._questions[
-                    i
-                ].answer_options.response_generation_method
-                if isinstance(response_generation_method, JSONResponseGenerationMethod):
-                    response_generation_method = response_generation_method.create_new_rgm_with_multiple_questions(
-                        questions=questionnaire._questions
-                    )
-                response_generation_methods.append(response_generation_method)
+    for i in _iter_survey_steps(max_survey_length, print_progress):
+        current_batch = _get_current_batch(llm_prompts, i)
+        (
+            system_messages,
+            prompts,
+            response_generation_methods,
+        ) = _prepare_battery_batch(current_batch, i, item_separator)
 
         # TODO Implement Retrying for errors.
         # try:
-        output, logprobs, reasoning_output = batch_generation(
+        output, logprobs, reasoning_output = _run_batch_generation(
             model=model,
             system_messages=system_messages,
             prompts=prompts,
-            response_generation_method=response_generation_methods,
+            response_generation_methods=response_generation_methods,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -410,20 +565,15 @@ def conduct_survey_battery(
         #     logprobs = None
         #     reasoning_output = [None] * len(current_batch)
 
-        # avoid errors when zipping
-        if logprobs is None:
-            logprobs = [None] * len(current_batch)
-
-        for survey_id, prompt, answer, logprob_answer, reasoning in zip(
-            current_batch.keys(), prompts, output, logprobs, reasoning_output
-        ):
-            question_llm_response_pairs[survey_id].update(
-                {
-                    -1: QuestionLLMResponseTuple(
-                        prompt, answer, logprob_answer, reasoning
-                    )
-                }
-            )
+        _store_question_responses(
+            question_llm_response_pairs=question_llm_response_pairs,
+            survey_ids=current_batch.keys(),
+            questions=prompts,
+            answers=output,
+            logprobs=logprobs,
+            reasoning_output=reasoning_output,
+            item_ids=[-1] * len(output),
+        )
 
         _intermediate_saves(
             llm_prompts,
@@ -433,10 +583,7 @@ def conduct_survey_battery(
             i,
         )
 
-    for i, survey in enumerate(llm_prompts):
-        survey_results.append(InferenceResult(survey, question_llm_response_pairs[i]))
-
-    return survey_results
+    return _finalize_survey_results(llm_prompts, question_llm_response_pairs)
 
 
 def conduct_survey_sequential(
@@ -472,19 +619,13 @@ def conduct_survey_sequential(
         List(InferenceResult): A list of results containing the survey data and LLM responses for each provided prompt.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
-    if isinstance(llm_prompts, LLMPrompt):
-        llm_prompts = [llm_prompts]
+    llm_prompts = _normalize_llm_prompts(llm_prompts)
 
     max_survey_length: int = max(
-        len(questionnaire._questions) for questionnaire in llm_prompts
+        len(questionnaire) for questionnaire in llm_prompts
     )
 
-    question_llm_response: List[Dict[int, QuestionLLMResponseTuple]] = []
-
-    for i in range(len(llm_prompts)):
-        question_llm_response.append({})
-
-    survey_results: List[InferenceResult] = []
+    question_llm_response = _initialize_question_response_pairs(llm_prompts)
 
     all_prompts: List[List[str]] = []
     assistant_messages: List[List[str]] = []
@@ -493,61 +634,14 @@ def conduct_survey_sequential(
         assistant_messages.append([])
         all_prompts.append([])
 
-    for i in (
-        tqdm(range(max_survey_length), desc="Processing questionnaires")
-        if print_progress
-        else range(max_survey_length)
-    ):
-        current_batch: Dict[int, LLMPrompt] = {
-            pos: questionnaire
-            for pos, questionnaire in enumerate(llm_prompts)
-            if len(questionnaire._questions) > i
-        }
-
-        first_question: bool = i == 0
-
-        if first_question:
-            system_messages, prompts = zip(
-                *[
-                    questionnaire.get_prompt_for_questionnaire_type(
-                        QuestionnairePresentation.SEQUENTIAL,
-                        questionnaire._questions[i].item_id,
-                    )
-                    for questionnaire in current_batch.values()
-                ]
-            )
-            questions = [
-                questionnaire.generate_question_prompt(
-                    questionnaire_items=questionnaire._questions[i]
-                )
-                for questionnaire in current_batch.values()
-            ]
-        else:
-            system_messages, _ = zip(
-                *[
-                    questionnaire.get_prompt_for_questionnaire_type(
-                        QuestionnairePresentation.SEQUENTIAL,
-                        questionnaire._questions[i].item_id,
-                    )
-                    for questionnaire in current_batch.values()
-                ]
-            )
-            prompts = [
-                questionnaire.generate_question_prompt(
-                    questionnaire_items=questionnaire._questions[i]
-                )
-                for questionnaire in current_batch.values()
-            ]
-            questions = prompts
-
-        response_generation_methods = [
-            (
-                questionnaire._questions[i].answer_options.response_generation_method
-                if questionnaire._questions[i].answer_options
-                else None
-            )
-            for questionnaire in current_batch.values()
-        ]
+    for i in _iter_survey_steps(max_survey_length, print_progress):
+        current_batch = _get_current_batch(llm_prompts, i)
+        (
+            system_messages,
+            prompts,
+            questions,
+            response_generation_methods,
+        ) = _prepare_sequential_step(current_batch, i)
 
         for c in range(len(current_batch.values())):
             all_prompts[c].append(prompts[c])
@@ -557,7 +651,7 @@ def conduct_survey_sequential(
         missing_indeces = []
 
         for index, surv in enumerate(current_batch.values()):
-            prefilled_answer = surv._questions[i].prefilled_response
+            prefilled_answer = surv.get_question(i).prefilled_response
             if prefilled_answer is not None:
                 current_assistant_messages.append(prefilled_answer)
                 missing_indeces.append(index)
@@ -574,28 +668,15 @@ def conduct_survey_sequential(
 
             logprobs = [None] * len(current_batch.values())
             reasoning_output = [None] * len(current_batch.values())
-            for (
-                survey_id,
-                question,
-                llm_response,
-                logprob_answer,
-                reasoning,
-                item,
-            ) in zip(
-                current_batch.keys(),
-                questions,
-                current_assistant_messages,
-                logprobs,
-                reasoning_output,
-                current_batch.values(),
-            ):
-                question_llm_response[survey_id].update(
-                    {
-                        item._questions[i].item_id: QuestionLLMResponseTuple(
-                            question, llm_response, logprob_answer, reasoning
-                        )
-                    }
-                )
+            _store_question_responses(
+                question_llm_response_pairs=question_llm_response,
+                survey_ids=current_batch.keys(),
+                questions=questions,
+                answers=current_assistant_messages,
+                logprobs=logprobs,
+                reasoning_output=reasoning_output,
+                item_ids=[item.get_question_item_id(i) for item in current_batch.values()],
+            )
             continue
             # TODO: add support for automatic system prompt for other answer production methods
 
@@ -622,27 +703,22 @@ def conduct_survey_sequential(
         #     logprobs = None
         #     reasoning_output = [None] * len(current_batch)
 
-        # avoid errors when zipping
+        if reasoning_output is None:
+            reasoning_output = [None] * len(needed_batch)
         if logprobs is None or len(logprobs) == 0:
             logprobs = [None] * len(needed_batch)
 
         for num, index in enumerate(missing_indeces):
             output.insert(index, current_assistant_messages[num])
-        for survey_id, question, llm_response, logprob_answer, reasoning, item in zip(
-            current_batch.keys(),
-            questions,
-            output,
-            logprobs,
-            reasoning_output,
-            needed_batch,
-        ):
-            question_llm_response[survey_id].update(
-                {
-                    item._questions[i].item_id: QuestionLLMResponseTuple(
-                        question, llm_response, logprob_answer, reasoning
-                    )
-                }
-            )
+        _store_question_responses(
+            question_llm_response_pairs=question_llm_response,
+            survey_ids=current_batch.keys(),
+            questions=questions,
+            answers=output,
+            logprobs=logprobs,
+            reasoning_output=reasoning_output,
+            item_ids=[item.get_question_item_id(i) for item in needed_batch],
+        )
 
         for o, _ in enumerate(output):
             assistant_messages[o].append(output[o])
@@ -652,10 +728,7 @@ def conduct_survey_sequential(
             llm_prompts, n_save_step, intermediate_save_file, question_llm_response, i
         )
 
-    for i, survey in enumerate(llm_prompts):
-        survey_results.append(InferenceResult(survey, question_llm_response[i]))
-
-    return survey_results
+    return _finalize_survey_results(llm_prompts, question_llm_response)
 
 
 class SurveyCreator:

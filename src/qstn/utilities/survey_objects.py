@@ -276,8 +276,12 @@ class InferenceResult:
         parts = []
 
         for i, (_, question_llm_response_tuple) in enumerate(self.results.items()):
+            if hasattr(self.questionnaire, "get_question"):
+                question_obj = self.questionnaire.get_question(i)
+            else:
+                question_obj = self.questionnaire._questions[i]
             parts.append(
-                self.questionnaire.generate_question_prompt(self.questionnaire._questions[i])
+                self.questionnaire.generate_question_prompt(question_obj)
             )
             parts.append(question_llm_response_tuple.llm_response)
 

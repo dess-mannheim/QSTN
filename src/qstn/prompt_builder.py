@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Union, overload, Self, Tuple, Literal
+from typing import List, Dict, Optional, Union, overload, Self, Tuple, Literal, Any
 from string import ascii_lowercase, ascii_uppercase
 
 from dataclasses import replace
@@ -55,7 +55,8 @@ class LLMPrompt:
     ):
         """
         Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe can be provided to structure the questionnaire.
-        Question structure can later be modified with the magic `__setitem__`, `__getitem__` and `__delitem__` methods. New questions can be inserted with `insert_questions`.
+        Question structure can later be modified with explicit methods such as
+        `insert_questions`, `replace_question`, and `remove_question`.
 
         Args:
             questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the questionnaire structure and questions.
@@ -235,14 +236,35 @@ class LLMPrompt:
     #         else len(total_tokens) * 3
     #     )
 
-    def get_questions(self) -> List[QuestionnaireItem]:
+    def get_questions(self) -> Tuple[QuestionnaireItem, ...]:
         """
-        Get the list of loaded interview questions.
+        Get an immutable snapshot of loaded interview questions.
 
         Returns:
-            List[QuestionnaireItem]: The loaded questions.
+            Tuple[QuestionnaireItem, ...]: Loaded questions.
         """
-        return self._questions
+        return tuple(self._questions)
+
+    @property
+    def questions(self) -> Tuple[QuestionnaireItem, ...]:
+        """Read-only view of questionnaire items."""
+        return tuple(self._questions)
+
+    def get_question(self, position: int) -> QuestionnaireItem:
+        """Return a question by positional index."""
+        return self._questions[position]
+
+    def replace_question(self, position: int, questionnaire_item: QuestionnaireItem) -> None:
+        """Replace the question at a given index."""
+        self._questions[position] = questionnaire_item
+
+    def remove_question(self, position: int) -> None:
+        """Remove the question at a given index."""
+        del self._questions[position]
+
+    def get_question_item_id(self, position: int) -> Any:
+        """Return the questionnaire item id at a given index."""
+        return self._questions[position].item_id
 
     def load_questionnaire_format(
         self, questionnaire_source: Union[str, pd.DataFrame]
@@ -473,31 +495,6 @@ class LLMPrompt:
             int: The number of questions.
         """
         return len(self._questions)
-
-    def __getitem__(
-        self, position: Union[int, slice]
-    ) -> Union[QuestionnaireItem, List[QuestionnaireItem]]:
-        """
-        Returns the item(s) at the specifed int/slice.
-
-        Returns:
-            Union(QuestionnaireItem, List(QuestionnaireItem)): The QuestionnaireItem at that position.
-        """
-        return self._questions[position]
-
-    def __delitem__(self, position: int) -> None:
-        """
-        Removes the question at that position.
-
-        """
-        del self._questions[position]
-
-    def __setitem__(self, position: int, questionnaireItem: QuestionnaireItem) -> None:
-        """
-        Replaces the QuestionnaireItem at the specified position.
-
-        """
-        self._questions[position] = questionnaireItem
 
     def __str__(self) -> str:
         """

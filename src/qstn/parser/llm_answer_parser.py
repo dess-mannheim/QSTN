@@ -134,8 +134,9 @@ def parse_json_battery(
         grouped_items = {}
 
         for col_name, cell_value in source_row.items():
-            for i in range(len(survey._questions)):
-                current_question = survey._questions[i]
+            survey_questions = survey.get_questions()
+            for i in range(len(survey_questions)):
+                current_question = survey_questions[i]
                 current_id = current_question.item_id
                 if col_name.endswith(f"_{current_question.question_content}"):
                     new_col_name = col_name.removesuffix(
