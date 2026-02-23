@@ -44,6 +44,8 @@ def _print_conversation(
     response_generation_method: List[ResponseGenerationMethod],
     number_of_printed_conversations: int = 2,
 ):
+    methods = response_generation_method or []
+
     if reasoning_output is None:
         reasonings = [None] * len(system_messages)
     else:
@@ -90,8 +92,8 @@ def _print_conversation(
             if reasoning:
                 round_print += "\n-- Reasoning --\n" + str(reasoning)
 
-            if i < len(response_generation_method):
-                current_method = response_generation_method[i]
+            if i < len(methods):
+                current_method = methods[i]
                 if isinstance(current_method, LogprobResponseGenerationMethod):
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
             tqdm.write(round_print)
@@ -106,8 +108,8 @@ def _print_conversation(
             if reasoning:
                 round_print += "\n-- Reasoning --\n" + str(reasoning)
 
-            if i < len(response_generation_method):
-                current_method = response_generation_method[i]
+            if i < len(methods):
+                current_method = methods[i]
                 if isinstance(current_method, LogprobResponseGenerationMethod):
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
             tqdm.write(round_print)

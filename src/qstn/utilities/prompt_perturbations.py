@@ -1,5 +1,6 @@
 import random
 import string
+import re
 
 from qstn.inference.survey_inference import *
 
@@ -200,6 +201,7 @@ def apply_safe_perturbation(prompts: list, perturbation_func, **kwargs):
         
         if perturbation_func in [make_synonyms, make_paraphrase]:
             print("Using batch perturbation function:", perturbation_func)
+            final_prompts = prompts
             if perturbation_func == make_synonyms:
                 final_prompts = make_synonyms(
                     all_prompts=prompts,

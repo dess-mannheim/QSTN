@@ -360,9 +360,11 @@ def parse_logprobs(
     # if each choice only maps to one token
     if isinstance(allowed_choices, list):
         allowed_choices = {c: [c] for c in allowed_choices}
+    answer_format = list(allowed_choices.keys())
 
     for survey_result in survey_results:
         answers = []
+        missing_logprobs = False
         for item_id, qa_tuple in survey_result.results.items():
             if qa_tuple.logprobs is None:
                 warnings.warn(
@@ -370,23 +372,30 @@ def parse_logprobs(
                     + "Make sure to use Logprob_AnswerProductionMethod to generate logprobs.",
                     stacklevel=2,
                 )
-                answer_format = ["error_col"]
-                answers.append((item_id, qa_tuple.question, "ERROR: Parsing"))
+                missing_logprobs = True
+                answers.append((item_id, qa_tuple.question, *([np.nan] * len(answer_format))))
             else:
                 filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, allowed_choices)
-                answer_format = filtered_logprobs.keys()
                 answers.append(
-                    (item_id, qa_tuple.question, *filtered_logprobs.values())
+                    (
+                        item_id,
+                        qa_tuple.question,
+                        *[filtered_logprobs.get(choice, np.nan) for choice in answer_format],
+                    )
                 )
 
-            df = pd.DataFrame(
-                answers,
-                columns=[
-                    constants.QUESTIONNAIRE_ITEM_ID,
-                    constants.QUESTION,
-                    *answer_format,
-                ],
-            )
-            final_result[survey_result.questionnaire] = df
+        df = pd.DataFrame(
+            answers,
+            columns=[
+                constants.QUESTIONNAIRE_ITEM_ID,
+                constants.QUESTION,
+                *answer_format,
+            ],
+        )
+        if missing_logprobs:
+            missing_mask = df[answer_format].isna().all(axis=1)
+            df["error_col"] = ["MISSING_LOGPROBS" if is_missing else None for is_missing in missing_mask]
+
+        final_result[survey_result.questionnaire] = df
 
     return final_result

@@ -410,8 +410,10 @@ def _get_logprobs(
     if isinstance(response_generation_method, LogprobResponseGenerationMethod):
         rgms.append(response_generation_method)
     elif isinstance(response_generation_method, list):
-        rgms: List[LogprobResponseGenerationMethod] = [
-            rgm for rgm in response_generation_method
+        rgms = [
+            rgm
+            for rgm in response_generation_method
+            if isinstance(rgm, LogprobResponseGenerationMethod)
         ]
     for rgm in rgms:
         if rgm.ignore_reasoning:
