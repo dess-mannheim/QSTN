@@ -7,7 +7,6 @@ These tests exercise cross-module behavior that is easy to regress:
 - high-level survey inference delegation.
 """
 
-import pytest
 import asyncio
 from types import SimpleNamespace
 

@@ -1,6 +1,5 @@
 """Unit tests for helper utilities in `qstn.inference.local_inference` and printing paths."""
 
-import pytest
 from types import SimpleNamespace
 
 from qstn.inference import local_inference, survey_inference

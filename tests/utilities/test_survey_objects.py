@@ -7,7 +7,6 @@ These tests cover:
 """
 
 import pytest
-import pandas as pd
 
 from qstn.utilities import survey_objects, constants
 from qstn.inference.response_generation import (

@@ -1,6 +1,5 @@
 """Smoke tests for constants and prompt template primitives."""
 
-import pytest
 from qstn.utilities import constants, prompt_templates, placeholder
 
 

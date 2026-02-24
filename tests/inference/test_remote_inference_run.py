@@ -1,7 +1,5 @@
 """Behavioral tests for OpenAI remote batch runner wrappers."""
 
-import pytest
-
 from qstn.inference import remote_inference
 
 

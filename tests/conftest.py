@@ -3,6 +3,7 @@
 # tests/conftest.py
 import sys
 import types
+from unittest.mock import AsyncMock, MagicMock
 
 # Keep test imports lightweight: allow `qstn` import paths without pulling full vLLM/torch stack.
 if "vllm" not in sys.modules:
@@ -43,15 +44,11 @@ if "vllm" not in sys.modules:
 
     sys.modules["vllm"] = vllm_stub
 
+import pandas as pd
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-
 from openai import AsyncOpenAI
 
-import pandas as pd
-
 import qstn
-from qstn.prompt_builder import LLMPrompt
 
 @pytest.fixture(scope="function")
 def mock_questionnaires():

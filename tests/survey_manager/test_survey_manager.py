@@ -6,7 +6,6 @@ This module validates:
 - intermediate-save path validation behavior.
 """
 
-import pandas as pd
 import pytest
 from typing import List
 

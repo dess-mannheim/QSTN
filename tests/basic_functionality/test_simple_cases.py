@@ -4,15 +4,10 @@ These tests validate that single-item, sequential, and battery survey flows
 produce expected dataframe outputs with mocked API responses.
 """
 
-import pytest
 import pandas as pd
-
-from unittest.mock import MagicMock, AsyncMock
 
 from qstn.utilities.survey_objects import QuestionnaireItem
 import qstn
-
-from openai import AsyncOpenAI
 
 def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client):
     # --- SETUP ---

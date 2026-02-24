@@ -1,7 +1,7 @@
 """Unit tests for remote inference helper functions and threading wrapper behavior."""
 
-import pytest
 import asyncio
+import pytest
 
 from qstn.inference import remote_inference
 from qstn.inference.response_generation import (
