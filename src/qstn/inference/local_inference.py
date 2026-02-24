@@ -1,27 +1,20 @@
-from vllm import LLM, SamplingParams
-from vllm.sampling_params import StructuredOutputsParams
-from vllm.outputs import RequestOutput
-
-from typing import List, Optional, Union, Dict, Any, Tuple
-
-from .response_generation import ResponseGenerationMethod
-from .reasoning_parser import parse_reasoning
-
-from ..utilities.utils import generate_seeds, _make_cache_key
-
-from .dynamic_pydantic import _generate_pydantic_model
-from .response_generation import (
-    ResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
-    LogprobResponseGenerationMethod,
-)
-
 import random
-import torch
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import json
-import re
+import torch
+from vllm import LLM, SamplingParams
+from vllm.outputs import RequestOutput
+from vllm.sampling_params import StructuredOutputsParams
+
+from ..utilities.utils import _make_cache_key, generate_seeds
+from .dynamic_pydantic import _generate_pydantic_model
+from .reasoning_parser import parse_reasoning
+from .response_generation import (
+    ChoiceResponseGenerationMethod,
+    JSONResponseGenerationMethod,
+    LogprobResponseGenerationMethod,
+    ResponseGenerationMethod,
+)
 
 
 def _run_vllm_chat_pipeline(

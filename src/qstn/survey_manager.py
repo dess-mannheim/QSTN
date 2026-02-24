@@ -49,8 +49,6 @@ Usage example:
     )
 """
 
-import warnings
-
 from typing import (
     List,
     Dict,
@@ -62,7 +60,6 @@ from typing import (
 
 from pathlib import Path
 import os
-from dataclasses import dataclass
 
 import pandas as pd
 

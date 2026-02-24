@@ -8,8 +8,6 @@ from .utilities import constants, placeholder, prompt_templates
 from .utilities.constants import QuestionnairePresentation
 from .utilities.utils import safe_format_with_regex
 
-from .utilities.prompt_perturbations import *
-
 from .inference.response_generation import ResponseGenerationMethod
 
 import pandas as pd

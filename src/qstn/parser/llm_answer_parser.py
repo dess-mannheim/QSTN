@@ -1,24 +1,14 @@
-from typing import List, Dict, Optional
-
-from ..prompt_builder import LLMPrompt
-from ..utilities.survey_objects import InferenceResult
-
-from ..inference.survey_inference import batch_generation, ResponseGenerationMethod
-
-from ..utilities import constants
-
-#from vllm import LLM
-
-import pandas as pd
-import numpy as np
-
 import json
+import warnings
+from typing import Dict, List
 
 import json_repair
+import numpy as np
+import pandas as pd
 
-
-from collections import defaultdict
-import warnings
+from ..prompt_builder import LLMPrompt
+from ..utilities import constants
+from ..utilities.survey_objects import InferenceResult
 
 
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."

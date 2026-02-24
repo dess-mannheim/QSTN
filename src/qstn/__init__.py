@@ -1,6 +1,4 @@
+"""Public exports for main modules"""
 from . import prompt_builder, survey_manager
 
-# TODO: discuss whether we want all functions available on the top level
-#from .inference import *
-#from .parser import *
-#from .utilities import *
+__all__ = ["prompt_builder", "survey_manager"]
