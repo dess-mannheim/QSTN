@@ -34,7 +34,9 @@ dev = [
     "black",
     "ruff",
     "mypy",
-    "pre-commit"
+    "pre-commit",
+    "pytest",
+    "pytest-cov"
 ]
 
 [project.urls]
