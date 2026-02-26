@@ -166,7 +166,7 @@ with col_prompt_display:
                 
                 current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(
                     selected_questionnaire_type, 
-                    item_id=i
+                    item_position=i
                 )
                 current_system_prompt = current_system_prompt.replace("\n", "  \n")
                 current_prompt = current_prompt.replace("\n", "  \n")
