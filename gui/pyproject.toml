@@ -9,6 +9,6 @@ name = "QSTNGui"
 version = "0.0.1"
 
 dependencies = [
-    streamlit,
-    qstn
+    "streamlit",
+    "qstn"
 ]
