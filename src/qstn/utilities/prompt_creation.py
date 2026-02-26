@@ -1,18 +1,14 @@
-from typing import Optional, Dict, Any, Final, List
-from enum import Enum
 import random
+from enum import Enum
+from typing import Any, Final
 
 from . import prompt_templates
 
-JSON_START_STRING: Final[
-    str
-] = """```json
+JSON_START_STRING: Final[str] = """```json
 {
 """
 
-JSON_END_STRING: Final[
-    str
-] = """
+JSON_END_STRING: Final[str] = """
 }
 ```"""
 
@@ -23,7 +19,7 @@ COT_STRING: Final[str] = "Think step by step."
 
 class PersonaCall(Enum):
     YOU = "You are"
-    I = "I am"
+    I_AM = "I am"
     ACT = "Act as"
     FREETEXT = ""
 
@@ -31,23 +27,21 @@ class PersonaCall(Enum):
 class Persona:
     def __init__(
         self,
-        name: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        attributes: dict[str, Any] | None = None,
+        description: str | None = None,
         persona_call: PersonaCall = PersonaCall.YOU,
-        persona_call_freetext: Optional[str] = None,
+        persona_call_freetext: str | None = None,
     ):
         self.name = name
         self.attributes = attributes or {}
         self.description = description or ""
-        self.persona_call_text = self.set_persona_call(
-            persona_call, persona_call_freetext
-        )
+        self.persona_call_text = self.set_persona_call(persona_call, persona_call_freetext)
 
     def set_persona_call(
         self,
         persona_call: PersonaCall = PersonaCall.YOU,
-        persona_call_freetext: Optional[str] = None,
+        persona_call_freetext: str | None = None,
     ) -> None:
         persona_str = ""
         if persona_call:
@@ -71,7 +65,10 @@ class Persona:
 
     # def __str__(self) -> str:
     #     attr_str = ", ".join(f"{k}: {v}" for k, v in self.attributes.items())
-    #     return f"Persona(Name: {self.name}, Attributes: {attr_str}, Description: {self.description})"
+    #     return (
+    #         f"Persona(Name: {self.name}, Attributes: {attr_str}, "
+    #         f"Description: {self.description})"
+    #     )
 
 
 class OutputForm:
@@ -84,7 +81,7 @@ class OutputForm:
 
     def single_answer(
         self,
-        forced_options: List[str],
+        forced_options: list[str],
         start_string: str = FORCED_OPTION_STRING,
         randomize: bool = False,
     ) -> None:
@@ -97,9 +94,9 @@ class OutputForm:
 
     def json(
         self,
-        json_attributes: List[str],
-        json_explanation: Optional[List[str]],
-        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
+        json_attributes: list[str],
+        json_explanation: list[str] | None,
+        json_instructions: str | None = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
         end_string: str = JSON_END_STRING,
         randomize: bool = False,
@@ -116,9 +113,7 @@ class OutputForm:
                 random.shuffle(combined)
 
                 json_attributes, json_explanation = zip(*combined)
-                json_attributes, json_explanation = list(json_attributes), list(
-                    json_explanation
-                )
+                json_attributes, json_explanation = list(json_attributes), list(json_explanation)
             else:
                 random.shuffle(json_attributes)
 
@@ -148,22 +143,20 @@ class OutputForm:
 
 class PromptCreation:
     def __init__(self):
-        self._persona: Optional[Persona] = None
-        self._task_instruction: Optional[str] = None
-        self._output_form: Optional[OutputForm] = None
+        self._persona: Persona | None = None
+        self._task_instruction: str | None = None
+        self._output_form: OutputForm | None = None
 
     def create_persona(
         self,
-        name: Optional[str] = None,
-        attributes: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        attributes: dict[str, Any] | None = None,
+        description: str | None = None,
         persona_call: PersonaCall = PersonaCall.YOU,
-        persona_call_freetext: Optional[str] = None,
+        persona_call_freetext: str | None = None,
     ) -> Persona:
         """Creates a persona with a name, attributes, and an optional description."""
-        self._persona = Persona(
-            name, attributes, description, persona_call, persona_call_freetext
-        )
+        self._persona = Persona(name, attributes, description, persona_call, persona_call_freetext)
         return self._persona
 
     def set_task_instruction(self, instruction: str) -> None:
@@ -172,7 +165,7 @@ class PromptCreation:
 
     def set_output_format_closed_answer(
         self,
-        forced_options: Optional[List[str]],
+        forced_options: list[str] | None,
         start_string: str = FORCED_OPTION_STRING,
         randomize: bool = False,
     ) -> None:
@@ -182,9 +175,9 @@ class PromptCreation:
 
     def set_output_format_json(
         self,
-        json_attributes: List[str],
-        json_explanation: Optional[List[str]] = None,
-        json_instructions: Optional[str] = prompt_templates.SYSTEM_JSON_DEFAULT,
+        json_attributes: list[str],
+        json_explanation: list[str] | None = None,
+        json_instructions: str | None = prompt_templates.SYSTEM_JSON_DEFAULT,
         start_string: str = JSON_START_STRING,
         end_string: str = JSON_END_STRING,
         randomize: bool = False,

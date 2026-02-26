@@ -1,43 +1,39 @@
-
 import asyncio
 import threading
-from typing import Tuple, List, Optional, Union, Any, Dict
+from typing import Any
 
-from tqdm.asyncio import tqdm_asyncio
 from openai import AsyncOpenAI
+from tqdm.asyncio import tqdm_asyncio
 
-from .response_generation import (
-    ResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
-    LogprobResponseGenerationMethod,
-)
-
-from ..utilities.utils import generate_seeds, _make_cache_key
-
+from ..utilities.utils import _make_cache_key, generate_seeds
 from .dynamic_pydantic import _generate_pydantic_model
-
 from .reasoning_parser import parse_reasoning
+from .response_generation import (
+    ChoiceResponseGenerationMethod,
+    JSONResponseGenerationMethod,
+    LogprobResponseGenerationMethod,
+    ResponseGenerationMethod,
+)
 
 
 def run_openai_batch(
     model: AsyncOpenAI,
-    system_messages: List[str] = ("You are a helpful assistant.",),
-    prompts: List[str] = ("Hi there! What is your name?",),
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    system_messages: list[str] = ("You are a helpful assistant.",),
+    prompts: list[str] = ("Hi there! What is your name?",),
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
-    client_model_name: Optional[str] = None,
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     print_progress: bool = True,
     **generation_kwargs: Any,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str]]:
 
     # Prepare batch of messages
-    batch_messages: List[List[Dict[str, str]]] = [
+    batch_messages: list[list[dict[str, str]]] = [
         [
             {"role": "system", "content": system_message},
             {"role": "user", "content": prompt},
@@ -67,20 +63,20 @@ def run_openai_batch(
 
 def run_openai_batch_conversation(
     model: AsyncOpenAI,
-    system_messages: List[str] = ("You are a helpful assistant.",),
-    prompts: List[str] = ("Hi there! What is your name?",),
-    assistant_messages: List[List[str]] = None,
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    system_messages: list[str] = ("You are a helpful assistant.",),
+    prompts: list[str] = ("Hi there! What is your name?",),
+    assistant_messages: list[list[str]] = None,
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
-    client_model_name: Optional[str] = None,
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     print_progress: bool = True,
     **generation_kwargs: Any,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str]]:
 
     batch_messages = []
     batch_size = len(system_messages)
@@ -97,9 +93,7 @@ def run_openai_batch_conversation(
         for j in range(num_user_msgs):
             messages.append({"role": "user", "content": prompts[i][j]})
             if j < num_assistant_msgs:
-                messages.append(
-                    {"role": "assistant", "content": assistant_messages[i][j]}
-                )
+                messages.append({"role": "assistant", "content": assistant_messages[i][j]})
 
         batch_messages.append(messages)
 
@@ -124,22 +118,20 @@ def run_openai_batch_conversation(
 def _run_async_in_thread(
     client: AsyncOpenAI,
     client_model_name: str,
-    batch_messages: List[List[Dict[str, str]]],
-    seeds: List[int],
+    batch_messages: list[list[dict[str, str]]],
+    seeds: list[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     **generation_kwargs,
 ):
     result_container = {}
 
-    logprob_config = _update_logprob_kwargs(
-        response_generation_method, generation_kwargs
-    )
+    logprob_config = _update_logprob_kwargs(response_generation_method, generation_kwargs)
 
     sampling_params = _create_structured_output(
         batch_size=len(batch_messages),
@@ -181,26 +173,26 @@ def _run_async_in_thread(
 async def _run_api_batch_async(
     client: AsyncOpenAI,
     client_model_name: str,
-    batch_messages: List[List[Dict[str, str]]],
-    seeds: List[int],
+    batch_messages: list[list[dict[str, str]]],
+    seeds: list[int],
     concurrency_limit: int = 10,
     print_progress: bool = True,
-    sampling_params: List[Dict[str, Any]] = (),
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
-    logprob_config: Optional[LogprobResponseGenerationMethod] = None,
+    sampling_params: list[dict[str, Any]] = (),
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
+    logprob_config: LogprobResponseGenerationMethod | None = None,
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     **generation_kwargs,
-) -> List[str]:
+) -> list[str]:
     semaphore = asyncio.Semaphore(concurrency_limit)
 
     async def get_completion(
         messages: list,
         seed: int,
-        sampling_params: Optional[Union[Dict[str, Any], List[str]]] = None,
-        response_generation_method: Optional[ResponseGenerationMethod] = None,
+        sampling_params: dict[str, Any] | list[str] | None = None,
+        response_generation_method: ResponseGenerationMethod | None = None,
         **generation_kwargs,
     ):
         async with semaphore:
@@ -221,14 +213,14 @@ async def _run_api_batch_async(
                         },
                     }
 
-                elif isinstance(
-                    response_generation_method, ChoiceResponseGenerationMethod
-                ):
+                elif isinstance(response_generation_method, ChoiceResponseGenerationMethod):
                     import warnings
-                    warnings.warn("Strict Choice Response Generation is only supported for vllm APIs.")
-                    if (
-                        True
-                    ):  # We could use this if we can ensure that the api is vllm.
+
+                    warnings.warn(
+                        "Strict Choice Response Generation is only supported for " "vllm APIs.",
+                        stacklevel=2,
+                    )
+                    if True:  # We could use this if we can ensure that the api is vllm.
                         request_kwargs["extra_body"] = {
                             "structured_outputs": {"choice": sampling_params}
                         }
@@ -274,9 +266,7 @@ async def _run_api_batch_async(
     if print_progress:
         responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Processing Prompts")
     else:
-        responses = await asyncio.gather(
-            *tasks, return_exceptions=True
-        )
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
     final_results = []
     reasoning_output = []
@@ -294,15 +284,11 @@ async def _run_api_batch_async(
             msg = response.choices[0].message
 
             # Automatic reasoning parsing
-            reasoning = getattr(msg, "reasoning", None) or getattr(
-                msg, "reasoning_content", None
-            )
+            reasoning = getattr(msg, "reasoning", None) or getattr(msg, "reasoning_content", None)
 
             if reasoning is None:
                 # Fallback to parsing manually
-                final_answer, extracted_reasoning = parse_reasoning(
-                    msg.content, patterns=patterns
-                )
+                final_answer, extracted_reasoning = parse_reasoning(msg.content, patterns=patterns)
                 final_results.append(final_answer)
                 if extracted_reasoning:
                     reasoning_output.append(extracted_reasoning.strip())
@@ -314,10 +300,7 @@ async def _run_api_batch_async(
             if logprob_config and response.choices[0].logprobs:
                 logprob_result.append(
                     [
-                        [
-                            {"token": top.token, "logprob": top.logprob}
-                            for top in lp.top_logprobs
-                        ]
+                        [{"token": top.token, "logprob": top.logprob} for top in lp.top_logprobs]
                         for lp in response.choices[0].logprobs.content
                     ]
                 )
@@ -352,10 +335,8 @@ def _update_logprob_kwargs(response_generation_method, generation_kwargs):
 
 def _create_structured_output(
     batch_size: int,
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ],
-) -> Dict[str, Any]:
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
+) -> dict[str, Any]:
     """
     Create sampling parameters for generation.
 
@@ -385,10 +366,8 @@ def _create_structured_output(
 
 def _create_structured_params(
     batch_size: int,
-    response_generation_method: Union[
-        ResponseGenerationMethod, List[ResponseGenerationMethod]
-    ],
-) -> List[Dict[str, Any]]:
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod],
+) -> list[dict[str, Any]]:
 
     structured_output = []
 
@@ -408,15 +387,13 @@ def _create_structured_params(
             )
             and response_generation_method.allowed_choices is not None
         ):
-            _allowed_choices = [
-                str(c) for c in response_generation_method.allowed_choices
-            ]
+            _allowed_choices = [str(c) for c in response_generation_method.allowed_choices]
             structured_output = [_allowed_choices] * batch_size
 
     # Different response generation methods for each question
     else:
         structured_output = []
-        cache: Dict[str, Any] = {}
+        cache: dict[str, Any] = {}
         for i in range(batch_size):
             current_method = response_generation_method[i]
             if isinstance(current_method, JSONResponseGenerationMethod):
@@ -426,9 +403,7 @@ def _create_structured_params(
                 key = _make_cache_key(fields, cons)
 
                 if key not in cache:
-                    pydantic_model = _generate_pydantic_model(
-                        fields=fields, constraints=cons
-                    )
+                    pydantic_model = _generate_pydantic_model(fields=fields, constraints=cons)
                     json_schema = pydantic_model.model_json_schema()
                     cache[key] = json_schema
 

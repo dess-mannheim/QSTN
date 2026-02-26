@@ -25,8 +25,14 @@ Usage example:
     party_questionnaire = pd.DataFrame(questionnaire)
 
 
-    system_prompt = "Act as if you were a black middle aged man from New York! Answer in a single short sentence!"
-    prompt = "Please tell us how you feel about the following parties: " + placeholder.PROMPT_QUESTIONS
+    system_prompt = (
+        "Act as if you were a black middle aged man from New York! "
+        "Answer in a single short sentence!"
+    )
+    prompt = (
+        "Please tell us how you feel about the following parties: "
+        + placeholder.PROMPT_QUESTIONS
+    )
 
     questionnaire = LLMPrompt(
         questionnaire_name="political_parties",
@@ -53,6 +59,7 @@ import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Union,
 )
@@ -73,6 +80,9 @@ from .utilities.survey_objects import (
     InferenceResult,
     QuestionLLMResponseTuple,
 )
+
+if TYPE_CHECKING:
+    from vllm import LLM
 
 # @dataclass
 # class GenerationFailure:
@@ -343,7 +353,8 @@ def conduct_survey_single_item(
             vllm.SamplingParams, or client.chat.completions.create().
 
     Returns:
-        List(InferenceResult): A list of results containing the survey data and LLM responses for each provided prompt.
+        List(InferenceResult): A list of results containing the survey data and
+            LLM responses for each provided prompt.
     """
 
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
@@ -379,7 +390,8 @@ def conduct_survey_single_item(
         )
         # except Exception as e:
         #     warnings.warn(
-        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #         "Questions at position {i} could not be processed, because "
+        #         "an error occured: {e}. Output is set to None"
         #     )
         #     output = [None] * len(current_batch)
         #     logprobs = None
@@ -487,19 +499,24 @@ def conduct_survey_battery(
 
     Args:
         model (LLM or AsyncOpenAI): vllm.LLM instance or AsyncOpenAI client.
-        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
+        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list
+            of LLMPrompt objects to conduct as a survey.
         client_model_name (str, optional): Name of model when using OpenAI client.
         api_concurrency (int): Number of concurrent API requests. Defaults to 10.
         print_conversation (bool): If True, prints all conversations to stdout. Default False.
         print_progress (bool): If True, shows a tqdm progress bar. Default True.
         n_save_step (int, optional): Save intermediate results every n steps.
-        intermediate_save_file (str, optional): Path to save intermediate results. Has to be provided if n_save_step.
+        intermediate_save_file (str, optional): Path to save intermediate
+            results. Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
         item_separator (str): The str that separates each question. Defaults to a newline.
-        generation_kwargs: Additional generation parameters that will be given to vllm.chat(), vllm.SamplingParams, or client.chat.completions.create().
+        generation_kwargs: Additional generation parameters that will be given
+            to vllm.chat(), vllm.SamplingParams, or
+            client.chat.completions.create().
 
     Returns:
-        List(InferenceResult): A list of results containing the survey data and LLM responses for each provided prompt.
+        List(InferenceResult): A list of results containing the survey data and
+            LLM responses for each provided prompt.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
 
@@ -535,7 +552,8 @@ def conduct_survey_battery(
         )
         # except Exception as e:
         #     warnings.warn(
-        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #         "Questions at position {i} could not be processed, because "
+        #         "an error occured: {e}. Output is set to None"
         #     )
         #     output = [None] * len(current_batch)
         #     logprobs = None
@@ -575,24 +593,31 @@ def conduct_survey_sequential(
     **generation_kwargs: Any,
 ) -> list[InferenceResult]:
     """
-    Conducts the survey in multiple chat calls, where all questions and answers are kept in context (sequential presentation).
+    Conducts the survey in multiple chat calls, where all questions and answers
+    are kept in context (sequential presentation).
 
-    System Prompt -> User Prompt with first question -> LLM Answer to first question -> User Prompt with second question -> ....
+    System Prompt -> User Prompt with first question -> LLM Answer to first
+    question -> User Prompt with second question -> ....
 
     Args:
         model (LLM or AsyncOpenAI): vllm.LLM instance or AsyncOpenAI client.
-        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list of LLMPrompt objects to conduct as a survey.
+        llm_prompts (LLMPrompt or List(LLMPrompt)): Single LLMPrompt or list
+            of LLMPrompt objects to conduct as a survey.
         client_model_name (str, optional): Name of model when using OpenAI client.
         api_concurrency (int): Number of concurrent API requests. Defaults to 10.
         print_conversation (bool): If True, prints all conversations to stdout. Default False.
         print_progress (bool): If True, shows a tqdm progress bar. Default True.
         n_save_step (int, optional): Save intermediate results every n steps.
-        intermediate_save_file (str, optional): Path to save intermediate results. Has to be provided if n_save_step.
+        intermediate_save_file (str, optional): Path to save intermediate
+            results. Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
-        generation_kwargs: Additional generation parameters that will be given to vllm.chat(), vllm.SamplingParams, or client.chat.completions.create().
+        generation_kwargs: Additional generation parameters that will be given
+            to vllm.chat(), vllm.SamplingParams, or
+            client.chat.completions.create().
 
     Returns:
-        List(InferenceResult): A list of results containing the survey data and LLM responses for each provided prompt.
+        List(InferenceResult): A list of results containing the survey data and
+            LLM responses for each provided prompt.
     """
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
     llm_prompts = _normalize_llm_prompts(llm_prompts)
@@ -604,7 +629,7 @@ def conduct_survey_sequential(
     all_prompts: list[list[str]] = []
     assistant_messages: list[list[str]] = []
 
-    for i in range(len(llm_prompts)):
+    for _ in llm_prompts:
         assistant_messages.append([])
         all_prompts.append([])
 
@@ -669,7 +694,8 @@ def conduct_survey_sequential(
         )
         # except Exception as e:
         #     warnings.warn(
-        #         f"Questions at position {i} could not be processed, because an error occured: {e}. Output is set to None"
+        #         "Questions at position {i} could not be processed, because "
+        #         "an error occured: {e}. Output is set to None"
         #     )
         #     output = [None] * len(current_batch)
         #     logprobs = None
@@ -728,7 +754,9 @@ class SurveyCreator:
         Generates LLMPrompt objects from two pandas DataFrames.
 
         Args:
-            survey_dataframe (pandas.DataFrame): A DataFrame containing the survey data (questionnaire_name, system_prompt and questionnaire_instruction).
+            survey_dataframe (pandas.DataFrame): A DataFrame containing survey
+                data (questionnaire_name, system_prompt, and
+                questionnaire_instruction).
             questionnaire_dataframe (pandas.DataFrame): A DataFrame containing the questions.
 
         Returns:

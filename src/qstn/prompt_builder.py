@@ -20,14 +20,16 @@ class LLMPrompt:
     """
     Main class for setting up and managing the prompt in the LLM experiment.
 
-    This class handles loading questions from a predefined questionnaire, preparing prompts, managing answer options,
-    and generating prompt structures for different interview types.
+    This class handles loading questions
+        from a predefined questionnaire, preparing prompts, managing answer options,
+        and generating prompt structures for different interview types.
     """
 
     DEFAULT_QUESTIONNAIRE_ID: str = "Questionnaire"
 
     DEFAULT_SYSTEM_PROMPT: str = (
-        "You will be given questions and possible answer options for each. Please reason about each question before answering."
+        "You will be given questions and possible answer options for each. "
+        "Please reason about each question before answering."
     )
     DEFAULT_TASK_INSTRUCTION: str = ""
 
@@ -45,12 +47,14 @@ class LLMPrompt:
         seed: int = 42,
     ):
         """
-        Initialize an LLMPrompt instance. Either a path to a csv file or a pandas dataframe can be provided to structure the questionnaire.
+        Initialize an LLMPrompt instance. Either a path to a csv file
+            or a pandas dataframe can be provided to structure the questionnaire.
         Question structure can later be modified with explicit methods such as
         `insert_questions`, `replace_question`, and `remove_question`.
 
         Args:
-            questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the questionnaire structure and questions.
+            questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the
+                questionnaire structure and questions.
             questionnaire_name (str): Name/ID for the questionnaire.
             system_prompt (str): System prompt for all questions.
             prompt (str): Prompt for all questions.
@@ -87,7 +91,8 @@ class LLMPrompt:
                     "The provided Dataframe is empty! No questions are created.", stacklevel=2
                 )
                 return False
-            # Optional check if the correct columns are provided? Would probably be nice to have that warning here.
+            # Optional check if the correct columns are provided?
+            # Would probably be nice to have that warning here.
 
         return True
 
@@ -111,12 +116,19 @@ class LLMPrompt:
         Generate the full prompt for a given questionnaire presentation.
 
         Args:
-            quesitonnaire_type (QuestionnairePresentation): The type of questionnaire prompt to generate.
-            item_id (str): The id of the questionnaire_item that should be shown. If both item_id and item_position are provided, only item_id is considered.
-            item_position (int): The question at that position will be shown. If both item_id and item_position are provided, only item_id is considered. Defaults to the first question.
-            item_separator (str): For QuestionnairePresentation.BATTERY decides the str that seperates each question.
+            quesitonnaire_type (QuestionnairePresentation):
+                The type of questionnaire prompt to generate.
+            item_id (str):
+                The id of the questionnaire_item that should be shown.
+                If both item_id and item_position are provided, only item_id is considered.
+            item_position (int): The question at that position will be shown.
+                If both item_id and item_position are provided, only item_id is considered.
+                Defaults to the first question.
+            item_separator (str): For QuestionnairePresentation.BATTERY decides the str
+                that seperates each question.
         Returns:
-            Tuple(str, str): The first element corresponds to the system_prompt, the second element to the prompt.
+            Tuple(str, str): The first element corresponds to the system_prompt,
+                the second element to the prompt.
         """
         options = ""
         automatic_output_instructions = ""
@@ -201,7 +213,8 @@ class LLMPrompt:
 
     # Currently disallowed to allow lightweight import. This should be reenabled in the future.
     # def calculate_input_token_estimate(
-    #     self, model_id: str, questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM
+    #     self, model_id: str, questionnaire_type: QuestionnairePresentation =
+    # QuestionnairePresentation.SINGLE_ITEM
     # ) -> int:
     #     """
     #     Estimate the number of input tokens for the prompt, given a model and questionnaire type.
@@ -339,8 +352,10 @@ class LLMPrompt:
 
         Args:
             question_stem (str or List[str], optional): Single or list of question stems.
-            answer_options (AnswerOptions or Dict[int, AnswerOptions], optional): Answer options for all or per question.
-            prefilled_responses (Dict[int, str], optional): If you provide prefilled responses, they will be used
+            answer_options (AnswerOptions or Dict[int, AnswerOptions], optional):
+                Answer options for all or per question.
+            prefilled_responses (Dict[int, str], optional):
+                If you provide prefilled responses, they will be used
             to fill the answers instead of prompting the LLM for that question.
             randomized_item_order (bool): If True, randomize the order of questions.
         Returns:
@@ -352,7 +367,8 @@ class LLMPrompt:
         if prompt_list:
             assert len(question_stem) == len(
                 questionnaire_questions
-            ), "If a list of question stems is given, length of prompt and survey questions have to be the same"
+            ), "If a list of question stems is given, length of prompt "
+            "       and survey questions have to be the same"
 
         options_dict = False
 
@@ -372,7 +388,7 @@ class LLMPrompt:
 
         if not prompt_list and not options_dict:
             updated_questions = []
-            for i, question in enumerate(questionnaire_questions):
+            for question in questionnaire_questions:
                 new_questionnaire_question = replace(
                     question,
                     question_stem=(question_stem if question_stem else question.question_stem),
@@ -382,7 +398,7 @@ class LLMPrompt:
                 updated_questions.append(new_questionnaire_question)
 
         elif not prompt_list and options_dict:
-            for i, question in enumerate(questionnaire_questions):
+            for question in questionnaire_questions:
                 new_questionnaire_question = replace(
                     question,
                     question_stem=(question_stem if question_stem else question.question_stem),
@@ -434,7 +450,7 @@ class LLMPrompt:
                     questionnaire_items.question_stem, format_dict
                 )
             else:
-                question_prompt = f"""{questionnaire_items.question_stem} {questionnaire_items.question_content}"""
+                question_prompt = f"""{questionnaire_items.question_stem} {questionnaire_items.question_content}"""  # noqa: E501
         else:
             question_prompt = f"""{questionnaire_items.question_content}"""
 
@@ -479,7 +495,8 @@ class LLMPrompt:
         Args:
             items (Union[QuestionnaireItem, List[QuestionnaireItem]]): A single
                 QuestionnaireItem or a list of items to insert.
-            position (int): The index where the questions should be inserted. Default [None] adds them at the end.
+            position (int): The index where the questions should be inserted.
+                Default [None] adds them at the end.
         """
         if position is None:
             position = len(self._questions)
@@ -529,13 +546,17 @@ def generate_likert_options(
             Defaults to False.
         even_order (bool, optional): If True, options the center option will be removed.
             E.g., for n=5: 1, 2, 4, 5
-        add_middle_category (bool, optional): If True, a middle category will be added. The name can be specified,
+        add_middle_category (bool, optional): If True, a middle category will be added.
+            The name can be specified,
             by default it is "Neutral". E.g., for n=4: 1, 2, 3: Neutral, 4, 5
-        str_middle_cat (str, optional): The label for the middle category if `add_middle_category` is True.
+        str_middle_cat (str, optional): The label for the middle category
+            if `add_middle_category` is True.
             Defaults to "Neutral".
-        add_refusal (bool, optional): If True, an additional option for "Don't know / Refuse to answer" will be added.
+        add_refusal (bool, optional): If True, an additional option for
+            "Don't know / Refuse to answer" will be added.
             Defaults to False.
-        refusal_code (str, optional): The code assigned to the refusal option if `add_refusal` is True.
+        refusal_code (str, optional): The code assigned to the refusal option
+            if `add_refusal` is True.
             Defaults to "-99".
         start_idx (int, optional): The starting index for the scale (usually 0 or 1).
             Defaults to 1.
@@ -570,17 +591,21 @@ def generate_likert_options(
     if only_from_to_scale:
         # if len(answer_texts) != 2:
         #     raise ValueError(
-        #         f"From-To scales require exactly 2 descriptions, but answer_texts was set to '{answer_texts}'."
+        #         "From-To scales require exactly 2 descriptions, but "
+        #         f"answer_texts was set to '{answer_texts}'."
         #     )
         if idx_type != "integer":
             raise ValueError(
-                f"From-To scales require an integer scale index, but idx_type was set to '{idx_type}'."
+                "From-To scales require an integer scale index, but "
+                f"idx_type was set to '{idx_type}'."
             )
     else:
         if answer_texts:
             if len(answer_texts) != n:
                 raise ValueError(
-                    f"answer_texts and n need to be the same length, but answer_texts has length {len(answer_texts)} and n was given as {n}."
+                    "answer_texts and n need to be the same length, but "
+                    f"answer_texts has length {len(answer_texts)} "
+                    f"and n was given as {n}."
                 )
     if even_order:
         if n % 2 == 0:

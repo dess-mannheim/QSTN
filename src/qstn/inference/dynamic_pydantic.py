@@ -1,16 +1,16 @@
-from typing import List, Dict, Union
 import warnings
-from pydantic import BaseModel, create_model
 from enum import Enum
 
+from pydantic import BaseModel, create_model
 
-def _create_enum(name: str, values: List[str | int]) -> Enum:
+
+def _create_enum(name: str, values: list[str | int]) -> Enum:
     """A helper to create an Enum class dynamically."""
     return Enum(name, {str(v).upper(): v for v in values})
 
 
 def _generate_pydantic_model(
-    fields: Union[List[str], Dict[str, str]], constraints: Dict[str, List[str]]
+    fields: list[str] | dict[str, str], constraints: dict[str, list[str]]
 ) -> BaseModel:
     """Dynamically creates a Pydantic model based on a list of fields and constraints.
 
@@ -43,19 +43,20 @@ def _generate_pydantic_model(
 
     model_fields = {}
     if constraints:
-        if isinstance(fields, Dict):
+        if isinstance(fields, dict):
             difference = set(constraints.keys()) - set(fields.keys())
         else:
             difference = set(constraints.keys()) - set(fields)
         if len(difference) > 0:
             warnings.warn(
                 f"Constraints specified for non-existing fields: {difference}. "
-                + "Constraints should be provided in the format {'a JSON field': ['option 1',...]}.",
+                + "Constraints should be provided in the format "
+                + "{'a JSON field': ['option 1',...]}.",
                 RuntimeWarning,
                 stacklevel=2,
             )
 
-    if isinstance(fields, Dict):
+    if isinstance(fields, dict):
         elements = fields.keys()
     else:
         elements = fields

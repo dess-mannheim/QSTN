@@ -1,22 +1,19 @@
-from typing import List, Optional, Dict, TYPE_CHECKING, NamedTuple, Union
-from ..utilities import constants, prompt_templates
-
-from ..inference.response_generation import (
-    ResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
-    LogprobResponseGenerationMethod,
-    JSONVerbalizedDistribution,
-)
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, NamedTuple
 
 import pandas as pd
 
-from dataclasses import dataclass
+from ..inference.response_generation import (
+    ChoiceResponseGenerationMethod,
+    JSONResponseGenerationMethod,
+    JSONVerbalizedDistribution,
+    LogprobResponseGenerationMethod,
+    ResponseGenerationMethod,
+)
+from ..utilities import constants, prompt_templates
 
 if TYPE_CHECKING:
     from ..prompt_builder import LLMPrompt
-
-
 
 
 @dataclass
@@ -42,17 +39,17 @@ class AnswerTexts:
             range of options. Defaults to False.
     """
 
-    full_answers: List[str]
-    answer_texts: Optional[List[str]] = None
-    indices: Optional[List[str]] = None
+    full_answers: list[str]
+    answer_texts: list[str] | None = None
+    indices: list[str] | None = None
     index_answer_seperator: str = ": "
     option_seperators: str = (", ",)
     only_scale: bool = (False,)
 
     def __init__(
         self,
-        answer_texts: List[str],
-        indices: Optional[List[str]] = None,
+        answer_texts: list[str],
+        indices: list[str] | None = None,
         index_answer_seperator: str = ": ",
         option_seperators: str = ", ",
         only_scale: bool = False,
@@ -99,14 +96,12 @@ class AnswerTexts:
                 f"{index}{self.index_answer_seperator}{answer_text}"
                 for answer_text, index in zip(self.answer_texts, self.indices)
             ]
-        elif self.answer_texts and self.indices == None:
+        elif self.answer_texts and self.indices is None:
             self.full_answers = [f"{answer_text}" for answer_text in self.answer_texts]
-        elif self.answer_texts == None and self.indices:
+        elif self.answer_texts is None and self.indices:
             self.full_answers = [f"{index}" for index in self.indices]
         else:
-            raise ValueError(
-                "Invalid Answer Text, because neither text nor indices were given."
-            )
+            raise ValueError("Invalid Answer Text, because neither text nor indices were given.")
 
     def get_list_answer_texts(self):
         """Returns the answer texts as a single string, joined by the option separators.
@@ -133,7 +128,8 @@ class AnswerOptions:
 
     Args:
         answer_texts (list): A list of possible answer strings.
-        index (list | None): Optionally, store answer option index separately, e.g., for structured outputs.
+        index (list | None): Optionally store answer option indices separately,
+            e.g., for structured outputs.
         from_to_scale (bool): If True, treat answer_text as a scale [start, ..., end].
         list_prompt_template (str): A format string for list-based options.
                                     Must contain an '{options}' placeholder.
@@ -145,7 +141,7 @@ class AnswerOptions:
     from_to_scale: bool = False
     list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT
     scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT
-    response_generation_method: Optional[ResponseGenerationMethod] = None
+    response_generation_method: ResponseGenerationMethod | None = None
 
     def __init__(
         self,
@@ -153,7 +149,7 @@ class AnswerOptions:
         from_to_scale: bool = False,
         list_prompt_template: str = prompt_templates.LIST_OPTIONS_DEFAULT,
         scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT,
-        response_generation_method: Optional[ResponseGenerationMethod] = None,
+        response_generation_method: ResponseGenerationMethod | None = None,
     ):
         self.answer_texts = answer_texts
         self.from_to_scale = from_to_scale
@@ -162,9 +158,7 @@ class AnswerOptions:
         self.response_generation_method = response_generation_method
 
         if self.response_generation_method:
-            if isinstance(
-                self.response_generation_method, JSONVerbalizedDistribution
-            ):
+            if isinstance(self.response_generation_method, JSONVerbalizedDistribution):
                 if self.response_generation_method.output_index_only:
                     self.response_generation_method.json_fields = {
                         _option: "probability" for _option in self.answer_texts.indices
@@ -174,16 +168,13 @@ class AnswerOptions:
                     }
                 else:
                     self.response_generation_method.json_fields = {
-                        _option: "probability"
-                        for _option in self.answer_texts.full_answers
+                        _option: "probability" for _option in self.answer_texts.full_answers
                     }
                     self.response_generation_method.constraints = {
                         _option: "float" for _option in self.answer_texts.full_answers
                     }
 
-            elif isinstance(
-                self.response_generation_method, JSONResponseGenerationMethod
-            ):
+            elif isinstance(self.response_generation_method, JSONResponseGenerationMethod):
                 fields = self.response_generation_method.json_fields
                 if isinstance(fields, dict):
                     for key in fields:
@@ -202,7 +193,7 @@ class AnswerOptions:
                                 for index in answer_texts.indices:
                                     try:
                                         number = int(index)
-                                    except:
+                                    except (TypeError, ValueError):
                                         number = index
                                     numbers.append(number)
                                 constraints[key] = numbers
@@ -211,21 +202,12 @@ class AnswerOptions:
 
             elif isinstance(
                 self.response_generation_method, ChoiceResponseGenerationMethod
-            ) or isinstance(
-                self.response_generation_method, LogprobResponseGenerationMethod
-            ):
-                if (
-                    self.response_generation_method.allowed_choices
-                    == constants.OPTIONS_ADJUST
-                ):
+            ) or isinstance(self.response_generation_method, LogprobResponseGenerationMethod):
+                if self.response_generation_method.allowed_choices == constants.OPTIONS_ADJUST:
                     if self.response_generation_method.output_index_only:
-                        self.response_generation_method.allowed_choices = (
-                            answer_texts.indices
-                        )
+                        self.response_generation_method.allowed_choices = answer_texts.indices
                     else:
-                        self.response_generation_method.allowed_choices = (
-                            answer_texts.full_answers
-                        )
+                        self.response_generation_method.allowed_choices = answer_texts.full_answers
 
     def create_options_str(self) -> str:
         if self.from_to_scale:
@@ -233,7 +215,8 @@ class AnswerOptions:
                 return None
             if len(self.answer_texts.answer_texts) < 2:
                 raise ValueError(
-                    f"From-To scale requires at least a start and end value, but answer_text was set to {self.answer_texts}."
+                    "From-To scale requires at least a start and end value, "
+                    f"but answer_text was set to {self.answer_texts}."
                 )
             start_option, end_option = self.answer_texts.get_scale_answer_texts()
             return self.scale_prompt_template.format(start=start_option, end=end_option)
@@ -250,8 +233,8 @@ class QuestionLLMResponseTuple(NamedTuple):
 
     question: str
     llm_response: str
-    logprobs: Optional[Dict[str, float]]
-    reasoning: Optional[str]
+    logprobs: dict[str, float] | None
+    reasoning: str | None
 
 
 @dataclass
@@ -261,7 +244,7 @@ class InferenceResult:
     """
 
     questionnaire: "LLMPrompt"
-    results: Dict[int, QuestionLLMResponseTuple]
+    results: dict[int, QuestionLLMResponseTuple]
 
     def to_dataframe(self) -> pd.DataFrame:
         answers = []
@@ -280,9 +263,7 @@ class InferenceResult:
                 question_obj = self.questionnaire.get_question(i)
             else:
                 question_obj = self.questionnaire._questions[i]
-            parts.append(
-                self.questionnaire.generate_question_prompt(question_obj)
-            )
+            parts.append(self.questionnaire.generate_question_prompt(question_obj))
             parts.append(question_llm_response_tuple.llm_response)
 
         return "\n".join(parts)
@@ -293,7 +274,7 @@ class QuestionnaireItem:
     """Represents a single questionnaire item."""
 
     item_id: str
-    question_content: Union[str,int]
-    question_stem: Optional[str] = None
-    answer_options: Optional[AnswerOptions] = None
-    prefilled_response: Optional[str] = None
+    question_content: str | int
+    question_stem: str | None = None
+    answer_options: AnswerOptions | None = None
+    prefilled_response: str | None = None

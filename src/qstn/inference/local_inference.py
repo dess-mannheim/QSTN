@@ -1,5 +1,6 @@
 import random
-from typing import Any, Dict, List, Optional, Tuple, Union
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 from vllm import LLM, SamplingParams
@@ -19,25 +20,21 @@ from .response_generation import (
 
 def _run_vllm_chat_pipeline(
     model: LLM,
-    batch_messages: List[List[Dict[str, str]]],
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ],
+    batch_messages: list[list[dict[str, str]]],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     seed: int,
     print_progress: bool,
     reasoning_start_token: str,
     reasoning_end_token: str,
     space_char: str,
     **generation_kwargs: Any,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     """Run the shared vLLM chat pipeline for single and conversation batching."""
     batch_size = len(batch_messages)
     seeds = generate_seeds(seed, batch_size=batch_size)
 
     logprob_result = None
-    logprob_config = _update_logprob_kwargs(
-        response_generation_method, generation_kwargs
-    )
+    logprob_config = _update_logprob_kwargs(response_generation_method, generation_kwargs)
 
     # If users specify use_tqdm themselves, we use that flag instead.
     print_progress = generation_kwargs.pop("use_tqdm", print_progress)
@@ -46,8 +43,10 @@ def _run_vllm_chat_pipeline(
         import warnings
 
         warnings.warn(
-            "Do not specify sampling_params for vllm inference. If you want to use hyperparameters, "
-            "add them directly to the generation kwargs. Given argument sampling_params will be ignored."
+            "Do not specify sampling_params for vllm inference. "
+            "If you want to use hyperparameters, add them directly to the "
+            "generation kwargs. Given argument sampling_params will be ignored.",
+            stacklevel=2,
         )
         generation_kwargs.pop("sampling_params")
 
@@ -60,7 +59,7 @@ def _run_vllm_chat_pipeline(
         **gen_kwargs,
     )
 
-    outputs: List[RequestOutput] = model.chat(
+    outputs: list[RequestOutput] = model.chat(
         batch_messages,
         sampling_params=sampling_params_list,
         use_tqdm=print_progress,
@@ -89,11 +88,11 @@ def _run_vllm_chat_pipeline(
 
 def run_vllm_batch(
     model: LLM,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    system_messages: Sequence[str] = ("You are a helpful assistant.",),
+    prompts: Sequence[str] = ("Hi there! What is your name?",),
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
     # number_of_printed_conversation: int = 2,
     print_progress: bool = True,
@@ -102,10 +101,9 @@ def run_vllm_batch(
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
     **generation_kwargs: Any,
-) -> Tuple[List[str], List[str], List[str]]:
-
+) -> tuple[list[str], list[str], list[str]]:
     # Prepare batch of messages
-    batch_messages: List[List[Dict[str, str]]] = [
+    batch_messages: list[list[dict[str, str]]] = [
         [
             {"role": "system", "content": system_message},
             {"role": "user", "content": prompt},
@@ -128,12 +126,12 @@ def run_vllm_batch(
 
 def run_vllm_batch_conversation(
     model: LLM,
-    system_messages: List[str] = ["You are a helpful assistant."],
-    prompts: List[str] = ["Hi there! What is your name?"],
-    assistant_messages: List[List[str]] = None,
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    system_messages: Sequence[str] = ("You are a helpful assistant.",),
+    prompts: Sequence[Sequence[str]] = (("Hi there! What is your name?",),),
+    assistant_messages: Sequence[Sequence[str]] = (),
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
     # number_of_printed_conversation: int = 2,
     print_progress: bool = True,
@@ -142,11 +140,11 @@ def run_vllm_batch_conversation(
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
     **generation_kwargs: Any,
-) -> Tuple[List[str], List[str], List[str]]:
-
-        
+) -> tuple[list[str], list[str], list[str]]:
     batch_messages = []
     batch_size = len(system_messages)
+    if not assistant_messages:
+        assistant_messages = tuple(() for _ in range(batch_size))
     for i in range(batch_size):
         messages = []
 
@@ -160,9 +158,7 @@ def run_vllm_batch_conversation(
         for j in range(num_user_msgs):
             messages.append({"role": "user", "content": prompts[i][j]})
             if j < num_assistant_msgs:
-                messages.append(
-                    {"role": "assistant", "content": assistant_messages[i][j]}
-                )
+                messages.append({"role": "assistant", "content": assistant_messages[i][j]})
 
         batch_messages.append(messages)
 
@@ -215,7 +211,7 @@ def _get_sampling_field_names() -> set[str]:
     return set(sig.parameters.keys())
 
 
-def _split_kwargs(kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _split_kwargs(kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Splits kwargs into (generation_args, chat_args).
     """
@@ -235,12 +231,10 @@ def _split_kwargs(kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any
 
 def _structured_sampling_params(
     batch_size: int,
-    seeds: List[int],
-    response_generation_method: Union[
-        ResponseGenerationMethod, List[ResponseGenerationMethod]
-    ],
+    seeds: list[int],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod],
     **generation_kwargs: Any,
-) -> List[SamplingParams]:
+) -> list[SamplingParams]:
 
     structured_output = []
 
@@ -264,9 +258,7 @@ def _structured_sampling_params(
             )
             and response_generation_method.allowed_choices is not None
         ):
-            _allowed_choices = [
-                str(c) for c in response_generation_method.allowed_choices
-            ]
+            _allowed_choices = [str(c) for c in response_generation_method.allowed_choices]
             global_structured_output = StructuredOutputsParams(choice=_allowed_choices)
             structured_output = [global_structured_output] * batch_size
             # Remote Inference
@@ -276,7 +268,7 @@ def _structured_sampling_params(
     # Different response generation methods for each question
     else:
         structured_output = []
-        cache: Dict[str, StructuredOutputsParams] = {}
+        cache: dict[str, StructuredOutputsParams] = {}
         for i in range(batch_size):
             current_method = response_generation_method[i]
             if isinstance(current_method, JSONResponseGenerationMethod):
@@ -286,9 +278,7 @@ def _structured_sampling_params(
                 key = _make_cache_key(fields, cons)
 
                 if key not in cache:
-                    pydantic_model = _generate_pydantic_model(
-                        fields=fields, constraints=cons
-                    )
+                    pydantic_model = _generate_pydantic_model(fields=fields, constraints=cons)
                     json_schema = pydantic_model.model_json_schema()
                     cache[key] = StructuredOutputsParams(json=json_schema)
 
@@ -327,8 +317,7 @@ def _structured_sampling_params(
         ]
     else:
         sampling_params_list = [
-            SamplingParams(seed=seeds[i], **generation_kwargs)
-            for i in range(batch_size)
+            SamplingParams(seed=seeds[i], **generation_kwargs) for i in range(batch_size)
         ]
     # Remote Inference
     # else:
@@ -339,12 +328,10 @@ def _structured_sampling_params(
 
 def _create_sampling_params(
     batch_size: int,
-    seeds: List[int],
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ],
+    seeds: list[int],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     **generation_kwargs: Any,
-) -> List[SamplingParams]:
+) -> list[SamplingParams]:
     """
     Create sampling parameters for generation.
 
@@ -371,9 +358,8 @@ def _create_sampling_params(
             **generation_kwargs,
         )
 
-    return [
-        SamplingParams(seed=seeds[i], **generation_kwargs) for i in range(batch_size)
-    ]
+    return [SamplingParams(seed=seeds[i], **generation_kwargs) for i in range(batch_size)]
+
 
 def _get_logprobs(
     model,
@@ -386,7 +372,7 @@ def _get_logprobs(
 ):
     logprob_result = []
     # ignore the first k tokens that belong to the reasoning
-    rgms: List[LogprobResponseGenerationMethod] = []
+    rgms: list[LogprobResponseGenerationMethod] = []
     if isinstance(response_generation_method, LogprobResponseGenerationMethod):
         rgms.append(response_generation_method)
     elif isinstance(response_generation_method, list):
@@ -417,10 +403,9 @@ def _get_logprobs(
 
         for req_output, logprob_position in zip(outputs, logprob_positions):
             try:
+                # Strip space token and any leading whitespace from tokenization.
                 answer_dict = {
-                    x.decoded_token.lstrip(
-                        space_char
-                    ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+                    x.decoded_token.lstrip(space_char).lstrip(): x.logprob
                     for x in req_output.outputs[0].logprobs[logprob_position].values()
                 }
             except IndexError:  # less than [logprob_position] tokens in the output!
@@ -480,7 +465,9 @@ def _update_logprob_kwargs(response_generation_method, generation_kwargs):
     #                     answer_dict = {
     #                         x.decoded_token.lstrip(
     #                             space_char
-    #                         ).lstrip(): x.logprob  # strip the space character and whitespace from tokenization
+    #                         ).lstrip(): x.logprob
+    #                         # strip the space character and whitespace from
+    #                         # tokenization
     #                         for x in req_output.outputs[0]
     #                         .logprobs[logprob_position]
     #                         .values()
@@ -495,7 +482,7 @@ def _update_logprob_kwargs(response_generation_method, generation_kwargs):
 # REGEX Method.
 # We could use the thinking ids directly and decode the message again.
 def _extract_reasoning_and_answer(
-    reasoning_start_token: str, reasoning_end_token: str, outputs: List[RequestOutput]
+    reasoning_start_token: str, reasoning_end_token: str, outputs: list[RequestOutput]
 ):
     plain_results = []
     reasoning_output = []
@@ -513,9 +500,9 @@ def _extract_reasoning_and_answer(
         final_answer = full_text
 
         final_answer, extracted_reasoning = parse_reasoning(full_text, patterns=patterns)
-       
+
         raw_reasonings.append(extracted_reasoning)
-        if extracted_reasoning != None:
+        if extracted_reasoning is not None:
             reasoning_output.append(extracted_reasoning.strip())
         else:
             reasoning_output.append(extracted_reasoning)

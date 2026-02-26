@@ -1,13 +1,16 @@
-import pandas as pd
-from typing import Dict, Any, List
-import re
-import numpy as np
 import json
+import re
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
 
 def _make_cache_key(fields: Any, constraints: Any) -> str:
     return json.dumps({"fields": fields, "constraints": constraints}, sort_keys=False)
 
-def generate_seeds(seed: int, batch_size: int) -> List[int]:
+
+def generate_seeds(seed: int, batch_size: int) -> list[int]:
     """
     Generate a list of random seeds.
 
@@ -21,7 +24,8 @@ def generate_seeds(seed: int, batch_size: int) -> List[int]:
     rng = np.random.default_rng(seed)
     return rng.integers(low=0, high=2**32, size=batch_size).tolist()
 
-def create_one_dataframe(parsed_results: Dict[Any, pd.DataFrame]) -> pd.DataFrame:
+
+def create_one_dataframe(parsed_results: dict[Any, pd.DataFrame]) -> pd.DataFrame:
     """Concatenates a dictionary of DataFrames into a single DataFrame.
 
     Args:

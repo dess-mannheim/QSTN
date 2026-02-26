@@ -1,6 +1,5 @@
-from typing import Final, List, Dict
-
 from enum import Enum
+from typing import Final
 
 # Survey Item
 SYSTEM_PROMPT_FIELD: Final[str] = "system_prompt"
@@ -24,7 +23,7 @@ LLM_RESPONSE: Final[str] = "llm_response"
 PARSED_RESPONSE: Final[str] = "parsed_response"
 
 # Structured Output constraints
-OPTIONS_ADJUST: List[str] = ["OPTIONS_ADJUST"]
+OPTIONS_ADJUST: list[str] = ["OPTIONS_ADJUST"]
 
 
 class QuestionnairePresentation(Enum):
@@ -34,9 +33,10 @@ class QuestionnairePresentation(Enum):
 
 
 DEFAULT_SYSTEM_PROMPT: Final[str] = (
-    "You will be given questions and possible answer options for each. Please reason about each question before answering."
+    "You will be given questions and possible answer options for each. "
+    "Please reason about each question before answering."
 )
 DEFAULT_TASK_INSTRUCTION: Final[str] = ""
-DEFAULT_JSON_STRUCTURE: Final[List[str]] = ["reasoning", "answer"]
-DEFAULT_CONSTRAINTS: Final[Dict[str, List[str]]] = {"answer": OPTIONS_ADJUST}
+DEFAULT_JSON_STRUCTURE: Final[list[str]] = ["reasoning", "answer"]
+DEFAULT_CONSTRAINTS: Final[dict[str, list[str]]] = {"answer": OPTIONS_ADJUST}
 DEFAULT_QUESTIONNAIRE_ID: Final[str] = "Questionnaire"

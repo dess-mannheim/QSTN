@@ -1,24 +1,23 @@
-
-from typing import TYPE_CHECKING, Any, List, Optional, Union, Tuple
-
 import random
+from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
 from .response_generation import (
-    ResponseGenerationMethod,
     LogprobResponseGenerationMethod,
+    ResponseGenerationMethod,
 )
 
 if TYPE_CHECKING:
-    from vllm import LLM
     from openai import AsyncOpenAI
+    from vllm import LLM
 
 HAS_VLLM = False
 HAS_OPENAI = False
 
 try:
     from vllm import LLM
+
     from .local_inference import run_vllm_batch, run_vllm_batch_conversation
 
     HAS_VLLM = True
@@ -27,6 +26,7 @@ except ImportError:
 
 try:
     from openai import AsyncOpenAI
+
     from .remote_inference import run_openai_batch, run_openai_batch_conversation
 
     HAS_OPENAI = True
@@ -35,13 +35,13 @@ except ImportError:
 
 
 def _print_conversation(
-    system_messages: List[str],
-    prompts: List[str],
-    assistant_messages: List[str],
-    plain_results: List[str],
-    reasoning_output: List[str],
-    logprob_result: List[str],
-    response_generation_method: List[ResponseGenerationMethod],
+    system_messages: list[str],
+    prompts: list[str],
+    assistant_messages: list[str],
+    plain_results: list[str],
+    reasoning_output: list[str],
+    logprob_result: list[str],
+    response_generation_method: list[ResponseGenerationMethod],
     number_of_printed_conversations: int = 2,
 ):
     methods = response_generation_method or []
@@ -79,9 +79,7 @@ def _print_conversation(
             if i >= number_of_printed_conversations:
                 break
 
-            round_print = (
-                f"{conversation_print}\n-- System Message --\n{system_message}"
-            )
+            round_print = f"{conversation_print}\n-- System Message --\n{system_message}"
             for j, _ in enumerate(prompt_list):
                 round_print = f"{round_print}\n-- User Message --\n{prompt_list[j]}"
                 if j < len(assistant_list):
@@ -104,7 +102,11 @@ def _print_conversation(
         ):
             if i >= number_of_printed_conversations:
                 break
-            round_print = f"{conversation_print}\n-- System Message --\n{system_message}\n-- User Message ---\n{prompt}\n-- Generated Message --\n{answer}"
+            round_print = (
+                f"{conversation_print}\n-- System Message --\n{system_message}"
+                f"\n-- User Message ---\n{prompt}"
+                f"\n-- Generated Message --\n{answer}"
+            )
             if reasoning:
                 round_print += "\n-- Reasoning --\n" + str(reasoning)
 
@@ -114,15 +116,16 @@ def _print_conversation(
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
             tqdm.write(round_print)
 
+
 def batch_generation(
-    model: Union[LLM, AsyncOpenAI],
-    system_messages: List[str] = ("You are a helpful assistant.",),
-    prompts: List[str] = ("Hi there! What is your name?",),
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    model: LLM | AsyncOpenAI,
+    system_messages: list[str] = ("You are a helpful assistant.",),
+    prompts: list[str] = ("Hi there! What is your name?",),
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
-    client_model_name: Optional[str] = None,
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
     number_of_printed_conversations: int = 2,
@@ -131,7 +134,7 @@ def batch_generation(
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
     **generation_kwargs: Any,
-) -> Tuple:
+) -> tuple:
     """
     Generate responses for a batch of prompts.
 
@@ -145,16 +148,23 @@ def batch_generation(
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
         prompts (List(str)): User prompts to generate responses for.
-        response_generation_method (ResponseGenerationMethod or List(ResponseGenerationMethod), optional): Configuration for structured output.
+        response_generation_method (
+            ResponseGenerationMethod or List(ResponseGenerationMethod), optional
+        ): Configuration for structured output.
         seed (int): Random seed for reproducibility, defaults to 42.
         client_model_name (str, optional): Model name when using OpenAI API.
         api_concurrency (int): Max concurrent API requests when using OpenAI API.
-        number_if_printed_conversations (int): How many conversations should be printed. Defaults to 2.
+        number_if_printed_conversations (int): How many conversations should be
+            printed. Defaults to 2.
         print_conversation (bool): If True, prints conversations. Defaults to False.
         print_progress (bool): If True, shows progress bar. Defaults to True.
-        reasoning_start_token (str): Special token at the beginning of reasoning models' output. Will be used for manual parsing, if automatic parsing is not possible.
-        reasoning_end_token (str): Special token to separate reasoning from regular model output. Will be used for manual parsing, if automatic parsing is not possible.
-        space_token (str): Special char to encode spaces in tokens ("Ġ" for most byte-pair tokenizers).
+        reasoning_start_token (str): Special token at the beginning of reasoning
+            models' output. Used for manual parsing if automatic parsing fails.
+        reasoning_end_token (str): Special token to separate reasoning from
+            regular model output. Used for manual parsing if automatic parsing
+            fails.
+        space_token (str): Special char to encode spaces in tokens ("Ġ" for
+            most byte-pair tokenizers).
         generation_kwargs: Additional generation parameters
 
     Returns:
@@ -163,13 +173,9 @@ def batch_generation(
 
     model_type = type(model).__name__
     if model_type == "LLM" and not HAS_VLLM:
-        raise ImportError(
-            "You are trying to use a vLLM model, but 'vllm' is not installed."
-        )
+        raise ImportError("You are trying to use a vLLM model, but 'vllm' is not installed.")
     if model_type == "AsyncOpenAI" and not HAS_OPENAI:
-        raise ImportError(
-            "You are trying to use OpenAI, but 'openai' is not installed."
-        )
+        raise ImportError("You are trying to use OpenAI, but 'openai' is not installed.")
     if model_type != "LLM" and model_type != "AsyncOpenAI":
         raise ValueError(f"Unsupported model type: {type(model)}")
     random.seed(seed)
@@ -222,14 +228,19 @@ def batch_generation(
 
 def batch_turn_by_turn_generation(
     model: LLM,
-    system_messages: List[str] = ("You are a helpful assistant.",),
-    prompts: List[List[str]] = (("Hi there! What is your name?", "Interesting",),),
-    assistant_messages: Optional[List[List[str]]] = None,
-    response_generation_method: Optional[
-        Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-    ] = None,
+    system_messages: list[str] = ("You are a helpful assistant.",),
+    prompts: list[list[str]] = (
+        (
+            "Hi there! What is your name?",
+            "Interesting",
+        ),
+    ),
+    assistant_messages: list[list[str]] | None = None,
+    response_generation_method: (
+        ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = None,
     seed: int = 42,
-    client_model_name: Optional[str] = None,
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
     number_of_printed_conversations: int = 2,
@@ -238,7 +249,7 @@ def batch_turn_by_turn_generation(
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
     **generation_kwargs,
-) -> List[str]:
+) -> list[str]:
     """
     Generate responses for multi-turn conversations.
 
@@ -252,18 +263,28 @@ def batch_turn_by_turn_generation(
     Args:
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
-        prompts (List(List(str))): User prompts to generate responses for. Can be multiple request per system prompt.
-        assistant_messages (List(List(str)), optional): These are prefilled responses for the assistant. E.g. if the first list contains one entry, the first LLM assistant will be prefilled in the chat format and not be inferenced.
-        response_generation_method (ResponseGenerationMethod or List(ResponseGenerationMethod), optional): Configuration for structured output.
+        prompts (List(List(str))): User prompts to generate responses for. Can
+            include multiple requests per system prompt.
+        assistant_messages (List(List(str)), optional): Prefilled assistant
+            responses. For example, if the first list contains one entry, the
+            first assistant turn is prefilled and not inferred.
+        response_generation_method (
+            ResponseGenerationMethod or List(ResponseGenerationMethod), optional
+        ): Configuration for structured output.
         seed (int): Random seed for reproducibility, defaults to 42.
         client_model_name (str, optional): Model name when using OpenAI API.
         api_concurrency (int): Max concurrent API requests when using OpenAI API.
         print_conversation (bool): If True, prints conversations. Defaults to False.
-        number_of_printed_conversations (int): How many conversations should be printed. Defaults to 2.
+        number_of_printed_conversations (int): How many conversations should be
+            printed. Defaults to 2.
         print_progress (bool): If True, shows progress bar. Defaults to True.
-        reasoning_start_token (str): Special token at the beginning of reasoning models' output. Will be used for manual parsing, if automatic parsing is not possible.
-        reasoning_end_token (str): Special token to separate reasoning from regular model output. Will be used for manual parsing, if automatic parsing is not possible.
-        space_token (str): Special char to encode spaces in tokens ("Ġ" for most byte-pair tokenizers).
+        reasoning_start_token (str): Special token at the beginning of reasoning
+            models' output. Used for manual parsing if automatic parsing fails.
+        reasoning_end_token (str): Special token to separate reasoning from
+            regular model output. Used for manual parsing if automatic parsing
+            fails.
+        space_token (str): Special char to encode spaces in tokens ("Ġ" for
+            most byte-pair tokenizers).
         generation_kwargs: Additional generation parameters.
 
     Returns:
@@ -272,13 +293,9 @@ def batch_turn_by_turn_generation(
 
     model_type = type(model).__name__
     if model_type == "LLM" and not HAS_VLLM:
-        raise ImportError(
-            "You are trying to use a vLLM model, but 'vllm' is not installed."
-        )
+        raise ImportError("You are trying to use a vLLM model, but 'vllm' is not installed.")
     elif model_type == "AsyncOpenAI" and not HAS_OPENAI:
-        raise ImportError(
-            "You are trying to use OpenAI, but 'openai' is not installed."
-        )
+        raise ImportError("You are trying to use OpenAI, but 'openai' is not installed.")
     elif model_type != "LLM" and model_type != "AsyncOpenAI":
         raise ValueError(f"Unsupported model type: {type(model)}")
     random.seed(seed)
@@ -299,23 +316,20 @@ def batch_turn_by_turn_generation(
             **generation_kwargs,
         )
     elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
-        plain_results, logprob_result, reasoning_outputs = (
-            run_openai_batch_conversation(
-                model,
-                system_messages=system_messages,
-                prompts=prompts,
-                assistant_messages=assistant_messages,
-                response_generation_method=response_generation_method,
-                client_model_name=client_model_name,
-                seed=seed,
-                print_progress=print_progress,
-                api_concurrency=api_concurrency,
-                **generation_kwargs,
-            )
+        plain_results, logprob_result, reasoning_outputs = run_openai_batch_conversation(
+            model,
+            system_messages=system_messages,
+            prompts=prompts,
+            assistant_messages=assistant_messages,
+            response_generation_method=response_generation_method,
+            client_model_name=client_model_name,
+            seed=seed,
+            print_progress=print_progress,
+            api_concurrency=api_concurrency,
+            **generation_kwargs,
         )
     else:
         raise ValueError("Inference cannot be run without OpenAI or vllm installed.")
-
 
     if print_conversation:
         _print_conversation(
@@ -402,11 +416,15 @@ def batch_turn_by_turn_generation(
 #             **generation_kwargs,
 #         )
 
-#     # TODO add argurment to specify how many conversations should be printed (base argument should be reasonable)
+#     # TODO add argument to specify how many conversations should be printed.
+#     # The base argument should be reasonable.
 #     if print_conversation:
 #         conversation_print = "Conversation:"
 #         for prompt, answer in zip(prompts, result):
-#             round_print = f"{conversation_print}\nUser Message:\n{prompt}\nGenerated Message\n{answer}"
+#             round_print = (
+#                 f"{conversation_print}\nUser Message:\n{prompt}"
+#                 f"\nGenerated Message\n{answer}"
+#             )
 #             print(round_print, flush=True)
 #             break
 

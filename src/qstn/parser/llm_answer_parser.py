@@ -1,6 +1,5 @@
 import json
 import warnings
-from typing import Dict, List
 
 import json_repair
 import numpy as np
@@ -10,43 +9,45 @@ from ..prompt_builder import LLMPrompt
 from ..utilities import constants
 from ..utilities.survey_objects import InferenceResult
 
-
 DEFAULT_SYSTEM_PROMPT: str = "You are a helpful assistant."
 DEFAULT_PROMPT: str = (
     "Your task is to parse the correct answer option from an open text "
-    + "answer a LLM has given to survey questions. You will be provided with the survey question, "
-    + "possible answer options and the LLM answer. Answer ONLY and EXACTLY with one of the possible "
-    + "answer options or 'INVALID', if the provided LLM answer does give one of the options. \n"
+    + "answer a LLM has given to survey questions. "
+    + "You will be provided with the survey question, "
+    + "possible answer options and the LLM answer. "
+    + "Answer ONLY and EXACTLY with one of the possible answer options "
+    + "or 'INVALID', if the provided LLM answer does give one of the options. \n"
     + "Question: {question} \nResponse by LLM: {llm_response}"
 )
 
 
-def parse_json_str(answer: str) -> Dict[str, str] | None:
+def parse_json_str(answer: str) -> dict[str, str] | None:
     try:
         result_json = json.loads(answer)
-    except:
+    except Exception:
         try:
             result_json = json_repair.loads(answer, skip_json_loads=True)
-        except:
+        except Exception:
             return None
 
     return result_json
 
 
 def parse_json(
-    survey_results: List[InferenceResult],
-) -> Dict[LLMPrompt, pd.DataFrame]:
+    survey_results: list[InferenceResult],
+) -> dict[LLMPrompt, pd.DataFrame]:
     """Parses json output of a survey of LLMs.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
 
     Returns:
-        Dict[LLMInterview]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
+        Dict[LLMInterview]: A dictionary where the keys are the LLMInterviews
+            and the values are a Dataframe with the questions and answers.
     """
     final_result = {}
 
     for survey_result in survey_results:
-        answers: List[pd.DataFrame] = []
+        answers: list[pd.DataFrame] = []
         for key, value in survey_result.results.items():
             # value:QuestionAnswerTuple
             parsed_llm_response = parse_json_str(value.llm_response)
@@ -74,15 +75,11 @@ def parse_json(
                     row_data.append(logprobs)
                     row_columns.append("logprobs")
 
-                answers.append(
-                    pd.DataFrame(data=[row_data], columns=row_columns, index=[0])
-                )
+                answers.append(pd.DataFrame(data=[row_data], columns=row_columns, index=[0]))
             else:
                 answers.append(
                     pd.DataFrame(
-                        data=[
-                            (key, value.question, value.llm_response, "ERROR: Parsing")
-                        ],
+                        data=[(key, value.question, value.llm_response, "ERROR: Parsing")],
                         columns=[
                             constants.QUESTIONNAIRE_ITEM_ID,
                             constants.QUESTION,
@@ -100,16 +97,17 @@ def parse_json(
 
 
 def parse_json_battery(
-    survey_results: List[InferenceResult],
-) -> Dict[LLMPrompt, pd.DataFrame]:
+    survey_results: list[InferenceResult],
+) -> dict[LLMPrompt, pd.DataFrame]:
     """Parses json output of a survey of LLMs when prompted with one prompt.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
 
     Returns:
-        Dict[LLMInterview]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
+        Dict[LLMInterview]: A dictionary where the keys are the LLMInterviews
+            and the values are a Dataframe with the questions and answers.
     """
-    parsed_results: Dict[LLMPrompt, pd.DataFrame] = parse_json(survey_results)
+    parsed_results: dict[LLMPrompt, pd.DataFrame] = parse_json(survey_results)
 
     all_results = {}
 
@@ -129,15 +127,11 @@ def parse_json_battery(
                 current_question = survey_questions[i]
                 current_id = current_question.item_id
                 if col_name.endswith(f"_{current_question.question_content}"):
-                    new_col_name = col_name.removesuffix(
-                        f"_{current_question.question_content}"
-                    )
+                    new_col_name = col_name.removesuffix(f"_{current_question.question_content}")
                     if current_id not in grouped_items:
-                        grouped_items[current_id] = {
-                            constants.QUESTIONNAIRE_ITEM_ID: current_id
-                        }
-                    grouped_items[current_id][constants.QUESTION] = (
-                        survey.generate_question_prompt(current_question)
+                        grouped_items[current_id] = {constants.QUESTIONNAIRE_ITEM_ID: current_id}
+                    grouped_items[current_id][constants.QUESTION] = survey.generate_question_prompt(
+                        current_question
                     )
                     grouped_items[current_id][new_col_name] = cell_value
 
@@ -162,14 +156,15 @@ def parse_json_battery(
 
 
 def raw_responses(
-    survey_results: List[InferenceResult],
-) -> Dict[LLMPrompt, pd.DataFrame]:
+    survey_results: list[InferenceResult],
+) -> dict[LLMPrompt, pd.DataFrame]:
     """Organizes the questions and answers of a survey in a pandas Dataframe.
     Args:
         survey_results List[InterviewResult]: All results for all interviews.
 
     Returns:
-        Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
+        Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the
+            LLMInterviews and the values are a Dataframe with questions/answers.
     """
 
     all_results = {}
@@ -178,7 +173,15 @@ def raw_responses(
     return all_results
 
 
-# def llm_parse_all(model:LLM, survey_results:List[SurveyResult], system_prompt:str = DEFAULT_SYSTEM_PROMPT, prompt:str = DEFAULT_PROMPT, use_structured_ouput:bool = False, seed = 42, **generation_kwargs) -> Dict[LLMSurvey, pd.DataFrame]:
+# def llm_parse_all(
+#     model: LLM,
+#     survey_results: List[SurveyResult],
+#     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+#     prompt: str = DEFAULT_PROMPT,
+#     use_structured_ouput: bool = False,
+#     seed=42,
+#     **generation_kwargs,
+# ) -> Dict[LLMSurvey, pd.DataFrame]:
 #     #TODO LLM Parser in batches, same output as json parser
 #     all_results = {}
 #     for survey_result in survey_results:
@@ -190,11 +193,28 @@ def raw_responses(
 #             ids.append(item_id)
 #             questions.append(question_llm_response_tuple.question)
 #             answers.append(question_llm_response_tuple.llm_response)
-#             prompts.append(f"{prompt} \nQuestion: {question_llm_response_tuple.question} \nResponse by LLM: {question_llm_response_tuple.llm_response}")
-#         llm_parsed_results = batch_generation(model, system_messages=[system_prompt] * len(prompts), prompts=prompts, seed=seed, **generation_kwargs)
+#             prompts.append(
+#                 f"{prompt} \nQuestion: {question_llm_response_tuple.question}"
+#                 f"\nResponse by LLM: {question_llm_response_tuple.llm_response}"
+#             )
+#         llm_parsed_results = batch_generation(
+#             model,
+#             system_messages=[system_prompt] * len(prompts),
+#             prompts=prompts,
+#             seed=seed,
+#             **generation_kwargs,
+#         )
 
 
-#         all_results[survey_result.survey] = pd.DataFrame(zip(ids, questions, answers, llm_parsed_results), columns=[constants.SURVEY_ITEM_ID, constants.QUESTION, constants.LLM_RESPONSE, constants.PARSED_RESPONSE])
+#         all_results[survey_result.survey] = pd.DataFrame(
+#             zip(ids, questions, answers, llm_parsed_results),
+#             columns=[
+#                 constants.SURVEY_ITEM_ID,
+#                 constants.QUESTION,
+#                 constants.LLM_RESPONSE,
+#                 constants.PARSED_RESPONSE,
+#             ],
+#         )
 
 #     return all_results
 
@@ -239,7 +259,8 @@ def raw_responses(
 #             model,
 #             system_messages=system_messages,
 #             prompts=all_prompts,
-#             response_generation_method=answer_production_method,  # TODO: fix automatic system prompt
+#             response_generation_method=answer_production_method,
+#             # TODO: fix automatic system prompt
 #             seed=seed,
 #             print_conversation=print_conversation,
 #             print_progress=print_progress,
@@ -272,9 +293,7 @@ def raw_responses(
 #     return all_results
 
 
-def _filter_logprobs_by_choices(
-    logprob_df: pd.DataFrame, choices: pd.Series
-) -> pd.DataFrame:
+def _filter_logprobs_by_choices(logprob_df: pd.DataFrame, choices: pd.Series) -> pd.DataFrame:
 
     matches_found = []
 
@@ -283,7 +302,9 @@ def _filter_logprobs_by_choices(
         boolean_index = choices.str.startswith(token)
         # if len(choices[boolean_index]) > 1:
         #    warnings.warn(
-        #        f"Multiple allowed_choices ({list(choices[boolean_index])}) match the same output token: {token}",
+        #        "Multiple allowed_choices "
+        #        f"({list(choices[boolean_index])}) match "
+        #        f"the same output token: {token}",
         #        stacklevel=2
         #    )
         matches_found.append(boolean_index.any())
@@ -292,8 +313,8 @@ def _filter_logprobs_by_choices(
 
 
 def _logprobs_filter(
-    logprobs: Dict[str, float], allowed_choices: Dict[str, List[str]]
-) -> Dict[str, float]:
+    logprobs: dict[str, float], allowed_choices: dict[str, list[str]]
+) -> dict[str, float]:
 
     # normalize logprobs
     logprob_df = pd.DataFrame({"token": logprobs.keys(), "prob": logprobs.values()})
@@ -301,19 +322,20 @@ def _logprobs_filter(
     logprob_df = logprob_df[logprob_df.prob > 0]
 
     # flatten to check for collisions between answer options
-    # TODO: implement this properly---only collisions between answer options matter, not, e.g., TRUMP vs. trump!
+    # TODO: implement this properly.
+    # Only collisions between answer options matter, not, e.g., TRUMP vs. trump!
     # all_valid_outputs = [output for choices in allowed_choices.values() for output in choices]
     # _ = _filter_logprobs_by_choices(logprob_df, pd.Series(all_valid_outputs))
 
     # filter the individual survey answers
     choice_results = {}
     for choice, valid_outputs in allowed_choices.items():
-        valid_logprobs = _filter_logprobs_by_choices(
-            logprob_df, pd.Series(valid_outputs)
-        )
+        valid_logprobs = _filter_logprobs_by_choices(logprob_df, pd.Series(valid_outputs))
         if len(valid_logprobs) == 0:
             warnings.warn(
-                f"Could not find logprobs for answer option '{choice}' with possible outputs {valid_outputs}"
+                "Could not find logprobs for answer option "
+                f"'{choice}' with possible outputs {valid_outputs}",
+                stacklevel=2,
             )
             choice_results[choice] = np.nan
         else:
@@ -325,26 +347,27 @@ def _logprobs_filter(
     )  # only consider values != nan
     if not np.isnan(overall_sum) and overall_sum > 0:
         choice_results = {
-            choice: token_sum / overall_sum
-            for choice, token_sum in choice_results.items()
+            choice: token_sum / overall_sum for choice, token_sum in choice_results.items()
         }
 
     return choice_results
 
 
 def parse_logprobs(
-    survey_results: List[InferenceResult],
-    allowed_choices: List[str] | Dict[str, List[str]],
-) -> Dict[LLMPrompt, pd.DataFrame]:
+    survey_results: list[InferenceResult],
+    allowed_choices: list[str] | dict[str, list[str]],
+) -> dict[LLMPrompt, pd.DataFrame]:
     """
-    Filter and aggregate the logprobs that are returned when using the Logprob_AnswerProductionMethod
+    Filter and aggregate logprobs returned by Logprob_AnswerProductionMethod.
 
     Args:
         survey_results: List of InterviewResult that is returned from running a survey
-        allowed_choices: List of possible answer options OR dictionary that maps answer options to multiple tokens that encode each option
+        allowed_choices: List of possible answer options OR dictionary mapping
+            options to multiple tokens that encode each option
 
     Returns:
-        Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the LLMInterviews and the values are a Dataframe with the questions and answers.
+        Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the
+            LLMInterviews and the values are a Dataframe with questions/answers.
     """
     final_result = {}
 
@@ -385,7 +408,9 @@ def parse_logprobs(
         )
         if missing_logprobs:
             missing_mask = df[answer_format].isna().all(axis=1)
-            df["error_col"] = ["MISSING_LOGPROBS" if is_missing else None for is_missing in missing_mask]
+            df["error_col"] = [
+                "MISSING_LOGPROBS" if is_missing else None for is_missing in missing_mask
+            ]
 
         final_result[survey_result.questionnaire] = df
 

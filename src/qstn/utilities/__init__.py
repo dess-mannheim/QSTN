@@ -4,9 +4,7 @@ from . import (
     constants,
     placeholder,
     prompt_creation,
-    prompt_perturbations,
     prompt_templates,
-    survey_objects,
     utils,
 )
 from .constants import (
@@ -23,11 +21,11 @@ from .constants import (
     PARSED_RESPONSE,
     QUESTION,
     QUESTION_CONTENT,
+    QUESTION_STEM,
     QUESTIONNAIRE_INSTRUCTION_FIELD,
     QUESTIONNAIRE_ITEM,
     QUESTIONNAIRE_ITEM_ID,
     QUESTIONNAIRE_NAME,
-    QUESTION_STEM,
     SYSTEM_PROMPT_FIELD,
     QuestionnairePresentation,
 )
@@ -70,22 +68,13 @@ from .prompt_templates import (
     SYSTEM_JSON_SINGLE_ANSWER,
     SYSTEM_SINGLE_ANSWER,
 )
-from .survey_objects import (
-    AnswerOptions,
-    AnswerTexts,
-    InferenceResult,
-    QuestionLLMResponseTuple,
-    QuestionnaireItem,
-)
 from .utils import create_one_dataframe, generate_seeds, safe_format_with_regex
 
 __all__ = [
     "constants",
     "placeholder",
     "prompt_creation",
-    "prompt_perturbations",
     "prompt_templates",
-    "survey_objects",
     "utils",
     "SYSTEM_PROMPT_FIELD",
     "QUESTIONNAIRE_INSTRUCTION_FIELD",
@@ -142,11 +131,6 @@ __all__ = [
     "DE_SYSTEM_JSON_REASONING",
     "DE_SYSTEM_JSON_ALL_OPTIONS",
     "DE_SYSTEM_SINGLE_ANSWER",
-    "AnswerTexts",
-    "AnswerOptions",
-    "QuestionLLMResponseTuple",
-    "InferenceResult",
-    "QuestionnaireItem",
     "generate_seeds",
     "create_one_dataframe",
     "safe_format_with_regex",
