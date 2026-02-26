@@ -10,19 +10,19 @@ from .response_generation import (
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-    from vllm import LLM
+    from vllm import LLM  # pyright: ignore[reportMissingImports]
 
 HAS_VLLM = False
 HAS_OPENAI = False
 
 try:
-    from vllm import LLM
+    from vllm import LLM  # pyright: ignore[reportMissingImports]
 
     from .local_inference import run_vllm_batch, run_vllm_batch_conversation
 
     HAS_VLLM = True
 except ImportError:
-    LLM = Any
+    LLM = None
 
 try:
     from openai import AsyncOpenAI
@@ -31,7 +31,7 @@ try:
 
     HAS_OPENAI = True
 except ImportError:
-    AsyncOpenAI = Any
+    AsyncOpenAI = None
 
 
 def _print_conversation(
@@ -118,7 +118,7 @@ def _print_conversation(
 
 
 def batch_generation(
-    model: LLM | AsyncOpenAI,
+    model: LLM | AsyncOpenAI,  # pyright: ignore[reportInvalidTypeForm]
     system_messages: list[str] = ("You are a helpful assistant.",),
     prompts: list[str] = ("Hi there! What is your name?",),
     response_generation_method: (
@@ -227,7 +227,7 @@ def batch_generation(
 
 
 def batch_turn_by_turn_generation(
-    model: LLM,
+    model: LLM | AsyncOpenAI,  # type: ignore
     system_messages: list[str] = ("You are a helpful assistant.",),
     prompts: list[list[str]] = (
         (
