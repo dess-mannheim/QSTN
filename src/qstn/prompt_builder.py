@@ -1,22 +1,17 @@
-from typing import List, Dict, Optional, Union, overload, Self, Tuple, Literal, Any
-from string import ascii_lowercase, ascii_uppercase
-
+import copy
+import random
+import warnings
 from dataclasses import replace
-
-from .utilities.survey_objects import AnswerOptions, QuestionnaireItem, AnswerTexts
-from .utilities import constants, placeholder, prompt_templates
-from .utilities.constants import QuestionnairePresentation
-from .utilities.utils import safe_format_with_regex
-
-from .inference.response_generation import ResponseGenerationMethod
+from string import ascii_lowercase, ascii_uppercase
+from typing import Any, Literal, Self, overload
 
 import pandas as pd
 
-import random
-
-import copy
-
-import warnings
+from .inference.response_generation import ResponseGenerationMethod
+from .utilities import constants, placeholder, prompt_templates
+from .utilities.constants import QuestionnairePresentation
+from .utilities.survey_objects import AnswerOptions, AnswerTexts, QuestionnaireItem
+from .utilities.utils import safe_format_with_regex
 
 # from transformers import AutoTokenizer
 
@@ -36,15 +31,13 @@ class LLMPrompt:
     )
     DEFAULT_TASK_INSTRUCTION: str = ""
 
-    DEFAULT_JSON_STRUCTURE: List[str] = ["reasoning", "answer"]
+    DEFAULT_JSON_STRUCTURE: list[str] = ["reasoning", "answer"]
 
-    DEFAULT_PROMPT_STRUCTURE: str = (
-        f"{placeholder.PROMPT_QUESTIONS}\n{placeholder.PROMPT_OPTIONS}"
-    )
+    DEFAULT_PROMPT_STRUCTURE: str = f"{placeholder.PROMPT_QUESTIONS}\n{placeholder.PROMPT_OPTIONS}"
 
     def __init__(
         self,
-        questionnaire_source: Union[str, pd.DataFrame] = None,
+        questionnaire_source: str | pd.DataFrame = None,
         questionnaire_name: str = DEFAULT_QUESTIONNAIRE_ID,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         prompt: str = DEFAULT_PROMPT_STRUCTURE,
@@ -66,7 +59,7 @@ class LLMPrompt:
         """
         random.seed(seed)
 
-        self._questions: List[QuestionnaireItem] = []
+        self._questions: list[QuestionnaireItem] = []
 
         if self._check_valid_questionnaire(questionnaire_source):
             self.load_questionnaire_format(questionnaire_source=questionnaire_source)
@@ -78,19 +71,21 @@ class LLMPrompt:
         self.system_prompt: str = system_prompt
         self.prompt: str = prompt
 
-    def _check_valid_questionnaire(self, questionnaire_source: Union[str, pd.DataFrame] = None) -> bool:
+    def _check_valid_questionnaire(self, questionnaire_source: str | pd.DataFrame = None) -> bool:
         # No Object
         if questionnaire_source is None:
             return False
-        
+
         # Empty String
         if isinstance(questionnaire_source, str) and not questionnaire_source:
             return False
-        
+
         # Empty Dataframe
         if isinstance(questionnaire_source, pd.DataFrame):
             if questionnaire_source.empty:
-                warnings.warn("The provided Dataframe is empty! No questions are created.")
+                warnings.warn(
+                    "The provided Dataframe is empty! No questions are created.", stacklevel=2
+                )
                 return False
             # Optional check if the correct columns are provided? Would probably be nice to have that warning here.
 
@@ -108,10 +103,10 @@ class LLMPrompt:
     def get_prompt_for_questionnaire_type(
         self,
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
-        item_id: Optional[str] = None,
-        item_position: Optional[int] = 0,
+        item_id: str | int | None = None,
+        item_position: int | None = 0,
         item_separator: str = "\n",
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """
         Generate the full prompt for a given questionnaire presentation.
 
@@ -162,7 +157,7 @@ class LLMPrompt:
             }
 
         elif questionnaire_type == QuestionnairePresentation.BATTERY:
-            all_questions: List[str] = []
+            all_questions: list[str] = []
             for question in self._questions:
                 current_question_prompt = self.generate_question_prompt(question)
 
@@ -234,7 +229,7 @@ class LLMPrompt:
     #         else len(total_tokens) * 3
     #     )
 
-    def get_questions(self) -> Tuple[QuestionnaireItem, ...]:
+    def get_questions(self) -> tuple[QuestionnaireItem, ...]:
         """
         Get an immutable snapshot of loaded interview questions.
 
@@ -244,7 +239,7 @@ class LLMPrompt:
         return tuple(self._questions)
 
     @property
-    def questions(self) -> Tuple[QuestionnaireItem, ...]:
+    def questions(self) -> tuple[QuestionnaireItem, ...]:
         """Read-only view of questionnaire items."""
         return tuple(self._questions)
 
@@ -264,9 +259,7 @@ class LLMPrompt:
         """Return the questionnaire item id at a given index."""
         return self._questions[position].item_id
 
-    def load_questionnaire_format(
-        self, questionnaire_source: Union[str, pd.DataFrame]
-    ) -> Self:
+    def load_questionnaire_format(self, questionnaire_source: str | pd.DataFrame) -> Self:
         """
         Load the questionnaire format from a CSV file or a pandas DataFrame.
 
@@ -279,14 +272,14 @@ class LLMPrompt:
         Returns:
             Self: The updated instance with loaded questions.
         """
-        questionnaire_questions: List[QuestionnaireItem] = []
+        questionnaire_questions: list[QuestionnaireItem] = []
 
-        # This is a duplicate check with actual Error here, 
+        # This is a duplicate check with actual Error here,
         # because if the method is called on its own it should not run the remaining code
         if not self._check_valid_questionnaire(questionnaire_source=questionnaire_source):
             raise ValueError("Please provide a non empty DataFrame or a valid String.")
 
-        if type(questionnaire_source) == pd.DataFrame:
+        if isinstance(questionnaire_source, pd.DataFrame):
             df = questionnaire_source
         else:
             df = pd.read_csv(questionnaire_source)
@@ -319,26 +312,26 @@ class LLMPrompt:
     @overload
     def prepare_prompt(
         self,
-        question_stem: Optional[str] = None,
-        answer_options: Optional[AnswerOptions] = None,
-        prefilled_responses: Optional[Dict[int, str]] = None,
+        question_stem: str | None = None,
+        answer_options: AnswerOptions | None = None,
+        prefilled_responses: dict[int, str] | None = None,
         randomized_item_order: bool = False,
     ) -> Self: ...
 
     @overload
     def prepare_prompt(
         self,
-        question_stem: Optional[List[str]] = None,
-        answer_options: Optional[Dict[str, AnswerOptions]] = None,
-        prefilled_responses: Optional[Dict[int, str]] = None,
+        question_stem: list[str] | None = None,
+        answer_options: dict[str, AnswerOptions] | None = None,
+        prefilled_responses: dict[int, str] | None = None,
         randomized_item_order: bool = False,
     ) -> Self: ...
 
     def prepare_prompt(
         self,
-        question_stem: Optional[Union[str, List[str]]] = None,
-        answer_options: Optional[Union[AnswerOptions, Dict[str, AnswerOptions]]] = None,
-        prefilled_responses: Optional[Dict[int, str]] = None,
+        question_stem: str | list[str] | None = None,
+        answer_options: AnswerOptions | dict[str, AnswerOptions] | None = None,
+        prefilled_responses: dict[int, str] | None = None,
         randomized_item_order: bool = False,
     ) -> Self:
         """
@@ -353,7 +346,7 @@ class LLMPrompt:
         Returns:
             Self: The updated instance with prepared questions.
         """
-        questionnaire_questions: List[QuestionnaireItem] = self._questions
+        questionnaire_questions: list[QuestionnaireItem] = self._questions
 
         prompt_list = isinstance(question_stem, list)
         if prompt_list:
@@ -366,11 +359,11 @@ class LLMPrompt:
         if isinstance(answer_options, AnswerOptions):
             # self._same_options = True # unnecessary
             options_dict = False
-        elif isinstance(answer_options, Dict):
+        elif isinstance(answer_options, dict):
             # self._same_options = False # unnecessary
             options_dict = True
 
-        updated_questions: List[QuestionnaireItem] = []
+        updated_questions: list[QuestionnaireItem] = []
 
         if not prefilled_responses:
             prefilled_responses = {}
@@ -379,69 +372,41 @@ class LLMPrompt:
 
         if not prompt_list and not options_dict:
             updated_questions = []
-            for i in range(len(questionnaire_questions)):
+            for i, question in enumerate(questionnaire_questions):
                 new_questionnaire_question = replace(
-                    questionnaire_questions[i],
-                    question_stem=(
-                        question_stem
-                        if question_stem
-                        else questionnaire_questions[i].question_stem
-                    ),
+                    question,
+                    question_stem=(question_stem if question_stem else question.question_stem),
                     answer_options=answer_options,
-                    prefilled_response=prefilled_responses.get(
-                        questionnaire_questions[i].item_id
-                    ),
+                    prefilled_response=prefilled_responses.get(question.item_id),
                 )
                 updated_questions.append(new_questionnaire_question)
 
         elif not prompt_list and options_dict:
-            for i in range(len(questionnaire_questions)):
+            for i, question in enumerate(questionnaire_questions):
                 new_questionnaire_question = replace(
-                    questionnaire_questions[i],
-                    question_stem=(
-                        question_stem
-                        if question_stem
-                        else questionnaire_questions[i].question_stem
-                    ),
-                    answer_options=answer_options.get(
-                        questionnaire_questions[i].item_id
-                    ),
-                    prefilled_response=prefilled_responses.get(
-                        questionnaire_questions[i].item_id
-                    ),
+                    question,
+                    question_stem=(question_stem if question_stem else question.question_stem),
+                    answer_options=answer_options.get(question.item_id),
+                    prefilled_response=prefilled_responses.get(question.item_id),
                 )
                 updated_questions.append(new_questionnaire_question)
 
         elif prompt_list and not options_dict:
-            for i in range(len(questionnaire_questions)):
+            for i, question in enumerate(questionnaire_questions):
                 new_questionnaire_question = replace(
-                    questionnaire_questions[i],
-                    question_stem=(
-                        question_stem[i]
-                        if question_stem
-                        else questionnaire_questions[i].question_stem
-                    ),
+                    question,
+                    question_stem=(question_stem[i] if question_stem else question.question_stem),
                     answer_options=answer_options,
-                    prefilled_response=prefilled_responses.get(
-                        questionnaire_questions[i].item_id
-                    ),
+                    prefilled_response=prefilled_responses.get(question.item_id),
                 )
                 updated_questions.append(new_questionnaire_question)
         elif prompt_list and options_dict:
-            for i in range(len(questionnaire_questions)):
+            for i, question in enumerate(questionnaire_questions):
                 new_questionnaire_question = replace(
-                    questionnaire_questions[i],
-                    question_stem=(
-                        question_stem[i]
-                        if question_stem
-                        else questionnaire_questions[i].question_stem
-                    ),
-                    answer_options=answer_options.get(
-                        questionnaire_questions[i].item_id
-                    ),
-                    prefilled_response=prefilled_responses.get(
-                        questionnaire_questions[i].item_id
-                    ),
+                    question,
+                    question_stem=(question_stem[i] if question_stem else question.question_stem),
+                    answer_options=answer_options.get(question.item_id),
+                    prefilled_response=prefilled_responses.get(question.item_id),
                 )
                 updated_questions.append(new_questionnaire_question)
 
@@ -464,9 +429,7 @@ class LLMPrompt:
 
         if questionnaire_items.question_stem:
             if placeholder.QUESTION_CONTENT in questionnaire_items.question_stem:
-                format_dict = {
-                    placeholder.QUESTION_CONTENT: questionnaire_items.question_content
-                }
+                format_dict = {placeholder.QUESTION_CONTENT: questionnaire_items.question_content}
                 question_prompt = safe_format_with_regex(
                     questionnaire_items.question_stem, format_dict
                 )
@@ -479,9 +442,7 @@ class LLMPrompt:
             _options_str = questionnaire_items.answer_options.create_options_str()
             if _options_str is not None:
                 safe_formatter = {placeholder.PROMPT_OPTIONS: _options_str}
-                question_prompt = safe_format_with_regex(
-                    question_prompt, safe_formatter
-                )
+                question_prompt = safe_format_with_regex(question_prompt, safe_formatter)
 
         return question_prompt
 
@@ -510,7 +471,7 @@ class LLMPrompt:
 
     def insert_questions(
         self,
-        items: Union[QuestionnaireItem, List[QuestionnaireItem]],
+        items: QuestionnaireItem | list[QuestionnaireItem],
         position: int = None,
     ) -> None:
         """Inserts one or more questions into the questionnaire.
@@ -525,7 +486,7 @@ class LLMPrompt:
 
         if not isinstance(items, (list, tuple)):
             items = [items]
-        
+
         self._questions[position:position] = items
 
 
@@ -534,7 +495,7 @@ _IDX_TYPES = Literal["char_lower", "char_upper", "integer", "no_index"]
 
 def generate_likert_options(
     n: int,
-    answer_texts: Optional[List[str]],
+    answer_texts: list[str] | None,
     only_from_to_scale: bool = False,
     random_order: bool = False,
     reversed_order: bool = False,
@@ -549,7 +510,7 @@ def generate_likert_options(
     index_answer_separator: str = ": ",
     options_separator: str = ", ",
     idx_type: _IDX_TYPES = "integer",
-    response_generation_method: Optional[ResponseGenerationMethod] = None,
+    response_generation_method: ResponseGenerationMethod | None = None,
 ) -> AnswerOptions:
     """Generates a set of options and a prompt for a Likert-style scale.
 
@@ -623,36 +584,24 @@ def generate_likert_options(
                 )
     if even_order:
         if n % 2 == 0:
-            raise ValueError(
-                "If you want to turn a scale even, it should be odd before."
-            )
+            raise ValueError("If you want to turn a scale even, it should be odd before.")
         middle_index = n // 2
         answer_texts = answer_texts[:middle_index] + answer_texts[middle_index + 1 :]
         n = n - 1
     if add_middle_category:
         if n % 2 != 0:
-            raise ValueError(
-                "If you want to add a middle category, it should be even before."
-            )
+            raise ValueError("If you want to add a middle category, it should be even before.")
         middle_index = n // 2
-        answer_texts = (
-            answer_texts[:middle_index] + [str_middle_cat] + answer_texts[middle_index:]
-        )
+        answer_texts = answer_texts[:middle_index] + [str_middle_cat] + answer_texts[middle_index:]
         n = n + 1
 
     if random_order:
         if len(answer_texts) < 2:
-            raise ValueError(
-                "There must be at least two answer options to reorder randomly."
-            )
-        random.shuffle(
-            answer_texts
-        )  # no assignment needed because shuffles already inplace
+            raise ValueError("There must be at least two answer options to reorder randomly.")
+        random.shuffle(answer_texts)  # no assignment needed because shuffles already inplace
     if reversed_order:
         if len(answer_texts) < 2:
-            raise ValueError(
-                "There must be at least two answer options to reorder in reverse."
-            )
+            raise ValueError("There must be at least two answer options to reorder in reverse.")
         answer_texts = answer_texts[::-1]
 
     if add_refusal:

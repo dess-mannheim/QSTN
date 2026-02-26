@@ -49,41 +49,30 @@ Usage example:
     )
 """
 
-from typing import (
-    List,
-    Dict,
-    Optional,
-    Union,
-    Any,
-    Iterable,
-)
-
-from pathlib import Path
 import os
+from collections.abc import Iterable
+from pathlib import Path
+from typing import (
+    Any,
+    Union,
+)
 
 import pandas as pd
-
 from openai import AsyncOpenAI
-
 from tqdm.auto import tqdm
 
+from .inference.response_generation import (
+    JSONResponseGenerationMethod,
+    ResponseGenerationMethod,
+)
+from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
+from .parser.llm_answer_parser import raw_responses
+from .prompt_builder import LLMPrompt, QuestionnairePresentation
+from .utilities import constants, utils
 from .utilities.survey_objects import (
+    InferenceResult,
     QuestionLLMResponseTuple,
 )
-from .utilities import constants
-from .utilities import utils
-
-from .parser.llm_answer_parser import raw_responses
-
-from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
-from .inference.response_generation import (
-    ResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-)
-
-from .prompt_builder import LLMPrompt, QuestionnairePresentation
-
-from .utilities.survey_objects import InferenceResult
 
 # @dataclass
 # class GenerationFailure:
@@ -93,8 +82,8 @@ from .utilities.survey_objects import InferenceResult
 
 
 def _normalize_llm_prompts(
-    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
-) -> List[LLMPrompt]:
+    llm_prompts: LLMPrompt | list[LLMPrompt],
+) -> list[LLMPrompt]:
     """Normalize a single prompt or list of prompts to a list."""
     if isinstance(llm_prompts, LLMPrompt):
         return [llm_prompts]
@@ -102,8 +91,8 @@ def _normalize_llm_prompts(
 
 
 def _initialize_question_response_pairs(
-    llm_prompts: List[LLMPrompt],
-) -> List[Dict[int, QuestionLLMResponseTuple]]:
+    llm_prompts: list[LLMPrompt],
+) -> list[dict[int, QuestionLLMResponseTuple]]:
     """Initialize mutable per-questionnaire response maps."""
     return [{} for _ in llm_prompts]
 
@@ -115,7 +104,7 @@ def _iter_survey_steps(max_survey_length: int, print_progress: bool):
     return range(max_survey_length)
 
 
-def _get_current_batch(llm_prompts: List[LLMPrompt], i: int) -> Dict[int, LLMPrompt]:
+def _get_current_batch(llm_prompts: list[LLMPrompt], i: int) -> dict[int, LLMPrompt]:
     """Return questionnaire batch that still has a question at step index i."""
     return {
         pos: questionnaire
@@ -125,11 +114,11 @@ def _get_current_batch(llm_prompts: List[LLMPrompt], i: int) -> Dict[int, LLMPro
 
 
 def _normalize_generation_outputs(
-    output: List[str],
-    logprobs: Optional[List[Any]],
-    reasoning_output: Optional[List[Any]],
+    output: list[str],
+    logprobs: list[Any] | None,
+    reasoning_output: list[Any] | None,
     expected_size: int,
-) -> tuple[List[str], List[Any], List[Any]]:
+) -> tuple[list[str], list[Any], list[Any]]:
     """Normalize optional generation outputs to zip-safe lists."""
     if logprobs is None:
         logprobs = [None] * expected_size
@@ -140,16 +129,16 @@ def _normalize_generation_outputs(
 
 def _run_batch_generation(
     model: Union["LLM", AsyncOpenAI],
-    system_messages: List[str],
-    prompts: List[str],
-    response_generation_methods: Optional[List[ResponseGenerationMethod]],
-    client_model_name: Optional[str],
+    system_messages: list[str],
+    prompts: list[str],
+    response_generation_methods: list[ResponseGenerationMethod] | None,
+    client_model_name: str | None,
     api_concurrency: int,
     print_conversation: bool,
     print_progress: bool,
     seed: int,
     **generation_kwargs: Any,
-) -> tuple[List[str], List[Any], List[Any]]:
+) -> tuple[list[str], list[Any], list[Any]]:
     """Thin wrapper around `batch_generation` with normalized optional outputs."""
     output, logprobs, reasoning_output = batch_generation(
         model=model,
@@ -172,9 +161,9 @@ def _run_batch_generation(
 
 
 def _finalize_survey_results(
-    llm_prompts: List[LLMPrompt],
-    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]],
-) -> List[InferenceResult]:
+    llm_prompts: list[LLMPrompt],
+    question_llm_response_pairs: list[dict[int, QuestionLLMResponseTuple]],
+) -> list[InferenceResult]:
     """Convert internal response maps to public `InferenceResult` objects."""
     return [
         InferenceResult(survey, question_llm_response_pairs[i])
@@ -183,12 +172,12 @@ def _finalize_survey_results(
 
 
 def _store_question_responses(
-    question_llm_response_pairs: List[Dict[int, QuestionLLMResponseTuple]],
+    question_llm_response_pairs: list[dict[int, QuestionLLMResponseTuple]],
     survey_ids: Iterable[int],
-    questions: List[str],
-    answers: List[str],
-    logprobs: List[Any],
-    reasoning_output: List[Any],
+    questions: list[str],
+    answers: list[str],
+    logprobs: list[Any],
+    reasoning_output: list[Any],
     item_ids: Iterable[Any],
 ) -> None:
     """Store question-level answers in the mutable response map."""
@@ -201,32 +190,26 @@ def _store_question_responses(
         item_ids,
     ):
         question_llm_response_pairs[survey_id].update(
-            {
-                item_id: QuestionLLMResponseTuple(
-                    question, answer, logprob_answer, reasoning
-                )
-            }
+            {item_id: QuestionLLMResponseTuple(question, answer, logprob_answer, reasoning)}
         )
 
 
 def _prepare_single_item_batch(
-    current_batch: Dict[int, LLMPrompt], i: int
-) -> tuple[List[str], List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    current_batch: dict[int, LLMPrompt], i: int
+) -> tuple[list[str], list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and metadata for a single-item survey step."""
     system_messages, prompts = zip(
         *[
-                questionnaire.get_prompt_for_questionnaire_type(
-                    QuestionnairePresentation.SINGLE_ITEM,
-                    questionnaire.get_question_item_id(i),
-                )
+            questionnaire.get_prompt_for_questionnaire_type(
+                QuestionnairePresentation.SINGLE_ITEM,
+                questionnaire.get_question_item_id(i),
+            )
             for questionnaire in current_batch.values()
         ]
     )
 
     questions = [
-        questionnaire.generate_question_prompt(
-            questionnaire_items=questionnaire.get_question(i)
-        )
+        questionnaire.generate_question_prompt(questionnaire_items=questionnaire.get_question(i))
         for questionnaire in current_batch.values()
     ]
     response_generation_methods = [
@@ -242,27 +225,27 @@ def _prepare_single_item_batch(
 
 
 def _prepare_battery_batch(
-    current_batch: Dict[int, LLMPrompt], i: int, item_separator: str
-) -> tuple[List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    current_batch: dict[int, LLMPrompt], i: int, item_separator: str
+) -> tuple[list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and response-generation methods for battery mode."""
     system_messages, prompts = zip(
         *[
-                questionnaire.get_prompt_for_questionnaire_type(
-                    QuestionnairePresentation.BATTERY,
-                    questionnaire.get_question_item_id(i),
-                    item_separator=item_separator,
-                )
+            questionnaire.get_prompt_for_questionnaire_type(
+                QuestionnairePresentation.BATTERY,
+                questionnaire.get_question_item_id(i),
+                item_separator=item_separator,
+            )
             for questionnaire in current_batch.values()
         ]
     )
 
-    response_generation_methods: List[Optional[ResponseGenerationMethod]] = []
+    response_generation_methods: list[ResponseGenerationMethod | None] = []
     for questionnaire in current_batch.values():
         response_generation_method = None
         if questionnaire.get_question(i).answer_options:
-            response_generation_method = (
-                questionnaire.get_question(i).answer_options.response_generation_method
-            )
+            response_generation_method = questionnaire.get_question(
+                i
+            ).answer_options.response_generation_method
             if isinstance(response_generation_method, JSONResponseGenerationMethod):
                 response_generation_method = (
                     response_generation_method.create_new_rgm_with_multiple_questions(
@@ -275,8 +258,8 @@ def _prepare_battery_batch(
 
 
 def _prepare_sequential_step(
-    current_batch: Dict[int, LLMPrompt], i: int
-) -> tuple[List[str], List[str], List[str], List[Optional[ResponseGenerationMethod]]]:
+    current_batch: dict[int, LLMPrompt], i: int
+) -> tuple[list[str], list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare per-step prompts/questions/methods for sequential mode."""
     first_question: bool = i == 0
 
@@ -328,16 +311,16 @@ def _prepare_sequential_step(
 
 def conduct_survey_single_item(
     model: Union["LLM", AsyncOpenAI],
-    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
-    client_model_name: Optional[str] = None,
+    llm_prompts: LLMPrompt | list[LLMPrompt],
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
-    n_save_step: Optional[int] = None,
-    intermediate_save_file: Optional[str] = None,
+    n_save_step: int | None = None,
+    intermediate_save_file: str | None = None,
     seed: int = 42,
     **generation_kwargs: Any,
-) -> List[InferenceResult]:
+) -> list[InferenceResult]:
     """
     Conducts a survey by asking each question in a new context (single item presentation).
 
@@ -367,9 +350,7 @@ def conduct_survey_single_item(
 
     llm_prompts = _normalize_llm_prompts(llm_prompts)
 
-    max_survey_length: int = max(
-        len(questionnaire) for questionnaire in llm_prompts
-    )
+    max_survey_length: int = max(len(questionnaire) for questionnaire in llm_prompts)
     question_llm_response_pairs = _initialize_question_response_pairs(llm_prompts)
 
     for i in _iter_survey_steps(max_survey_length, print_progress):
@@ -426,7 +407,7 @@ def conduct_survey_single_item(
 
 
 def _intermediate_saves(
-    questionnaires: List[LLMPrompt],
+    questionnaires: list[LLMPrompt],
     n_save_step: int,
     intermediate_save_file: str,
     question_llm_response_pairs: QuestionLLMResponseTuple,
@@ -444,7 +425,7 @@ def _intermediate_saves(
     """
     if n_save_step:
         if i % n_save_step == 0:
-            intermediate_survey_results: List[InferenceResult] = []
+            intermediate_survey_results: list[InferenceResult] = []
             for j, questionnaire in enumerate(questionnaires):
                 intermediate_survey_results.append(
                     InferenceResult(questionnaire, question_llm_response_pairs[j])
@@ -466,9 +447,7 @@ def _intermediate_save_path_check(n_save_step: int, intermediate_save_path: str)
             raise ValueError("`n_save_step` must be a positive integer.")
 
         if not intermediate_save_path:
-            raise ValueError(
-                "`intermediate_save_file` must be provided if saving is enabled."
-            )
+            raise ValueError("`intermediate_save_file` must be provided if saving is enabled.")
 
         if not intermediate_save_path.endswith(".csv"):
             raise ValueError("`intermediate_save_file` should be a .csv file.")
@@ -490,17 +469,17 @@ def _intermediate_save_path_check(n_save_step: int, intermediate_save_path: str)
 
 def conduct_survey_battery(
     model: Union["LLM", AsyncOpenAI],
-    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
-    client_model_name: Optional[str] = None,
+    llm_prompts: LLMPrompt | list[LLMPrompt],
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
-    n_save_step: Optional[int] = None,
-    intermediate_save_file: Optional[str] = None,
+    n_save_step: int | None = None,
+    intermediate_save_file: str | None = None,
     print_conversation: bool = False,
     print_progress: bool = True,
     seed: int = 42,
     item_separator: str = "\n",
     **generation_kwargs: Any,
-) -> List[InferenceResult]:
+) -> list[InferenceResult]:
     """
     Conducts the entire survey in one single LLM prompt (battery presentation).
 
@@ -585,16 +564,16 @@ def conduct_survey_battery(
 
 def conduct_survey_sequential(
     model: Union["LLM", AsyncOpenAI],
-    llm_prompts: Union[LLMPrompt, List[LLMPrompt]],
-    client_model_name: Optional[str] = None,
+    llm_prompts: LLMPrompt | list[LLMPrompt],
+    client_model_name: str | None = None,
     api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
-    n_save_step: Optional[int] = None,
-    intermediate_save_file: Optional[str] = None,
+    n_save_step: int | None = None,
+    intermediate_save_file: str | None = None,
     seed: int = 42,
     **generation_kwargs: Any,
-) -> List[InferenceResult]:
+) -> list[InferenceResult]:
     """
     Conducts the survey in multiple chat calls, where all questions and answers are kept in context (sequential presentation).
 
@@ -618,14 +597,12 @@ def conduct_survey_sequential(
     _intermediate_save_path_check(n_save_step, intermediate_save_file)
     llm_prompts = _normalize_llm_prompts(llm_prompts)
 
-    max_survey_length: int = max(
-        len(questionnaire) for questionnaire in llm_prompts
-    )
+    max_survey_length: int = max(len(questionnaire) for questionnaire in llm_prompts)
 
     question_llm_response = _initialize_question_response_pairs(llm_prompts)
 
-    all_prompts: List[List[str]] = []
-    assistant_messages: List[List[str]] = []
+    all_prompts: list[list[str]] = []
+    assistant_messages: list[list[str]] = []
 
     for i in range(len(llm_prompts)):
         assistant_messages.append([])
@@ -643,7 +620,7 @@ def conduct_survey_sequential(
         for c in range(len(current_batch.values())):
             all_prompts[c].append(prompts[c])
 
-        current_assistant_messages: List[str] = []
+        current_assistant_messages: list[str] = []
 
         missing_indeces = []
 
@@ -654,9 +631,7 @@ def conduct_survey_sequential(
                 missing_indeces.append(index)
 
         needed_batch = [
-            item
-            for a, item in enumerate(current_batch.values())
-            if a not in missing_indeces
+            item for a, item in enumerate(current_batch.values()) if a not in missing_indeces
         ]
 
         if len(needed_batch) == 0:
@@ -729,11 +704,12 @@ def conduct_survey_sequential(
 
 
 class SurveyCreator:
-    @classmethod
-    def from_path(cls, survey_path: str, questionnaire_path: str) -> List[LLMPrompt]:
-        """
-        Generates LLMPrompt objects from two csv files. One fills the surveys, one fills the personas.
+    """Helper class to create LLM prompts from a population CSV/DataFrame and questionnaire."""
 
+    @classmethod
+    def from_path(cls, survey_path: str, questionnaire_path: str) -> list[LLMPrompt]:
+        """
+        Generates LLMPrompt objects from two CSV files (population/survey and questionnaire).
         Args:
             survey_path (str): The path to the survey CSV file.
 
@@ -747,9 +723,9 @@ class SurveyCreator:
     @classmethod
     def from_dataframe(
         cls, survey_dataframe: pd.DataFrame, questionnaire_dataframe: pd.DataFrame
-    ) -> List[LLMPrompt]:
+    ) -> list[LLMPrompt]:
         """
-        Generates LLMQuestionnaire objects from two pandas DataFrames.
+        Generates LLMPrompt objects from two pandas DataFrames.
 
         Args:
             survey_dataframe (pandas.DataFrame): A DataFrame containing the survey data (questionnaire_name, system_prompt and questionnaire_instruction).
@@ -773,9 +749,7 @@ class SurveyCreator:
         )
 
     @classmethod
-    def _from_dataframe(
-        cls, df: pd.DataFrame, df_questionnaire: pd.DataFrame
-    ) -> List[LLMPrompt]:
+    def _from_dataframe(cls, df: pd.DataFrame, df_questionnaire: pd.DataFrame) -> list[LLMPrompt]:
         """
         Internal helper method to process the DataFrame.
         """

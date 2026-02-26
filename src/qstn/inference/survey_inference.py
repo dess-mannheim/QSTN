@@ -114,8 +114,6 @@ def _print_conversation(
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
             tqdm.write(round_print)
 
-
-# TODO Structured output for API calls
 def batch_generation(
     model: Union[LLM, AsyncOpenAI],
     system_messages: List[str] = ("You are a helpful assistant.",),
