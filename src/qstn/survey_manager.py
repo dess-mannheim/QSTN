@@ -82,7 +82,7 @@ from .utilities.survey_objects import (
 )
 
 if TYPE_CHECKING:
-    from vllm import LLM
+    from vllm import LLM  # pyright: ignore[reportMissingImports]
 
 # @dataclass
 # class GenerationFailure:

@@ -2,10 +2,10 @@ import random
 from collections.abc import Sequence
 from typing import Any
 
-import torch
-from vllm import LLM, SamplingParams
-from vllm.outputs import RequestOutput
-from vllm.sampling_params import StructuredOutputsParams
+import torch  # pyright: ignore[reportMissingImports]
+from vllm import LLM, SamplingParams  # pyright: ignore[reportMissingImports]
+from vllm.outputs import RequestOutput  # pyright: ignore[reportMissingImports]
+from vllm.sampling_params import StructuredOutputsParams  # pyright: ignore[reportMissingImports]
 
 from ..utilities.utils import _make_cache_key, generate_seeds
 from .dynamic_pydantic import _generate_pydantic_model
