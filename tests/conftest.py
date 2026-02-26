@@ -5,6 +5,30 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
 
+# Keep test imports lightweight: provide small stubs when heavy ML deps are absent.
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+
+    def _manual_seed(seed):
+        return None
+
+    class _Cuda:
+        @staticmethod
+        def device_count():
+            return 0
+
+        @staticmethod
+        def _is_in_bad_fork():
+            return False
+
+    torch_stub.manual_seed = _manual_seed
+    torch_stub.cuda = _Cuda()
+    sys.modules["torch"] = torch_stub
+
+if "transformers" not in sys.modules:
+    transformers_stub = types.ModuleType("transformers")
+    sys.modules["transformers"] = transformers_stub
+
 # Keep test imports lightweight: allow `qstn` import paths without pulling full vLLM/torch stack.
 if "vllm" not in sys.modules:
     vllm_stub = types.ModuleType("vllm")
