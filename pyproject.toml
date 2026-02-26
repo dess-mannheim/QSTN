@@ -30,6 +30,13 @@ license-files = ["LICEN[CS]E*"]
 [project.optional-dependencies]
 vllm = ["vllm>=0.12"]
 
+dev = [
+    "black",
+    "ruff",
+    "mypy",
+    "pre-commit"
+]
+
 [project.urls]
 Homepage = "https://github.com/dess-mannheim/QSTN"
 Documentation = "https://qstn.readthedocs.io/en/latest/index.html"
@@ -37,3 +44,29 @@ Documentation = "https://qstn.readthedocs.io/en/latest/index.html"
 [tool.hatch.build.targets.wheel]
 packages = ["src/qstn"]
 
+
+[tool.black]
+target-version = ["py312"]
+line-length = 100
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    # zip without `strict=`
+    "B905",
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
