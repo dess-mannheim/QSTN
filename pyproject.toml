@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "qstn"
-version = "0.2.1"
+dynamic = ["version"]
 description = "A Modular Framework for Robust Questionnaire Inference with Large Language Models"
 authors = [
     { name = "Maximilian Kreutner", email = "maximilian.kreutner@uni-mannheim.de" }
@@ -45,6 +45,12 @@ Documentation = "https://qstn.readthedocs.io/en/latest/index.html"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/qstn"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/qstn/_version.py"
 
 
 [tool.black]
