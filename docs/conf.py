@@ -7,6 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.abspath("../src"))
@@ -19,7 +20,31 @@ author = "Maximilian Kreutner"
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-release = qstn.__version__
+
+def _latest_stable_tag() -> str | None:
+    """Return the most recent stable tag (optionally prefixed with 'v')."""
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    try:
+        output = subprocess.check_output(
+            ["git", "tag", "--sort=-v:refname"],
+            cwd=repo_root,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+    for raw_tag in output.splitlines():
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        normalized = tag[1:] if tag.startswith("v") else tag
+        parts = normalized.split(".")
+        if len(parts) == 3 and all(part.isdigit() for part in parts):
+            return normalized
+    return None
+
+
+release = _latest_stable_tag() or qstn.__version__
 
 extensions = [
     "sphinx.ext.autodoc",  # Core library to pull documentation from docstrings
