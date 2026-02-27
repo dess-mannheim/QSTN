@@ -22,6 +22,7 @@ quickstart
 :caption: Tutorials
 :maxdepth: 2
 
+foundations/index
 guides/index
 resources/index
 ```

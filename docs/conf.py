@@ -9,32 +9,33 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath('../src'))
+sys.path.insert(0, os.path.abspath("../src"))
+import qstn
 
-project = 'QSTN'
-copyright = '2025, Maximilian Kreutner'
-author = 'Maximilian Kreutner'
+project = "QSTN"
+copyright = "2025, Maximilian Kreutner"
+author = "Maximilian Kreutner"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-release = '0.2.1'
+release = qstn.__version__
 
 extensions = [
-    'sphinx.ext.autodoc',      # Core library to pull documentation from docstrings
-    'sphinx.ext.napoleon',     # Support for Google and NumPy style docstrings
-    'sphinx.ext.viewcode',     # Add links to highlighted source code
-    'myst_nb',                 # To write documentation in Markdown instead of reStructuredText
+    "sphinx.ext.autodoc",  # Core library to pull documentation from docstrings
+    "sphinx.ext.napoleon",  # Support for Google and NumPy style docstrings
+    "sphinx.ext.viewcode",  # Add links to highlighted source code
+    "myst_nb",  # To write documentation in Markdown instead of reStructuredText
 ]
 
-templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # Tell Sphinx to use MyST for docstrings
 autodoc_default_options = {
-    'members': True,
-    'undoc-members': True,
-    'private-members': False,
+    "members": True,
+    "undoc-members": True,
+    "private-members": False,
 }
 
 autosummary_generate = True
@@ -45,18 +46,18 @@ autodoc_mock_imports = ["vllm", "torch", "transformers"]
 autodoc_typehints = "description"
 
 source_suffix = {
-    '.rst': 'restructuredtext',
-    '.md': 'myst-nb',
-    '.ipynb': 'myst-nb',
+    ".rst": "restructuredtext",
+    ".md": "myst-nb",
+    ".ipynb": "myst-nb",
 }
 
 nb_execution_mode = "off"
 
-root_doc = 'index'
+root_doc = "index"
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_book_theme"
-html_static_path = ['_static']
+html_static_path = ["_static"]
