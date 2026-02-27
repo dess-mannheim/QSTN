@@ -8,4 +8,5 @@ This section explains QSTN's core building blocks before the full workflow tutor
 llm_prompt_tutorial
 answer_options_tutorial
 response_generation_parsing_tutorial
+inference_batching_tutorial
 ```
