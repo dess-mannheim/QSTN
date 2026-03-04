@@ -709,7 +709,6 @@ def conduct_survey_sequential(
                 assistant_history[survey_id].append(answer)
 
             continue
-            # TODO: add support for automatic system prompt for other answer production methods
 
         needed_prompt_history = [prompt_history[survey_id] for survey_id in needed_survey_ids]
         needed_assistant_history = [assistant_history[survey_id] for survey_id in needed_survey_ids]
