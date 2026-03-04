@@ -652,6 +652,7 @@ def conduct_survey_sequential(
         ) = _prepare_sequential_step(current_batch, i)
 
         current_batch_size = len(current_batch)
+
         _validate_lengths_against_expected(
             current_batch_size,
             "Sequential step inputs are misaligned",
@@ -680,6 +681,7 @@ def conduct_survey_sequential(
                 needed_response_generation_methods.append(response_generation_methods[local_index])
 
         needed_batch_size = len(needed_survey_ids)
+
         _validate_lengths_against_expected(
             needed_batch_size,
             "Filtered sequential inference inputs are misaligned",
@@ -687,10 +689,12 @@ def conduct_survey_sequential(
             needed_response_generation_methods=needed_response_generation_methods,
         )
 
+        # All prompts in the current batch are prefilled -> we continue with the next loop
         if needed_batch_size == 0:
             output = [prefilled_by_position[idx] for idx in range(current_batch_size)]
             logprobs = [None] * current_batch_size
             reasoning_output = [None] * current_batch_size
+
             _store_question_responses(
                 question_llm_response_pairs=question_llm_response,
                 survey_ids=current_batch.keys(),
@@ -700,16 +704,16 @@ def conduct_survey_sequential(
                 reasoning_output=reasoning_output,
                 item_ids=[item.get_question_item_id(i) for item in current_batch.values()],
             )
+
             for survey_id, answer in zip(current_survey_ids, output):
                 assistant_history[survey_id].append(answer)
+
             continue
             # TODO: add support for automatic system prompt for other answer production methods
 
         needed_prompt_history = [prompt_history[survey_id] for survey_id in needed_survey_ids]
         needed_assistant_history = [assistant_history[survey_id] for survey_id in needed_survey_ids]
 
-        # TODO Implement Retrying for errors.
-        # try:
         needed_output, logprobs, reasoning_output = batch_turn_by_turn_generation(
             model=model,
             system_messages=needed_system_messages,
@@ -723,15 +727,8 @@ def conduct_survey_sequential(
             seed=seed,
             **generation_kwargs,
         )
-        # except Exception as e:
-        #     warnings.warn(
-        #         "Questions at position {i} could not be processed, because "
-        #         "an error occured: {e}. Output is set to None"
-        #     )
-        #     output = [None] * len(current_batch)
-        #     logprobs = None
-        #     reasoning_output = [None] * len(current_batch)
 
+        # Make sure that outputs are available
         if reasoning_output is None:
             reasoning_output = [None] * needed_batch_size
         if logprobs is None or len(logprobs) == 0:
@@ -752,6 +749,8 @@ def conduct_survey_sequential(
         output: list[str] = []
         full_logprobs: list[Any] = []
         full_reasoning_output: list[Any] = []
+
+        # Append to the correct survey
         for local_index, survey_id in enumerate(current_survey_ids):
             if local_index in prefilled_by_position:
                 answer = prefilled_by_position[local_index]
