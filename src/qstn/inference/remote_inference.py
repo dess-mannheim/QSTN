@@ -1,5 +1,8 @@
 import asyncio
+import atexit
 import threading
+import weakref
+from concurrent.futures import Future
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -15,6 +18,70 @@ from .response_generation import (
     ResponseGenerationMethod,
 )
 from .utils import normalize_system_messages
+
+
+class _ClientLoopRunner:
+    """Persistent event loop running in a background thread."""
+
+    def __init__(self):
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_ready = threading.Event()
+        self._thread = threading.Thread(target=self._thread_main, daemon=True)
+        self._thread.start()
+        self._loop_ready.wait()
+
+    def _thread_main(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        self._loop_ready.set()
+        loop.run_forever()
+        pending = asyncio.all_tasks(loop=loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
+
+    def submit(self, coro: Any) -> Future:
+        if self._loop is None:
+            raise RuntimeError("Loop runner is not initialized.")
+        return asyncio.run_coroutine_threadsafe(coro, self._loop)
+
+    def shutdown(self) -> None:
+        if self._loop is None:
+            return
+        if self._loop.is_closed():
+            return
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        if threading.current_thread() is not self._thread:
+            self._thread.join(timeout=5)
+
+
+_CLIENT_LOOP_RUNNERS: weakref.WeakKeyDictionary[AsyncOpenAI, _ClientLoopRunner] = (
+    weakref.WeakKeyDictionary()
+)
+_CLIENT_LOOP_RUNNERS_LOCK = threading.Lock()
+
+
+def _get_or_create_runner(client: AsyncOpenAI) -> _ClientLoopRunner:
+    with _CLIENT_LOOP_RUNNERS_LOCK:
+        runner = _CLIENT_LOOP_RUNNERS.get(client)
+        if runner is None:
+            runner = _ClientLoopRunner()
+            _CLIENT_LOOP_RUNNERS[client] = runner
+        return runner
+
+
+def _shutdown_all_client_loop_runners() -> None:
+    with _CLIENT_LOOP_RUNNERS_LOCK:
+        runners = list(_CLIENT_LOOP_RUNNERS.values())
+        _CLIENT_LOOP_RUNNERS.clear()
+    for runner in runners:
+        runner.shutdown()
+
+
+atexit.register(_shutdown_all_client_loop_runners)
 
 
 def run_openai_batch(
@@ -127,7 +194,7 @@ def run_openai_batch_conversation(
 
 def _run_async_in_thread(
     client: AsyncOpenAI,
-    client_model_name: str,
+    client_model_name: str | None,
     batch_messages: list[list[dict[str, str]]],
     seeds: list[int],
     concurrency_limit: int = 10,
@@ -139,45 +206,34 @@ def _run_async_in_thread(
     reasoning_end_token: str = "</think>",
     **generation_kwargs,
 ):
-    result_container = {}
-
     logprob_config = _update_logprob_kwargs(response_generation_method, generation_kwargs)
 
     sampling_params = _create_structured_output(
         batch_size=len(batch_messages),
         response_generation_method=response_generation_method,
     )
+    coro = _run_api_batch_async(
+        client=client,
+        client_model_name=client_model_name,
+        batch_messages=batch_messages,
+        seeds=seeds,
+        concurrency_limit=concurrency_limit,
+        print_progress=print_progress,
+        response_generation_method=response_generation_method,
+        sampling_params=sampling_params,
+        logprob_config=logprob_config,
+        reasoning_start_token=reasoning_start_token,
+        reasoning_end_token=reasoning_end_token,
+        **generation_kwargs,
+    )
 
-    def thread_target():
-        try:
-            res = asyncio.run(
-                _run_api_batch_async(
-                    client=client,
-                    client_model_name=client_model_name,
-                    batch_messages=batch_messages,
-                    seeds=seeds,
-                    concurrency_limit=concurrency_limit,
-                    print_progress=print_progress,
-                    response_generation_method=response_generation_method,
-                    sampling_params=sampling_params,
-                    logprob_config=logprob_config,
-                    reasoning_start_token=reasoning_start_token,
-                    reasoning_end_token=reasoning_end_token,
-                    **generation_kwargs,
-                )
-            )
-            result_container["result"] = res
-        except Exception as e:
-            result_container["error"] = e
-
-    thread = threading.Thread(target=thread_target)
-    thread.start()
-    thread.join()
-
-    if "error" in result_container:
-        raise result_container["error"]
-
-    return result_container.get("result")
+    runner = _get_or_create_runner(client)
+    try:
+        future = runner.submit(coro)
+    except Exception:
+        coro.close()
+        raise
+    return future.result()
 
 
 async def _run_api_batch_async(
