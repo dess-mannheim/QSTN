@@ -137,6 +137,18 @@ def _normalize_generation_outputs(
     return output, logprobs, reasoning_output
 
 
+def _validate_lengths_against_expected(
+    expected_size: int,
+    error_prefix: str,
+    **values: Any,
+) -> None:
+    """Raise a ValueError when one or more values don't match expected length."""
+    mismatches = {name: len(value) for name, value in values.items() if len(value) != expected_size}
+    if mismatches:
+        mismatch_details = ", ".join(f"{name}={size}" for name, size in mismatches.items())
+        raise ValueError(f"{error_prefix}: expected={expected_size}, {mismatch_details}")
+
+
 def _run_batch_generation(
     model: Union["LLM", AsyncOpenAI],
     system_messages: list[str | None],
@@ -626,15 +638,12 @@ def conduct_survey_sequential(
 
     question_llm_response = _initialize_question_response_pairs(llm_prompts)
 
-    all_prompts: list[list[str]] = []
-    assistant_messages: list[list[str]] = []
-
-    for _ in llm_prompts:
-        assistant_messages.append([])
-        all_prompts.append([])
+    prompt_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
+    assistant_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
 
     for i in _iter_survey_steps(max_survey_length, print_progress):
         current_batch = _get_current_batch(llm_prompts, i)
+        current_survey_ids = list(current_batch.keys())
         (
             system_messages,
             prompts,
@@ -642,49 +651,71 @@ def conduct_survey_sequential(
             response_generation_methods,
         ) = _prepare_sequential_step(current_batch, i)
 
-        for c in range(len(current_batch.values())):
-            all_prompts[c].append(prompts[c])
+        current_batch_size = len(current_batch)
+        _validate_lengths_against_expected(
+            current_batch_size,
+            "Sequential step inputs are misaligned",
+            system_messages=system_messages,
+            prompts=prompts,
+            questions=questions,
+            response_generation_methods=response_generation_methods,
+        )
 
-        current_assistant_messages: list[str] = []
+        for survey_id, prompt in zip(current_survey_ids, prompts):
+            prompt_history[survey_id].append(prompt)
 
-        missing_indeces = []
+        prefilled_by_position: dict[int, str] = {}
+        needed_survey_ids: list[int] = []
+        needed_system_messages: list[str | None] = []
+        needed_response_generation_methods: list[ResponseGenerationMethod | None] = []
 
-        for index, surv in enumerate(current_batch.values()):
+        for local_index, survey_id in enumerate(current_survey_ids):
+            surv = current_batch[survey_id]
             prefilled_answer = surv.get_question(i).prefilled_response
             if prefilled_answer is not None:
-                current_assistant_messages.append(prefilled_answer)
-                missing_indeces.append(index)
+                prefilled_by_position[local_index] = prefilled_answer
+            else:
+                needed_survey_ids.append(survey_id)
+                needed_system_messages.append(system_messages[local_index])
+                needed_response_generation_methods.append(response_generation_methods[local_index])
 
-        needed_batch = [
-            item for a, item in enumerate(current_batch.values()) if a not in missing_indeces
-        ]
+        needed_batch_size = len(needed_survey_ids)
+        _validate_lengths_against_expected(
+            needed_batch_size,
+            "Filtered sequential inference inputs are misaligned",
+            needed_system_messages=needed_system_messages,
+            needed_response_generation_methods=needed_response_generation_methods,
+        )
 
-        if len(needed_batch) == 0:
-            for c in range(len(current_batch.values())):
-                assistant_messages[c].append(current_assistant_messages[c])
-
-            logprobs = [None] * len(current_batch.values())
-            reasoning_output = [None] * len(current_batch.values())
+        if needed_batch_size == 0:
+            output = [prefilled_by_position[idx] for idx in range(current_batch_size)]
+            logprobs = [None] * current_batch_size
+            reasoning_output = [None] * current_batch_size
             _store_question_responses(
                 question_llm_response_pairs=question_llm_response,
                 survey_ids=current_batch.keys(),
                 questions=questions,
-                answers=current_assistant_messages,
+                answers=output,
                 logprobs=logprobs,
                 reasoning_output=reasoning_output,
                 item_ids=[item.get_question_item_id(i) for item in current_batch.values()],
             )
+            for survey_id, answer in zip(current_survey_ids, output):
+                assistant_history[survey_id].append(answer)
             continue
             # TODO: add support for automatic system prompt for other answer production methods
 
+        needed_prompt_history = [prompt_history[survey_id] for survey_id in needed_survey_ids]
+        needed_assistant_history = [assistant_history[survey_id] for survey_id in needed_survey_ids]
+
         # TODO Implement Retrying for errors.
         # try:
-        output, logprobs, reasoning_output = batch_turn_by_turn_generation(
+        needed_output, logprobs, reasoning_output = batch_turn_by_turn_generation(
             model=model,
-            system_messages=system_messages,
-            prompts=all_prompts,
-            assistant_messages=assistant_messages,
-            response_generation_method=response_generation_methods,
+            system_messages=needed_system_messages,
+            prompts=needed_prompt_history,
+            assistant_messages=needed_assistant_history,
+            response_generation_method=needed_response_generation_methods,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
             print_conversation=print_conversation,
@@ -702,25 +733,47 @@ def conduct_survey_sequential(
         #     reasoning_output = [None] * len(current_batch)
 
         if reasoning_output is None:
-            reasoning_output = [None] * len(needed_batch)
+            reasoning_output = [None] * needed_batch_size
         if logprobs is None or len(logprobs) == 0:
-            logprobs = [None] * len(needed_batch)
+            logprobs = [None] * needed_batch_size
 
-        for num, index in enumerate(missing_indeces):
-            output.insert(index, current_assistant_messages[num])
+        _validate_lengths_against_expected(
+            needed_batch_size,
+            "Sequential inference outputs are misaligned",
+            needed_output=needed_output,
+            logprobs=logprobs,
+            reasoning_output=reasoning_output,
+        )
+
+        needed_answers_by_survey = dict(zip(needed_survey_ids, needed_output))
+        needed_logprobs_by_survey = dict(zip(needed_survey_ids, logprobs))
+        needed_reasoning_by_survey = dict(zip(needed_survey_ids, reasoning_output))
+
+        output: list[str] = []
+        full_logprobs: list[Any] = []
+        full_reasoning_output: list[Any] = []
+        for local_index, survey_id in enumerate(current_survey_ids):
+            if local_index in prefilled_by_position:
+                answer = prefilled_by_position[local_index]
+                output.append(answer)
+                full_logprobs.append(None)
+                full_reasoning_output.append(None)
+            else:
+                output.append(needed_answers_by_survey[survey_id])
+                full_logprobs.append(needed_logprobs_by_survey[survey_id])
+                full_reasoning_output.append(needed_reasoning_by_survey[survey_id])
+
+            assistant_history[survey_id].append(output[-1])
+
         _store_question_responses(
             question_llm_response_pairs=question_llm_response,
             survey_ids=current_batch.keys(),
             questions=questions,
             answers=output,
-            logprobs=logprobs,
-            reasoning_output=reasoning_output,
-            item_ids=[item.get_question_item_id(i) for item in needed_batch],
+            logprobs=full_logprobs,
+            reasoning_output=full_reasoning_output,
+            item_ids=[item.get_question_item_id(i) for item in current_batch.values()],
         )
-
-        for o, _ in enumerate(output):
-            assistant_messages[o].append(output[o])
-        # assistant_messages.append(output)
 
         _intermediate_saves(
             llm_prompts, n_save_step, intermediate_save_file, question_llm_response, i
