@@ -7,6 +7,7 @@ import pytest
 
 from qstn import survey_manager
 from qstn.inference.response_generation import JSONSingleResponseGenerationMethod
+from qstn.parser.llm_answer_parser import raw_responses
 from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities.survey_objects import QuestionLLMResponseTuple
 
@@ -133,6 +134,165 @@ def test_conduct_survey_sequential_handles_partial_prefill_and_empty_logprobs(
 
     assert calls["count"] == 1
     assert len(results) == 2
+
+
+def test_conduct_survey_sequential_mixed_lengths_keep_persona_history(
+    mock_openai_client, monkeypatch
+):
+    """Sequential mode should keep prompt/assistant history aligned as batch size shrinks."""
+    two_items_df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    one_item_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+    prompt_a = LLMPrompt(questionnaire_source=two_items_df, questionnaire_name="A")
+    prompt_b = LLMPrompt(questionnaire_source=one_item_df, questionnaire_name="B")
+    prompt_c = LLMPrompt(questionnaire_source=two_items_df, questionnaire_name="C")
+
+    recorded_calls = []
+
+    def fake_batch_turn_by_turn_generation(**kwargs):
+        recorded_calls.append(
+            {
+                "system_messages": list(kwargs["system_messages"]),
+                "prompts": [list(conv) for conv in kwargs["prompts"]],
+                "assistant_messages": [list(conv) for conv in kwargs["assistant_messages"]],
+            }
+        )
+        call_index = len(recorded_calls) - 1
+        batch_size = len(kwargs["system_messages"])
+        return (
+            [f"STEP{call_index}_IDX{i}" for i in range(batch_size)],
+            [None] * batch_size,
+            [None] * batch_size,
+        )
+
+    monkeypatch.setattr(
+        survey_manager, "batch_turn_by_turn_generation", fake_batch_turn_by_turn_generation
+    )
+
+    results = survey_manager.conduct_survey_sequential(
+        model=mock_openai_client,
+        llm_prompts=[prompt_a, prompt_b, prompt_c],
+        client_model_name="mock-model",
+        print_progress=False,
+    )
+
+    assert len(recorded_calls) == 2
+    assert (
+        len(recorded_calls[0]["system_messages"])
+        == len(recorded_calls[0]["prompts"])
+        == len(recorded_calls[0]["assistant_messages"])
+        == 3
+    )
+    assert (
+        len(recorded_calls[1]["system_messages"])
+        == len(recorded_calls[1]["prompts"])
+        == len(recorded_calls[1]["assistant_messages"])
+        == 2
+    )
+    assert recorded_calls[1]["assistant_messages"] == [["STEP0_IDX0"], ["STEP0_IDX2"]]
+
+    parsed = raw_responses(results)
+    parsed_a = parsed[prompt_a]
+    parsed_b = parsed[prompt_b]
+    parsed_c = parsed[prompt_c]
+
+    assert (
+        parsed_a.loc[parsed_a["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX0"
+    )
+    assert (
+        parsed_a.loc[parsed_a["questionnaire_item_id"] == 2, "llm_response"].item() == "STEP1_IDX0"
+    )
+    assert (
+        parsed_b.loc[parsed_b["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX1"
+    )
+    assert (
+        parsed_c.loc[parsed_c["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX2"
+    )
+    assert (
+        parsed_c.loc[parsed_c["questionnaire_item_id"] == 2, "llm_response"].item() == "STEP1_IDX1"
+    )
+
+
+def test_conduct_survey_sequential_mixed_lengths_with_prefill_keeps_mapping(
+    mock_openai_client, monkeypatch
+):
+    """Prefilled answers should bypass generation without breaking mixed-length alignment."""
+    two_items_df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    one_item_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+    prompt_a = LLMPrompt(questionnaire_source=two_items_df, questionnaire_name="A")
+    prompt_b = LLMPrompt(questionnaire_source=one_item_df, questionnaire_name="B")
+    prompt_c = LLMPrompt(
+        questionnaire_source=two_items_df,
+        questionnaire_name="C",
+    ).prepare_prompt(prefilled_responses={2: "PREFILL_C2"})
+
+    recorded_calls = []
+
+    def fake_batch_turn_by_turn_generation(**kwargs):
+        recorded_calls.append(
+            {
+                "system_messages": list(kwargs["system_messages"]),
+                "prompts": [list(conv) for conv in kwargs["prompts"]],
+                "assistant_messages": [list(conv) for conv in kwargs["assistant_messages"]],
+            }
+        )
+        call_index = len(recorded_calls) - 1
+        batch_size = len(kwargs["system_messages"])
+        return (
+            [f"STEP{call_index}_IDX{i}" for i in range(batch_size)],
+            [None] * batch_size,
+            [None] * batch_size,
+        )
+
+    monkeypatch.setattr(
+        survey_manager, "batch_turn_by_turn_generation", fake_batch_turn_by_turn_generation
+    )
+
+    results = survey_manager.conduct_survey_sequential(
+        model=mock_openai_client,
+        llm_prompts=[prompt_a, prompt_b, prompt_c],
+        client_model_name="mock-model",
+        print_progress=False,
+    )
+
+    assert len(recorded_calls) == 2
+    assert (
+        len(recorded_calls[1]["system_messages"])
+        == len(recorded_calls[1]["prompts"])
+        == len(recorded_calls[1]["assistant_messages"])
+        == 1
+    )
+    assert recorded_calls[1]["assistant_messages"] == [["STEP0_IDX0"]]
+
+    parsed = raw_responses(results)
+    parsed_a = parsed[prompt_a]
+    parsed_b = parsed[prompt_b]
+    parsed_c = parsed[prompt_c]
+
+    assert (
+        parsed_a.loc[parsed_a["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX0"
+    )
+    assert (
+        parsed_a.loc[parsed_a["questionnaire_item_id"] == 2, "llm_response"].item() == "STEP1_IDX0"
+    )
+    assert (
+        parsed_b.loc[parsed_b["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX1"
+    )
+    assert (
+        parsed_c.loc[parsed_c["questionnaire_item_id"] == 1, "llm_response"].item() == "STEP0_IDX2"
+    )
+    assert (
+        parsed_c.loc[parsed_c["questionnaire_item_id"] == 2, "llm_response"].item() == "PREFILL_C2"
+    )
 
 
 def test_survey_creator_from_dataframe_and_from_path(tmp_path):
