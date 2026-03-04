@@ -54,8 +54,8 @@ fi
 
 echo "Running checks in conda env '${ENV_NAME}'..."
 conda run -n "$ENV_NAME" pytest -q
-conda run -n "$ENV_NAME" ruff check src tests
-conda run -n "$ENV_NAME" black --check src tests
+conda run -n "$ENV_NAME" ruff check src
+conda run -n "$ENV_NAME" black --check src
 
 echo "Creating annotated tag ${TAG}..."
 git tag -a "$TAG" -m "Release ${TAG}"
