@@ -14,11 +14,12 @@ from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
+from .utils import normalize_system_messages
 
 
 def run_openai_batch(
     model: AsyncOpenAI,
-    system_messages: list[str] = ("You are a helpful assistant.",),
+    system_messages: list[str | None] | None = ("You are a helpful assistant.",),
     prompts: list[str] = ("Hi there! What is your name?",),
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
@@ -31,17 +32,20 @@ def run_openai_batch(
     print_progress: bool = True,
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    normalized_system_messages = normalize_system_messages(
+        system_messages=system_messages,
+        batch_size=len(prompts),
+    )
 
     # Prepare batch of messages
-    batch_messages: list[list[dict[str, str]]] = [
-        [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt},
-        ]
-        for system_message, prompt in zip(system_messages, prompts)
-    ]
+    batch_messages: list[list[dict[str, str]]] = []
+    for system_message, prompt in zip(normalized_system_messages, prompts):
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        if system_message is not None:
+            messages.insert(0, {"role": "system", "content": system_message})
+        batch_messages.append(messages)
 
-    batch_size: int = len(system_messages)
+    batch_size: int = len(batch_messages)
 
     seeds = generate_seeds(seed, batch_size=batch_size)
 
@@ -63,9 +67,9 @@ def run_openai_batch(
 
 def run_openai_batch_conversation(
     model: AsyncOpenAI,
-    system_messages: list[str] = ("You are a helpful assistant.",),
-    prompts: list[str] = ("Hi there! What is your name?",),
-    assistant_messages: list[list[str]] = None,
+    system_messages: list[str | None] | None = ("You are a helpful assistant.",),
+    prompts: list[list[str]] = (("Hi there! What is your name?",),),
+    assistant_messages: list[list[str]] | None = None,
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
     ) = None,
@@ -77,15 +81,21 @@ def run_openai_batch_conversation(
     print_progress: bool = True,
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    normalized_system_messages = normalize_system_messages(
+        system_messages=system_messages,
+        batch_size=len(prompts),
+    )
 
     batch_messages = []
-    batch_size = len(system_messages)
+    batch_size = len(normalized_system_messages)
+    if assistant_messages is None:
+        assistant_messages = [[] for _ in range(batch_size)]
     for i in range(batch_size):
         messages = []
 
         # Add system message
-        if system_messages[i]:
-            messages.append({"role": "system", "content": system_messages[i]})
+        if normalized_system_messages[i] is not None:
+            messages.append({"role": "system", "content": normalized_system_messages[i]})
 
         num_user_msgs = len(prompts[i])
         num_assistant_msgs = len(assistant_messages[i])

@@ -41,7 +41,7 @@ class LLMPrompt:
         self,
         questionnaire_source: str | pd.DataFrame = None,
         questionnaire_name: str = DEFAULT_QUESTIONNAIRE_ID,
-        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         prompt: str = DEFAULT_PROMPT_STRUCTURE,
         verbose=False,
         seed: int = 42,
@@ -56,7 +56,8 @@ class LLMPrompt:
             questionnaire_source (str/pd.Dataframe): Path to the CSV file containing the
                 questionnaire structure and questions.
             questionnaire_name (str): Name/ID for the questionnaire.
-            system_prompt (str): System prompt for all questions.
+            system_prompt (str | None): System prompt for all questions.
+                Set to `None` to omit a system message.
             prompt (str): Prompt for all questions.
             verbose (bool): If True, enables verbose output. (Not implemented yet)
             seed (int): Random seed for reproducibility.
@@ -72,7 +73,7 @@ class LLMPrompt:
 
         self.questionnaire_name: str = questionnaire_name
 
-        self.system_prompt: str = system_prompt
+        self.system_prompt: str | None = system_prompt
         self.prompt: str = prompt
 
     def _check_valid_questionnaire(self, questionnaire_source: str | pd.DataFrame = None) -> bool:
@@ -111,7 +112,7 @@ class LLMPrompt:
         item_id: str | int | None = None,
         item_position: int | None = 0,
         item_separator: str = "\n",
-    ) -> tuple[str, str]:
+    ) -> tuple[str | None, str]:
         """
         Generate the full prompt for a given questionnaire presentation.
 
@@ -127,7 +128,7 @@ class LLMPrompt:
             item_separator (str): For QuestionnairePresentation.BATTERY decides the str
                 that seperates each question.
         Returns:
-            Tuple(str, str): The first element corresponds to the system_prompt,
+            Tuple(str | None, str): The first element corresponds to the system_prompt,
                 the second element to the prompt.
         """
         options = ""
@@ -206,7 +207,10 @@ class LLMPrompt:
                 placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
             }
 
-        system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
+        if self.system_prompt is None:
+            system_prompt = None
+        else:
+            system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
         prompt = safe_format_with_regex(self.prompt, format_dict)
 
         return system_prompt, prompt

@@ -181,3 +181,6 @@ cython_debug/
 
 # Codex local instructions
 AGENTS.md
+
+# version file
+src/qstn/_version.py

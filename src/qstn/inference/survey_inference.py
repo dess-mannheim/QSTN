@@ -7,6 +7,7 @@ from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
+from .utils import normalize_system_messages
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -35,13 +36,13 @@ except ImportError:
 
 
 def _print_conversation(
-    system_messages: list[str],
+    system_messages: list[str | None],
     prompts: list[str],
-    assistant_messages: list[str],
+    assistant_messages: list[str] | None,
     plain_results: list[str],
     reasoning_output: list[str],
     logprob_result: list[str],
-    response_generation_method: list[ResponseGenerationMethod],
+    response_generation_method: list[ResponseGenerationMethod] | None,
     number_of_printed_conversations: int = 2,
 ):
     methods = response_generation_method or []
@@ -79,7 +80,9 @@ def _print_conversation(
             if i >= number_of_printed_conversations:
                 break
 
-            round_print = f"{conversation_print}\n-- System Message --\n{system_message}"
+            round_print = conversation_print
+            if system_message is not None:
+                round_print = f"{round_print}\n-- System Message --\n{system_message}"
             for j, _ in enumerate(prompt_list):
                 round_print = f"{round_print}\n-- User Message --\n{prompt_list[j]}"
                 if j < len(assistant_list):
@@ -102,9 +105,11 @@ def _print_conversation(
         ):
             if i >= number_of_printed_conversations:
                 break
+            round_print = conversation_print
+            if system_message is not None:
+                round_print = f"{round_print}\n-- System Message --\n{system_message}"
             round_print = (
-                f"{conversation_print}\n-- System Message --\n{system_message}"
-                f"\n-- User Message ---\n{prompt}"
+                f"{round_print}\n-- User Message ---\n{prompt}"
                 f"\n-- Generated Message --\n{answer}"
             )
             if reasoning:
@@ -119,7 +124,7 @@ def _print_conversation(
 
 def batch_generation(
     model: LLM | AsyncOpenAI,  # pyright: ignore[reportInvalidTypeForm]
-    system_messages: list[str] = ("You are a helpful assistant.",),
+    system_messages: list[str | None] | None = ("You are a helpful assistant.",),
     prompts: list[str] = ("Hi there! What is your name?",),
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
@@ -180,11 +185,16 @@ def batch_generation(
         raise ValueError(f"Unsupported model type: {type(model)}")
     random.seed(seed)
 
+    normalized_system_messages = normalize_system_messages(
+        system_messages=system_messages,
+        batch_size=len(prompts),
+    )
+
     # Inference
     if HAS_VLLM and isinstance(model, LLM):
         plain_results, logprob_result, reasoning_outputs = run_vllm_batch(
             model,
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             response_generation_method=response_generation_method,
             seed=seed,
@@ -197,7 +207,7 @@ def batch_generation(
     elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
         plain_results, logprob_result, reasoning_outputs = run_openai_batch(
             model,
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             response_generation_method=response_generation_method,
             seed=seed,
@@ -213,7 +223,7 @@ def batch_generation(
 
     if print_conversation:
         _print_conversation(
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             assistant_messages=None,
             plain_results=plain_results,
@@ -228,7 +238,7 @@ def batch_generation(
 
 def batch_turn_by_turn_generation(
     model: LLM | AsyncOpenAI,  # type: ignore
-    system_messages: list[str] = ("You are a helpful assistant.",),
+    system_messages: list[str | None] | None = ("You are a helpful assistant.",),
     prompts: list[list[str]] = (
         (
             "Hi there! What is your name?",
@@ -300,11 +310,16 @@ def batch_turn_by_turn_generation(
         raise ValueError(f"Unsupported model type: {type(model)}")
     random.seed(seed)
 
+    normalized_system_messages = normalize_system_messages(
+        system_messages=system_messages,
+        batch_size=len(prompts),
+    )
+
     # Inference
     if HAS_VLLM and isinstance(model, LLM):
         plain_results, logprob_result, reasoning_outputs = run_vllm_batch_conversation(
             model,
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             assistant_messages=assistant_messages,
             response_generation_method=response_generation_method,
@@ -318,7 +333,7 @@ def batch_turn_by_turn_generation(
     elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
         plain_results, logprob_result, reasoning_outputs = run_openai_batch_conversation(
             model,
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             assistant_messages=assistant_messages,
             response_generation_method=response_generation_method,
@@ -333,7 +348,7 @@ def batch_turn_by_turn_generation(
 
     if print_conversation:
         _print_conversation(
-            system_messages=system_messages,
+            system_messages=normalized_system_messages,
             prompts=prompts,
             assistant_messages=assistant_messages,
             plain_results=plain_results,

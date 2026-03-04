@@ -139,7 +139,7 @@ def _normalize_generation_outputs(
 
 def _run_batch_generation(
     model: Union["LLM", AsyncOpenAI],
-    system_messages: list[str],
+    system_messages: list[str | None],
     prompts: list[str],
     response_generation_methods: list[ResponseGenerationMethod] | None,
     client_model_name: str | None,
@@ -206,7 +206,7 @@ def _store_question_responses(
 
 def _prepare_single_item_batch(
     current_batch: dict[int, LLMPrompt], i: int
-) -> tuple[list[str], list[str], list[str], list[ResponseGenerationMethod | None]]:
+) -> tuple[list[str | None], list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and metadata for a single-item survey step."""
     system_messages, prompts = zip(
         *[
@@ -236,7 +236,7 @@ def _prepare_single_item_batch(
 
 def _prepare_battery_batch(
     current_batch: dict[int, LLMPrompt], i: int, item_separator: str
-) -> tuple[list[str], list[str], list[ResponseGenerationMethod | None]]:
+) -> tuple[list[str | None], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and response-generation methods for battery mode."""
     system_messages, prompts = zip(
         *[
@@ -269,7 +269,7 @@ def _prepare_battery_batch(
 
 def _prepare_sequential_step(
     current_batch: dict[int, LLMPrompt], i: int
-) -> tuple[list[str], list[str], list[str], list[ResponseGenerationMethod | None]]:
+) -> tuple[list[str | None], list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare per-step prompts/questions/methods for sequential mode."""
     first_question: bool = i == 0
 
@@ -769,10 +769,14 @@ class SurveyCreator:
         """
         Internal helper method to create the LLM Prompts.
         """
+        system_prompt = row.get(constants.SYSTEM_PROMPT_FIELD, None)
+        if pd.isna(system_prompt):
+            system_prompt = None
+
         return LLMPrompt(
             questionnaire_source=df_questionnaire,
             questionnaire_name=row[constants.QUESTIONNAIRE_NAME],
-            system_prompt=row[constants.SYSTEM_PROMPT_FIELD],
+            system_prompt=system_prompt,
             prompt=row[constants.QUESTIONNAIRE_INSTRUCTION_FIELD],
         )
 

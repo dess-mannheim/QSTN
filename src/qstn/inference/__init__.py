@@ -1,6 +1,6 @@
 """Public exports for inference helpers and response generation methods."""
 
-from . import dynamic_pydantic, response_generation, survey_inference
+from . import dynamic_pydantic, response_generation, survey_inference, utils
 from .response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -23,6 +23,7 @@ __all__ = [
     "dynamic_pydantic",
     "response_generation",
     "survey_inference",
+    "utils",
     "HAS_OPENAI",
     "HAS_VLLM",
     "ResponseGenerationMethod",
