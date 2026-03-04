@@ -26,34 +26,46 @@ class _ClientLoopRunner:
     def __init__(self):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_ready = threading.Event()
+
         self._thread = threading.Thread(target=self._thread_main, daemon=True)
         self._thread.start()
+
         self._loop_ready.wait()
 
     def _thread_main(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
         self._loop = loop
         self._loop_ready.set()
+
         loop.run_forever()
+
         pending = asyncio.all_tasks(loop=loop)
+
         for task in pending:
             task.cancel()
+
         if pending:
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
         loop.close()
 
     def submit(self, coro: Any) -> Future:
         if self._loop is None:
             raise RuntimeError("Loop runner is not initialized.")
+
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
 
     def shutdown(self) -> None:
         if self._loop is None:
             return
+
         if self._loop.is_closed():
             return
+
         self._loop.call_soon_threadsafe(self._loop.stop)
+
         if threading.current_thread() is not self._thread:
             self._thread.join(timeout=5)
 
@@ -67,9 +79,11 @@ _CLIENT_LOOP_RUNNERS_LOCK = threading.Lock()
 def _get_or_create_runner(client: AsyncOpenAI) -> _ClientLoopRunner:
     with _CLIENT_LOOP_RUNNERS_LOCK:
         runner = _CLIENT_LOOP_RUNNERS.get(client)
+
         if runner is None:
             runner = _ClientLoopRunner()
             _CLIENT_LOOP_RUNNERS[client] = runner
+
         return runner
 
 
@@ -77,6 +91,7 @@ def _shutdown_all_client_loop_runners() -> None:
     with _CLIENT_LOOP_RUNNERS_LOCK:
         runners = list(_CLIENT_LOOP_RUNNERS.values())
         _CLIENT_LOOP_RUNNERS.clear()
+
     for runner in runners:
         runner.shutdown()
 
