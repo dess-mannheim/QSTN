@@ -52,6 +52,8 @@ source = "vcs"
 [tool.hatch.build.hooks.vcs]
 version-file = "src/qstn/_version.py"
 
+[tool.hatch.build]
+artifacts = ["src/qstn/_version.py"]
 
 [tool.black]
 target-version = ["py312"]
