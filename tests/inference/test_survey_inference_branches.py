@@ -24,7 +24,8 @@ def test_batch_generation_raises_importerror_for_missing_openai(monkeypatch):
 
 
 def test_batch_generation_vllm_branch_supports_print_with_none_methods(monkeypatch):
-    """vLLM path should delegate and print conversation even with `response_generation_method=None`."""
+    """vLLM path should delegate and print conversation even with
+    `response_generation_method=None`."""
     FakeLLM = type("LLM", (), {})
     monkeypatch.setattr(survey_inference, "HAS_VLLM", True)
     monkeypatch.setattr(survey_inference, "LLM", FakeLLM)
@@ -51,6 +52,52 @@ def test_batch_generation_vllm_branch_supports_print_with_none_methods(monkeypat
     assert out == (["ok"], [None], [None])
     assert captured["kwargs"]["print_progress"] is False
     assert "-- Generated Message --" in written[0]
+
+
+def test_batch_generation_vllm_branch_normalizes_none_system_messages(monkeypatch):
+    FakeLLM = type("LLM", (), {})
+    monkeypatch.setattr(survey_inference, "HAS_VLLM", True)
+    monkeypatch.setattr(survey_inference, "LLM", FakeLLM)
+
+    captured = {}
+
+    def fake_run_vllm_batch(model, **kwargs):
+        captured["kwargs"] = kwargs
+        return (["ok"], [None], [None])
+
+    monkeypatch.setattr(survey_inference, "run_vllm_batch", fake_run_vllm_batch)
+
+    survey_inference.batch_generation(
+        model=FakeLLM(),
+        system_messages=None,
+        prompts=["user"],
+        print_progress=False,
+    )
+
+    assert captured["kwargs"]["system_messages"] == [None]
+
+
+def test_batch_generation_vllm_branch_keeps_empty_system_messages(monkeypatch):
+    FakeLLM = type("LLM", (), {})
+    monkeypatch.setattr(survey_inference, "HAS_VLLM", True)
+    monkeypatch.setattr(survey_inference, "LLM", FakeLLM)
+
+    captured = {}
+
+    def fake_run_vllm_batch(model, **kwargs):
+        captured["kwargs"] = kwargs
+        return (["ok"], [None], [None])
+
+    monkeypatch.setattr(survey_inference, "run_vllm_batch", fake_run_vllm_batch)
+
+    survey_inference.batch_generation(
+        model=FakeLLM(),
+        system_messages=[""],
+        prompts=["user"],
+        print_progress=False,
+    )
+
+    assert captured["kwargs"]["system_messages"] == [""]
 
 
 def test_batch_turn_by_turn_openai_branch_delegates(monkeypatch):
@@ -85,3 +132,31 @@ def test_batch_turn_by_turn_openai_branch_delegates(monkeypatch):
     assert captured["kwargs"]["client_model_name"] == "gpt-x"
     assert captured["kwargs"]["api_concurrency"] == 4
     assert captured["kwargs"]["assistant_messages"] == [["a1"]]
+
+
+def test_batch_turn_by_turn_openai_branch_normalizes_none_system_messages(monkeypatch):
+    FakeAsyncOpenAI = type("AsyncOpenAI", (), {})
+    monkeypatch.setattr(survey_inference, "HAS_OPENAI", True)
+    monkeypatch.setattr(survey_inference, "AsyncOpenAI", FakeAsyncOpenAI)
+
+    captured = {}
+
+    def fake_run_openai_batch_conversation(model, **kwargs):
+        captured["kwargs"] = kwargs
+        return (["a"], [None], ["r"])
+
+    monkeypatch.setattr(
+        survey_inference,
+        "run_openai_batch_conversation",
+        fake_run_openai_batch_conversation,
+    )
+
+    survey_inference.batch_turn_by_turn_generation(
+        model=FakeAsyncOpenAI(),
+        system_messages=None,
+        prompts=[["u1"]],
+        assistant_messages=[[]],
+        print_progress=False,
+    )
+
+    assert captured["kwargs"]["system_messages"] == [None]

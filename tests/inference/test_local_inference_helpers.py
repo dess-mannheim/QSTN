@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from qstn.inference import local_inference, survey_inference
 from qstn.inference.response_generation import (
-    JSONResponseGenerationMethod,
     ChoiceResponseGenerationMethod,
+    JSONResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
 
@@ -13,9 +13,7 @@ from qstn.inference.response_generation import (
 def test_get_sampling_field_names_and_split(monkeypatch):
     """Fields returned by signature are used to split kwargs."""
     # monkeypatch the helper to return a known set
-    monkeypatch.setattr(
-        local_inference, "_get_sampling_field_names", lambda: {"foo", "bar"}
-    )
+    monkeypatch.setattr(local_inference, "_get_sampling_field_names", lambda: {"foo", "bar"})
 
     gen, chat = local_inference._split_kwargs({"foo": 1, "baz": 2, "bar": 3})
     assert gen == {"foo": 1, "bar": 3}
@@ -39,7 +37,9 @@ def test_update_logprob_kwargs():
     assert "logprobs" in kwargs2
 
     kwargs3 = {}
-    returned3 = local_inference._update_logprob_kwargs([JSONResponseGenerationMethod(["a"], {} )], kwargs3)
+    returned3 = local_inference._update_logprob_kwargs(
+        [JSONResponseGenerationMethod(["a"], {})], kwargs3
+    )
     assert returned3 is None
 
 
@@ -66,36 +66,45 @@ def test_structured_sampling_params_and_cache(monkeypatch):
     assert outputs2[0].structured_outputs is outputs2[1].structured_outputs
 
     # choice method with allowed choices
-    choice = ChoiceResponseGenerationMethod(allowed_choices=["x","y"])
+    choice = ChoiceResponseGenerationMethod(allowed_choices=["x", "y"])
     outputs3 = local_inference._structured_sampling_params(
         batch_size=1, seeds=[5], response_generation_method=choice
     )
-    assert outputs3[0].structured_outputs == {"choice": ["x","y"]}
+    assert outputs3[0].structured_outputs == {"choice": ["x", "y"]}
 
 
 def test_create_sampling_params():
     """Sampling params reflect whether structured options are used."""
     # without response_generation_method
-    simple = local_inference._create_sampling_params(batch_size=1, seeds=[1], response_generation_method=None)
+    simple = local_inference._create_sampling_params(
+        batch_size=1, seeds=[1], response_generation_method=None
+    )
     assert isinstance(simple[0], local_inference.SamplingParams)
     assert not hasattr(simple[0], "structured_outputs")
 
     # with structured but not list
     rgm = JSONResponseGenerationMethod(json_fields=["a"], constraints=None)
-    struct = local_inference._create_sampling_params(batch_size=1, seeds=[2], response_generation_method=rgm)
+    struct = local_inference._create_sampling_params(
+        batch_size=1, seeds=[2], response_generation_method=rgm
+    )
     assert hasattr(struct[0], "structured_outputs")
 
 
 def test_extract_reasoning_and_answer():
     """Outputs from vllm are parsed correctly into reasoning and answers."""
+
     class FakeOutput:
         def __init__(self, text):
             class Inner:
                 def __init__(self, txt):
                     self.text = txt
+
             self.outputs = [Inner(text)]
+
     outputs = [FakeOutput("<think>r</think>hello"), FakeOutput("world")]
-    raw, reasonings, answers = local_inference._extract_reasoning_and_answer("<think>","</think>", outputs)
+    raw, reasonings, answers = local_inference._extract_reasoning_and_answer(
+        "<think>", "</think>", outputs
+    )
     assert raw[0] == "r"
     assert answers[0] == "hello"
     assert reasonings[1] is None
@@ -103,6 +112,7 @@ def test_extract_reasoning_and_answer():
 
 def test_get_logprobs_ignores_non_logprob_methods():
     """Mixed response-method lists should ignore non-logprob entries safely."""
+
     class DummyModel:
         class Tokenizer:
             def tokenize(self, text):
@@ -180,3 +190,38 @@ def test_print_conversation_with_none_methods(monkeypatch):
         number_of_printed_conversations=1,
     )
     assert "-- Generated Message --" in written[0]
+
+
+def test_print_conversation_omits_none_system_message(monkeypatch):
+    written = []
+    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+
+    survey_inference._print_conversation(
+        system_messages=[None],
+        prompts=["p"],
+        assistant_messages=[],
+        plain_results=["a"],
+        reasoning_output=[None],
+        logprob_result=[None],
+        response_generation_method=None,
+        number_of_printed_conversations=1,
+    )
+    assert "-- System Message --" not in written[0]
+    assert "-- User Message ---" in written[0]
+
+
+def test_print_conversation_keeps_empty_system_message(monkeypatch):
+    written = []
+    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+
+    survey_inference._print_conversation(
+        system_messages=[""],
+        prompts=["p"],
+        assistant_messages=[],
+        plain_results=["a"],
+        reasoning_output=[None],
+        logprob_result=[None],
+        response_generation_method=None,
+        number_of_printed_conversations=1,
+    )
+    assert "-- System Message --" in written[0]

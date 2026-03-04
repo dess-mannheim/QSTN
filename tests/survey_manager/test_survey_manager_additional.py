@@ -12,10 +12,9 @@ from qstn.utilities.survey_objects import QuestionLLMResponseTuple
 
 
 def test_intermediate_saves_writes_csv_and_skips_when_disabled(tmp_path):
-    """`_intermediate_saves` should persist expected rows and skip writes when disabled."""
-    questionnaire_df = pd.DataFrame(
-        [{"questionnaire_item_id": 1, "question_content": "Q1"}]
-    )
+    """`_intermediate_saves` should persist expected rows
+    and skip writes when disabled."""
+    questionnaire_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
     prompt = LLMPrompt(questionnaire_source=questionnaire_df)
     pairs = [{1: QuestionLLMResponseTuple("Q1", "A1", None, None)}]
 
@@ -107,10 +106,9 @@ def test_conduct_survey_battery_uses_json_rgm_and_keeps_logprobs(
 def test_conduct_survey_sequential_handles_partial_prefill_and_empty_logprobs(
     mock_openai_client, monkeypatch
 ):
-    """Sequential survey should skip generation for prefilled prompts and handle missing logprobs."""
-    one_item_df = pd.DataFrame(
-        [{"questionnaire_item_id": 1, "question_content": "Only question?"}]
-    )
+    """Sequential survey should skip generation for prefilled prompts
+    and handle missing logprobs."""
+    one_item_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Only question?"}])
     prompt_prefilled = LLMPrompt(questionnaire_source=one_item_df).prepare_prompt(
         prefilled_responses={1: "prefilled"}
     )
@@ -148,9 +146,7 @@ def test_survey_creator_from_dataframe_and_from_path(tmp_path):
             }
         ]
     )
-    questionnaire_df = pd.DataFrame(
-        [{"questionnaire_item_id": 1, "question_content": "Q1"}]
-    )
+    questionnaire_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
 
     created = survey_manager.SurveyCreator.from_dataframe(survey_df, questionnaire_df)
     assert len(created) == 1
@@ -162,11 +158,42 @@ def test_survey_creator_from_dataframe_and_from_path(tmp_path):
     survey_df.to_csv(survey_path, index=False)
     questionnaire_df.to_csv(questionnaire_path, index=False)
 
-    loaded = survey_manager.SurveyCreator.from_path(
-        str(survey_path), str(questionnaire_path)
-    )
+    loaded = survey_manager.SurveyCreator.from_path(str(survey_path), str(questionnaire_path))
     assert len(loaded) == 1
     assert loaded[0].questionnaire_name == "S1"
+
+
+def test_survey_creator_allows_missing_system_prompt_column():
+    survey_df = pd.DataFrame(
+        [
+            {
+                "questionnaire_name": "S1",
+                "questionnaire_instruction": "ASK {questions}",
+            }
+        ]
+    )
+    questionnaire_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+
+    created = survey_manager.SurveyCreator.from_dataframe(survey_df, questionnaire_df)
+
+    assert created[0].system_prompt is None
+
+
+def test_survey_creator_converts_nan_system_prompt_to_none():
+    survey_df = pd.DataFrame(
+        [
+            {
+                "questionnaire_name": "S1",
+                "system_prompt": float("nan"),
+                "questionnaire_instruction": "ASK {questions}",
+            }
+        ]
+    )
+    questionnaire_df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+
+    created = survey_manager.SurveyCreator.from_dataframe(survey_df, questionnaire_df)
+
+    assert created[0].system_prompt is None
 
 
 def test_survey_manager_main_guard_executes_without_side_effects():

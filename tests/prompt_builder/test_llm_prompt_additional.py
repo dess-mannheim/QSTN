@@ -3,8 +3,8 @@
 import pandas as pd
 import pytest
 
-from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.inference.response_generation import JSONSingleResponseGenerationMethod
+from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities import placeholder
 from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities.survey_objects import QuestionnaireItem
@@ -19,9 +19,7 @@ def test_check_valid_questionnaire_and_duplicate_and_get_questions():
         assert prompt._check_valid_questionnaire(pd.DataFrame()) is False
 
     loaded = LLMPrompt(
-        questionnaire_source=pd.DataFrame(
-            [{"questionnaire_item_id": 1, "question_content": "Q1"}]
-        )
+        questionnaire_source=pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
     )
     clone = loaded.duplicate()
 
@@ -125,6 +123,34 @@ def test_get_prompt_for_questionnaire_type_error_and_battery_auto_instructions()
     assert "Blue?" in user_prompt
 
 
+def test_get_prompt_for_questionnaire_type_allows_none_system_prompt():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Red?"}])
+    prompt = LLMPrompt(
+        questionnaire_source=df, system_prompt=None, prompt="ASK {{QUESTION_PLACEHOLDER}}"
+    )
+
+    system_prompt, user_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM
+    )
+
+    assert system_prompt is None
+    assert "Red?" in user_prompt
+
+
+def test_get_prompt_for_questionnaire_type_keeps_empty_system_prompt():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Red?"}])
+    prompt = LLMPrompt(
+        questionnaire_source=df, system_prompt="", prompt="ASK {{QUESTION_PLACEHOLDER}}"
+    )
+
+    system_prompt, user_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM
+    )
+
+    assert system_prompt == ""
+    assert "Red?" in user_prompt
+
+
 def test_generate_question_prompt_without_placeholder_and_with_none_options_template():
     options = generate_likert_options(n=2, answer_texts=["Low", "High"])
     options.list_prompt_template = None
@@ -172,7 +198,12 @@ def test_str_and_insert_questions_default_position():
     "kwargs, match",
     [
         (
-            {"n": 2, "answer_texts": ["A", "B"], "only_from_to_scale": True, "idx_type": "char_upper"},
+            {
+                "n": 2,
+                "answer_texts": ["A", "B"],
+                "only_from_to_scale": True,
+                "idx_type": "char_upper",
+            },
             "integer scale index",
         ),
         ({"n": 2, "answer_texts": ["A"]}, "same length"),

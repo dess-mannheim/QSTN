@@ -2,7 +2,7 @@
 
 import pytest
 
-from qstn.inference import survey_inference, local_inference
+from qstn.inference import local_inference, survey_inference
 from qstn.inference.local_inference import run_vllm_batch, run_vllm_batch_conversation
 
 
@@ -10,10 +10,12 @@ class DummyModel:
     def __init__(self, return_texts):
         self.return_texts = return_texts
         self.last_chat = None
+
         # mimic a tokenizer with tokenize method for logprob test
         class Tokenizer:
             def tokenize(self, txt):
                 return txt.split()
+
         self._tokenizer = Tokenizer()
 
     def chat(self, batch_messages, sampling_params=None, use_tqdm=None, **kwargs):
@@ -26,9 +28,11 @@ class DummyModel:
         # return list of fake RequestOutput objects with text from return_texts
         outputs = []
         for txt in self.return_texts:
+
             class Inner:
                 def __init__(self, text):
                     self.outputs = [type("O", (), {"text": text, "logprobs": []})]
+
             outputs.append(Inner(txt))
         return outputs
 
@@ -46,14 +50,31 @@ def test_run_vllm_batch_basic(monkeypatch):
     assert res[2] == [None]
 
 
+def test_run_vllm_batch_supports_none_system_messages():
+    model = DummyModel(["hello"])
+    run_vllm_batch(model, system_messages=None, prompts=["p"], seed=123)
+
+    assert model.last_chat["batch_messages"] == [[{"role": "user", "content": "p"}]]
+
+
+def test_run_vllm_batch_keeps_empty_system_message():
+    model = DummyModel(["hello"])
+    run_vllm_batch(model, system_messages=[""], prompts=["p"], seed=123)
+
+    assert model.last_chat["batch_messages"] == [
+        [{"role": "system", "content": ""}, {"role": "user", "content": "p"}]
+    ]
+
+
 def test_run_vllm_batch_conversation_and_errors(monkeypatch):
     """Conversation helper should preserve model outputs and validate unsupported model types."""
-    model = DummyModel(["a","b"])
+    model = DummyModel(["a", "b"])
 
     # Multi-turn response roundtrip.
-    out = run_vllm_batch_conversation(model,
+    out = run_vllm_batch_conversation(
+        model,
         system_messages=["s"],
-        prompts=[["p1","p2"]],
+        prompts=[["p1", "p2"]],
         assistant_messages=[["x"]],
     )
     assert len(out) == 3
@@ -69,6 +90,39 @@ def test_run_vllm_batch_conversation_and_errors(monkeypatch):
     monkeypatch.setattr(survey_inference, "HAS_VLLM", False)
     with pytest.raises(ValueError):
         survey_inference.batch_generation(model=DummyModel(["z"]))
+
+
+def test_run_vllm_batch_conversation_supports_none_system_messages():
+    model = DummyModel(["a", "b"])
+    out = run_vllm_batch_conversation(
+        model,
+        system_messages=None,
+        prompts=[["p1", "p2"]],
+        assistant_messages=[["x"]],
+    )
+
+    assert out[0] == ["a", "b"]
+    assert model.last_chat["batch_messages"] == [
+        [
+            {"role": "user", "content": "p1"},
+            {"role": "assistant", "content": "x"},
+            {"role": "user", "content": "p2"},
+        ]
+    ]
+
+
+def test_run_vllm_batch_conversation_keeps_empty_system_message():
+    model = DummyModel(["a"])
+    run_vllm_batch_conversation(
+        model,
+        system_messages=[""],
+        prompts=[["p1"]],
+        assistant_messages=[[]],
+    )
+
+    assert model.last_chat["batch_messages"] == [
+        [{"role": "system", "content": ""}, {"role": "user", "content": "p1"}]
+    ]
 
 
 def test_run_vllm_batch_warns_for_sampling_params_and_respects_use_tqdm(monkeypatch):
