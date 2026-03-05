@@ -1,4 +1,5 @@
 import streamlit as st
+from dataclasses import replace as dataclass_replace
 from qstn.prompt_builder import LLMPrompt
 from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities import placeholder
@@ -25,6 +26,7 @@ st.write(
     "These options are applied to every questionnaire in your survey."
 )
 st.page_link("pages/01_Option_Prompt.py", label="Click here to adjust the answer options.")
+st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Prompts", query_params={"section": "prompts"})
 st.divider()
 
 @st.cache_data
@@ -39,7 +41,7 @@ if "questionnaires" not in st.session_state:
 
 current_questionnaire_id = paginator(st.session_state.questionnaires, "current_questionnaire_index_prompt")
 
-# Helper functions
+# Helper functions (used by _inject_default_placeholders_once)
 def get_survey_options():
     """Helper to get survey options from session state."""
     return st.session_state.get("survey_options")
@@ -47,6 +49,60 @@ def get_survey_options():
 def get_randomize_order_bool():
     """Helper to get randomize order boolean."""
     return st.session_state.get(f"input_{randomize_order_tick}", False)
+
+def _inject_default_placeholders_once():
+    """
+    On first load of Prompt Configuration: inject QUESTION_PLACEHOLDER/OPTIONS_PLACEHOLDER
+    into prompt and QUESTION_CONTENT_PLACEHOLDER into question_stem for all questionnaires,
+    then prepare them and set form/preview state so prompts and live preview show correctly.
+    """
+    if st.session_state.get("prompt_config_placeholders_initialized"):
+        return
+    questionnaires = st.session_state.questionnaires
+    survey_options = get_survey_options()
+    randomize_order = get_randomize_order_bool()
+
+    for q in questionnaires:
+        # Prompt: ensure both placeholders present (append once if either missing)
+        p = q.prompt or ""
+        if placeholder.PROMPT_QUESTIONS not in p:
+            p = (p.rstrip() + " " + placeholder.PROMPT_QUESTIONS + " " + placeholder.PROMPT_OPTIONS).strip()
+        elif placeholder.PROMPT_OPTIONS not in p:
+            p = (p.rstrip() + " " + placeholder.PROMPT_OPTIONS).strip()
+        q.prompt = p
+
+        # Question stem: ensure QUESTION_CONTENT placeholder present for each item
+        for i, item in enumerate(q._questions):
+            stem = item.question_stem or ""
+            if placeholder.QUESTION_CONTENT not in stem:
+                new_stem = (stem.rstrip() + " " + placeholder.QUESTION_CONTENT).strip()
+                q._questions[i] = dataclass_replace(item, question_stem=new_stem)
+
+        # Prepare so preview can resolve placeholders
+        first_stem = q._questions[0].question_stem if q._questions else None
+        q.prepare_prompt(
+            question_stem=first_stem,
+            answer_options=survey_options,
+            randomized_item_order=randomize_order,
+        )
+
+    cur_id = current_questionnaire_id
+    st.session_state.temporary_questionnaire = questionnaires[cur_id].duplicate()
+    st.session_state.temporary_questionnaire_id = cur_id
+
+    # Form keys: so text areas show the placeholder version
+    st.session_state[f"system_prompt_textarea_{cur_id}"] = questionnaires[cur_id].system_prompt
+    st.session_state[f"prompt_textarea_{cur_id}"] = questionnaires[cur_id].prompt
+    st.session_state[f"input_{question_stem_field}_{cur_id}"] = (
+        questionnaires[cur_id]._questions[0].question_stem if questionnaires[cur_id]._questions else ""
+    )
+
+    # Initial preview: resolved content immediately
+    preview_key = f"preview_{cur_id}"
+    system_prompt, prompt = generate_preview(questionnaires[cur_id], survey_options, randomize_order)
+    st.session_state[preview_key] = {"system_prompt": system_prompt, "prompt": prompt}
+
+    st.session_state["prompt_config_placeholders_initialized"] = True
 
 def clear_questionnaire_keys(questionnaire_id):
     """Helper to clear session state keys for a questionnaire."""
@@ -143,6 +199,9 @@ def generate_preview(questionnaire, survey_options, randomize_order):
     temp_q.prompt = questionnaire.prompt
     system_prompt, prompt = temp_q.get_prompt_for_questionnaire_type(QuestionnairePresentation.SEQUENTIAL)
     return system_prompt.replace("\n", "  \n"), prompt.replace("\n", "  \n")
+
+# First time on this page: inject default placeholders into prompts/question_stem, prepare questionnaires, set form and preview
+_inject_default_placeholders_once()
 
 # Initialize or update temporary_questionnaire to match current questionnaire
 if "temporary_questionnaire" not in st.session_state:

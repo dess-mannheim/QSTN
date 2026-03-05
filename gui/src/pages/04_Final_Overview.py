@@ -30,6 +30,7 @@ from openai import AsyncOpenAI
 
 # Set OpenAI's API key and API base to use vLLM's API server.
 
+st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Run & results", query_params={"section": "overview"})
 
 if "questionnaires" not in st.session_state:
     st.error(
