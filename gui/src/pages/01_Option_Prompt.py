@@ -21,6 +21,7 @@ st.title("Likert Scale Options Generator")
 st.write(
     "This interface allows you to configure and generate Likert scale answer options by adjusting the parameters below."
 )
+st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Answer options", query_params={"section": "options"})
 st.divider()
 
 if "questionnaires" not in st.session_state:

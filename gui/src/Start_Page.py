@@ -41,6 +41,9 @@ user_id = get_user_id()
 if user_id:
     st.caption(f"👤 Logged in as: {user_id}")
 
+with st.sidebar:
+    st.page_link("pages/00_Tutorial.py", label="📖 Tutorial & Help")
+
 # Check for saved sessions on startup
 if "session_loaded" not in st.session_state:
     available_sessions = list_available_sessions()
