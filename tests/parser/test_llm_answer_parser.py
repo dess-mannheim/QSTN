@@ -4,19 +4,32 @@ import math
 
 import pandas as pd
 import pytest
+from pandas.testing import assert_frame_equal
 
+from qstn.inference.response_generation import (
+    JSONReasoningResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
+)
 from qstn.parser.llm_answer_parser import (
+    SOURCE_LLM_RESPONSE_COLUMN,
     _filter_logprobs_by_choices,
     _logprobs_filter,
     parse_json,
     parse_json_battery,
     parse_json_str,
     parse_logprobs,
+    parse_with_llm,
+    parse_with_llm_battery,
     raw_responses,
 )
 from qstn.prompt_builder import LLMPrompt
 from qstn.utilities import constants
-from qstn.utilities.survey_objects import InferenceResult, QuestionLLMResponseTuple
+from qstn.utilities.survey_objects import (
+    AnswerOptions,
+    AnswerTexts,
+    InferenceResult,
+    QuestionLLMResponseTuple,
+)
 
 
 def _make_prompt():
@@ -35,7 +48,10 @@ def test_parse_json_str_handles_valid_repair_and_invalid_json():
 
 
 def test_parse_json_str_returns_none_when_both_parsers_fail(monkeypatch):
-    monkeypatch.setattr("qstn.parser.llm_answer_parser.json.loads", lambda *_: (_ for _ in ()).throw(ValueError("x")))
+    monkeypatch.setattr(
+        "qstn.parser.llm_answer_parser.json.loads",
+        lambda *_: (_ for _ in ()).throw(ValueError("x")),
+    )
     monkeypatch.setattr(
         "qstn.parser.llm_answer_parser.json_repair.loads",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("y")),
@@ -130,6 +146,594 @@ def test_parse_json_battery_returns_error_frame_unchanged():
     parsed = parse_json_battery([invalid_result])[prompt]
     assert "error_col" in parsed.columns
     assert parsed.loc[0, "error_col"] == "ERROR: Parsing"
+
+
+def test_parse_json_auto_routes_battery_to_battery_parser():
+    prompt = _make_prompt()
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"answer_Red?":"1","answer_Blue?":"2"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed_from_router = parse_json([battery_result])[prompt]
+    parsed_explicit = parse_json_battery([battery_result])[prompt]
+    assert_frame_equal(parsed_from_router, parsed_explicit)
+
+
+def test_parse_json_mixed_input_handles_battery_and_non_battery():
+    prompt_non_battery = _make_prompt()
+    prompt_battery = _make_prompt()
+    non_battery_result = InferenceResult(
+        questionnaire=prompt_non_battery,
+        results={
+            1: QuestionLLMResponseTuple("Q1", '{"answer":"Yes"}', None, None),
+        },
+    )
+    battery_result = InferenceResult(
+        questionnaire=prompt_battery,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"answer_Red?":"1","answer_Blue?":"2"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed = parse_json([non_battery_result, battery_result])
+
+    assert set(parsed.keys()) == {prompt_non_battery, prompt_battery}
+    assert parsed[prompt_non_battery].shape[0] == 1
+    assert sorted(parsed[prompt_battery][constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+
+
+def test_parse_with_llm_returns_parse_json_shape_and_source_trace():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "free-text-1", None, None),
+            2: QuestionLLMResponseTuple("Q2", "free-text-2", None, None),
+        },
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["response_generation_method"] = kwargs["response_generation_method"]
+        return ['{"answer":"Yes"}', '{"answer":"No"}'], None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist() == [1, 2]
+    assert "answer" in parsed.columns
+    assert SOURCE_LLM_RESPONSE_COLUMN in parsed.columns
+    assert parsed[SOURCE_LLM_RESPONSE_COLUMN].tolist() == ["free-text-1", "free-text-2"]
+    methods = captured["response_generation_method"]
+    assert isinstance(methods, list)
+    assert len(methods) == 2
+    assert all(isinstance(method, JSONSingleResponseGenerationMethod) for method in methods)
+
+
+def test_parse_with_llm_invalid_json_keeps_error_row_and_source_trace():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=lambda **_kwargs: (["not-json"], None, None),
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, constants.LLM_RESPONSE] == "not-json"
+    assert parsed.loc[0, "error_col"] == "ERROR: Parsing"
+    assert parsed.loc[0, SOURCE_LLM_RESPONSE_COLUMN] == "raw-answer"
+
+
+def test_parse_with_llm_preserves_reasoning_and_logprobs():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=lambda **_kwargs: (
+            ['{"answer":"Yes"}'],
+            [{"Yes": -0.1}],
+            ["Because"],
+        ),
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, "answer"] == "Yes"
+    assert parsed.loc[0, "built_in_reasoning"] == "Because"
+    assert parsed.loc[0, "logprobs"] == {"Yes": -0.1}
+    assert parsed.loc[0, SOURCE_LLM_RESPONSE_COLUMN] == "raw-answer"
+
+
+def test_parse_with_llm_forwards_custom_response_generation_method():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    custom_method = object()
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["response_generation_method"] = kwargs["response_generation_method"]
+        return ['{"answer":"Yes"}'], None, None
+
+    parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=custom_method,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    assert captured["response_generation_method"] == [custom_method]
+
+
+def test_parse_with_llm_uses_rgm_automatic_output_instructions_in_prompt():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    reasoning_rgm = JSONReasoningResponseGenerationMethod()
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["prompt"] = kwargs["prompts"][0]
+        captured["method"] = kwargs["response_generation_method"][0]
+        return ['{"reasoning":"Because","answer":"Yes"}'], None, None
+
+    parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=reasoning_rgm,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    automatic_template = captured["method"].get_automatic_prompt()
+    assert automatic_template in captured["prompt"]
+
+
+def test_parse_with_llm_reasoning_rgm_works_out_of_the_box():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=JSONReasoningResponseGenerationMethod(),
+        generation_fn=lambda **_kwargs: (
+            ['{"reasoning":"Because","answer":"Yes"}'],
+            None,
+            None,
+        ),
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, "reasoning"] == "Because"
+    assert parsed.loc[0, "answer"] == "Yes"
+
+
+def test_parse_with_llm_no_answer_option_is_available():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        return ['{"answer":"LLM_DID_NOT_ANSWER"}'], None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        no_answer_option="LLM_DID_NOT_ANSWER",
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, "answer"] == "LLM_DID_NOT_ANSWER"
+    assert "LLM_DID_NOT_ANSWER" in captured["methods"][0].constraints["answer"]
+
+
+def test_parse_with_llm_accepts_answer_options_override_for_optionless_questions():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    captured: dict[str, object] = {}
+    answer_options = {1: AnswerOptions(answer_texts=AnswerTexts(["Yes", "No"]))}
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        captured["prompt"] = kwargs["prompts"][0]
+        return ['{"answer":"Yes"}'], None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        answer_options=answer_options,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, "answer"] == "Yes"
+    assert captured["methods"][0].constraints["answer"] == ["Yes", "No"]
+    assert "Yes" in captured["prompt"] and "No" in captured["prompt"]
+
+
+def test_parse_with_llm_no_options_avoids_unsatisfiable_answer_constraints():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["method"] = kwargs["response_generation_method"][0]
+        return ['{"answer":"free text"}'], None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.loc[0, "answer"] == "free text"
+    method = captured["method"]
+    assert method.constraints is None
+
+
+def test_parse_with_llm_battery_parses_to_expanded_rows_with_source_trace():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=lambda **_kwargs: (
+            ['{"answer_Red?":"1","answer_Blue?":"2"}'],
+            None,
+            None,
+        ),
+        print_progress=False,
+    )[prompt]
+
+    assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+    assert set(parsed["answer"]) == {"1", "2"}
+    assert set(parsed[SOURCE_LLM_RESPONSE_COLUMN]) == {"raw-battery"}
+
+
+def test_parse_with_llm_battery_use_parser_false_returns_aggregated_row():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        use_parser=False,
+        response_generation_method=None,
+        generation_fn=lambda **_kwargs: (["open battery answer"], None, None),
+        print_progress=False,
+    )[prompt]
+
+    assert parsed.shape[0] == 1
+    assert parsed.loc[0, constants.QUESTIONNAIRE_ITEM_ID] == -1
+    assert parsed.loc[0, constants.LLM_RESPONSE] == "open battery answer"
+    assert parsed.loc[0, SOURCE_LLM_RESPONSE_COLUMN] == "raw-battery"
+
+
+def test_parse_with_llm_auto_routes_battery_and_matches_explicit_battery_parser():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+
+    def fake_generation_fn(**_kwargs):
+        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+
+    parsed_from_router = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+    parsed_explicit = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert_frame_equal(parsed_from_router, parsed_explicit)
+
+
+def test_parse_with_llm_allows_minus_one_item_id_when_not_battery():
+    questionnaire = pd.DataFrame(
+        [
+            {"questionnaire_item_id": -1, "question_content": "Q-neg"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    prompt = LLMPrompt(questionnaire_source=questionnaire)
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple("Q-neg", "raw-neg", None, None),
+            2: QuestionLLMResponseTuple("Q2", "raw-two", None, None),
+        },
+    )
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=lambda **_kwargs: (
+            ['{"answer":"NEG"}', '{"answer":"TWO"}'],
+            None,
+            None,
+        ),
+        print_progress=False,
+    )[prompt]
+
+    assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [-1, 2]
+    assert set(parsed["answer"]) == {"NEG", "TWO"}
+    assert set(parsed[SOURCE_LLM_RESPONSE_COLUMN]) == {"raw-neg", "raw-two"}
+
+
+def test_parse_with_llm_mixed_input_handles_battery_and_non_battery():
+    prompt_non_battery = _make_prompt()
+    prompt_battery = _make_prompt()
+    non_battery_result = InferenceResult(
+        questionnaire=prompt_non_battery,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-single", None, None)},
+    )
+    battery_result = InferenceResult(
+        questionnaire=prompt_battery,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+
+    def fake_generation_fn(**kwargs):
+        outputs = []
+        for prompt_text in kwargs["prompts"]:
+            if "raw-battery" in prompt_text:
+                outputs.append('{"answer_Red?":"1","answer_Blue?":"2"}')
+            else:
+                outputs.append('{"answer":"Yes"}')
+        return outputs, None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[non_battery_result, battery_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    assert set(parsed.keys()) == {prompt_non_battery, prompt_battery}
+    assert parsed[prompt_non_battery].shape[0] == 1
+    assert sorted(parsed[prompt_battery][constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+
+
+def test_parse_with_llm_allows_unconstrained_open_answers_without_parser():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "raw-answer", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["response_generation_method"] = kwargs["response_generation_method"]
+        return ["open and unconstrained answer"], None, None
+
+    parsed = parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        use_parser=False,
+        response_generation_method=None,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert captured["response_generation_method"] is None
+    assert parsed.loc[0, constants.LLM_RESPONSE] == "open and unconstrained answer"
+    assert parsed.loc[0, SOURCE_LLM_RESPONSE_COLUMN] == "raw-answer"
+    assert constants.QUESTIONNAIRE_ITEM_ID in parsed.columns
+    assert constants.QUESTION in parsed.columns
+
+
+def test_parse_with_llm_battery_uses_default_battery_json_keys_when_parser_enabled():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["response_generation_method"] = kwargs["response_generation_method"]
+        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    methods = captured["response_generation_method"]
+    assert isinstance(methods, list)
+    assert len(methods) == 1
+    assert set(methods[0].json_fields.keys()) == {"answer_Red?", "answer_Blue?"}
+    assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+
+
+def test_parse_with_llm_battery_forwards_custom_response_generation_method():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    custom_method = object()
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["response_generation_method"] = kwargs["response_generation_method"]
+        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+
+    parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=custom_method,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    assert captured["response_generation_method"] == [custom_method]
+
+
+def test_parse_with_llm_battery_uses_rgm_automatic_output_instructions_in_prompt():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["prompt"] = kwargs["prompts"][0]
+        captured["method"] = kwargs["response_generation_method"][0]
+        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+
+    parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    automatic_template = captured["method"].get_automatic_prompt()
+    assert automatic_template in captured["prompt"]
+
+
+def test_parse_with_llm_battery_no_answer_option_is_available():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        return ['{"answer_Red?":"LLM_DID_NOT_ANSWER","answer_Blue?":"2"}'], None, None
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        no_answer_option="LLM_DID_NOT_ANSWER",
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert "LLM_DID_NOT_ANSWER" in parsed["answer"].tolist()
+    methods = captured["methods"]
+    assert "LLM_DID_NOT_ANSWER" in methods[0].constraints["answer_Red?"]
+
+
+def test_parse_with_llm_battery_accepts_answer_options_override_for_optionless_questions():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    captured: dict[str, object] = {}
+    answer_options = {
+        1: AnswerOptions(answer_texts=AnswerTexts(["Warm", "Cold"])),
+        2: AnswerOptions(answer_texts=AnswerTexts(["Blue", "Green"])),
+    }
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        captured["prompt"] = kwargs["prompts"][0]
+        return ['{"answer_Red?":"Warm","answer_Blue?":"Blue"}'], None, None
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        answer_options=answer_options,
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert set(parsed["answer"]) == {"Warm", "Blue"}
+    assert captured["methods"][0].constraints["answer_Red?"] == ["Warm", "Cold"]
+    assert captured["methods"][0].constraints["answer_Blue?"] == ["Blue", "Green"]
+    assert "Warm" in captured["prompt"] and "Green" in captured["prompt"]
+
+
+def test_parse_with_llm_battery_no_options_avoids_unsatisfiable_answer_constraints():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+    captured: dict[str, object] = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["method"] = kwargs["response_generation_method"][0]
+        return ['{"answer_Red?":"free-a","answer_Blue?":"free-b"}'], None, None
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )[prompt]
+
+    assert set(parsed["answer"]) == {"free-a", "free-b"}
+    method = captured["method"]
+    assert method.constraints is None
 
 
 def test_raw_responses_returns_to_dataframe_mapping():

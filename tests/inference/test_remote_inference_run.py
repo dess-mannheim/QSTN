@@ -9,7 +9,7 @@ def test_run_openai_batch_pass_through(monkeypatch):
 
     def fake_helper(**kwargs):
         called.update(kwargs)
-        return (["ans"], [None], [None])
+        return (["ans"], [{"token": "A"}], ["reason"])
 
     monkeypatch.setattr(remote_inference, "_run_async_in_thread", fake_helper)
 
@@ -23,6 +23,8 @@ def test_run_openai_batch_pass_through(monkeypatch):
         foo=1,
     )
     assert out[0] == ["ans"]
+    assert out[1] == [{"token": "A"}]
+    assert out[2] == ["reason"]
     # helper was called with expected keys
     assert called.get("client") is model
     assert called.get("client_model_name") == "cm"
@@ -78,7 +80,7 @@ def test_run_openai_batch_conversation(monkeypatch):
 
     def fake_helper(**kwargs):
         called.update(kwargs)
-        return (["cans"], [None], [None])
+        return (["cans"], [{"token": "C"}], ["conv-reason"])
 
     monkeypatch.setattr(remote_inference, "_run_async_in_thread", fake_helper)
 
@@ -91,6 +93,8 @@ def test_run_openai_batch_conversation(monkeypatch):
         client_model_name="cm2",
     )
     assert out[0] == ["cans"]
+    assert out[1] == [{"token": "C"}]
+    assert out[2] == ["conv-reason"]
     assert called.get("batch_messages")[0][-1]["content"] == "a1"
 
 
