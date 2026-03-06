@@ -325,6 +325,9 @@ def load_session_state(session_id: str = "default") -> bool:
         for key, value in session_data.items():
             if not key.startswith("_"):
                 st.session_state[key] = value
+
+        # So Prompt Configuration will run first-load placeholder injection for this session
+        st.session_state.pop("prompt_config_placeholders_initialized", None)
         
         return True
     except Exception as e:

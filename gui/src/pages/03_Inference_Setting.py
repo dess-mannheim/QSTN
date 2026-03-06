@@ -10,7 +10,7 @@ st.set_page_config(
 
 st.title("AsyncOpenAI API Client & Inference Configurator")
 st.markdown("Use the widgets below to configure the `AsyncOpenAI` client and the inference parameters for an API call. Advanced or less common options can be added as a JSON object.")
-
+st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Inference", query_params={"section": "inference"})
 st.divider()
 
 
