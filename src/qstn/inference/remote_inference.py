@@ -131,7 +131,7 @@ def run_openai_batch(
 
     seeds = generate_seeds(seed, batch_size=batch_size)
 
-    plain_results, reasoning_output, logprob_result = _run_async_in_thread(
+    plain_results, logprob_result, reasoning_output = _run_async_in_thread(
         client=model,
         client_model_name=client_model_name,
         batch_messages=batch_messages,
@@ -144,7 +144,7 @@ def run_openai_batch(
         **generation_kwargs,
     )
 
-    return (plain_results, reasoning_output, logprob_result)
+    return (plain_results, logprob_result, reasoning_output)
 
 
 def run_openai_batch_conversation(
@@ -191,7 +191,7 @@ def run_openai_batch_conversation(
 
     seeds = generate_seeds(seed, batch_size=batch_size)
 
-    plain_results, reasoning_output, logprob_result = _run_async_in_thread(
+    plain_results, logprob_result, reasoning_output = _run_async_in_thread(
         client=model,
         client_model_name=client_model_name,
         batch_messages=batch_messages,
@@ -204,7 +204,7 @@ def run_openai_batch_conversation(
         **generation_kwargs,
     )
 
-    return (plain_results, reasoning_output, logprob_result)
+    return (plain_results, logprob_result, reasoning_output)
 
 
 def _run_async_in_thread(
