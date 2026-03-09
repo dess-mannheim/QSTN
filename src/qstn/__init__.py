@@ -2,7 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version as package_version
 
-from . import prompt_builder, survey_manager
+from . import persona_creator, prompt_builder, survey_manager
 
 try:
     __version__ = package_version("qstn")
@@ -12,4 +12,4 @@ except PackageNotFoundError:
     except Exception:
         __version__ = "0+unknown"
 
-__all__ = ["prompt_builder", "survey_manager", "__version__"]
+__all__ = ["prompt_builder", "survey_manager", "persona_creator", "__version__"]
