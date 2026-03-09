@@ -6,10 +6,13 @@ produce expected dataframe outputs with mocked API responses.
 
 import pandas as pd
 
-from qstn.utilities.survey_objects import QuestionnaireItem
 import qstn
+from qstn.utilities.survey_objects import QuestionnaireItem
 
-def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client):
+
+def test_simple_single_item(
+    mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client
+):
     # --- SETUP ---
     interviews = llm_prompt_factory(mock_personas, mock_questionnaires)
 
@@ -23,7 +26,7 @@ def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_facto
         llm_prompts=interviews,
         max_tokens=100,
         client_model_name="mock-model",
-        api_concurrency=3
+        api_concurrency=3,
     )
 
     # --- PARSING ---
@@ -42,11 +45,11 @@ def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_facto
 
     # 3. Check if the INSERTED question is present and in the correct relative position
     # The IDs should be ordered 1 -> 3 -> 2 based on our insertion at index 1
-    assert 3 in first_interview['questionnaire_item_id'].values
-    assert "How do you feel about Green?" == first_interview['question'].iloc[1]
-    
+    assert 3 in first_interview["questionnaire_item_id"].values
+    assert "How do you feel about Green?" == first_interview["question"].iloc[1]
+
     # 4. Check if the mocked answer came through (just to test if it was actually called)
-    assert first_interview.iloc[0]['llm_response'] == "I feel neutral about this."
+    assert first_interview.iloc[0]["llm_response"] == "I feel neutral about this."
 
     # 5. Check the second interview (which we did NOT touch)
     # It should still only have 2 questions and answers
@@ -54,7 +57,9 @@ def test_simple_single_item(mock_questionnaires, mock_personas, llm_prompt_facto
     assert len(second_interview) == 2
 
 
-def test_simple_sequential(mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client):
+def test_simple_sequential(
+    mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client
+):
     # --- SETUP ---
     interviews = llm_prompt_factory(mock_personas, mock_questionnaires)
 
@@ -68,7 +73,7 @@ def test_simple_sequential(mock_questionnaires, mock_personas, llm_prompt_factor
         llm_prompts=interviews,
         max_tokens=100,
         client_model_name="mock-model",
-        api_concurrency=3
+        api_concurrency=3,
     )
 
     # --- PARSING ---
@@ -87,16 +92,17 @@ def test_simple_sequential(mock_questionnaires, mock_personas, llm_prompt_factor
 
     # 3. Check if the INSERTED question is present and in the correct relative position
     # The IDs should be ordered 1 -> 3 -> 2 based on our insertion at index 1
-    assert 3 in first_interview['questionnaire_item_id'].values
-    assert "How do you feel about Green?" == first_interview['question'].iloc[1]
-    
+    assert 3 in first_interview["questionnaire_item_id"].values
+    assert "How do you feel about Green?" == first_interview["question"].iloc[1]
+
     # 4. Check if the mocked answer came through (just to test if it was actually called)
-    assert first_interview.iloc[0]['llm_response'] == "I feel neutral about this."
+    assert first_interview.iloc[0]["llm_response"] == "I feel neutral about this."
 
     # 5. Check the second interview (which we did NOT touch)
     # It should still only have 2 questions and answers
     second_interview = parsed_results[interviews[1]]
     assert len(second_interview) == 2
+
 
 def test_simple_battery(mock_questionnaires, mock_personas, llm_prompt_factory, mock_openai_client):
     # --- SETUP ---
@@ -112,7 +118,7 @@ def test_simple_battery(mock_questionnaires, mock_personas, llm_prompt_factory, 
         llm_prompts=interviews,
         max_tokens=100,
         client_model_name="mock-model",
-        api_concurrency=3
+        api_concurrency=3,
     )
 
     # --- PARSING ---
@@ -131,4 +137,4 @@ def test_simple_battery(mock_questionnaires, mock_personas, llm_prompt_factory, 
     assert "How do you feel about Green?" in first_interview["question"].iloc[0]
 
     # 3. Check if the mocked answer came through.
-    assert first_interview.iloc[0]['llm_response'] == "I feel neutral about this."
+    assert first_interview.iloc[0]["llm_response"] == "I feel neutral about this."

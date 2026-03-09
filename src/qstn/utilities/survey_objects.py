@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -155,24 +156,19 @@ class AnswerOptions:
         self.from_to_scale = from_to_scale
         self.list_prompt_template = list_prompt_template
         self.scale_prompt_template = scale_prompt_template
-        self.response_generation_method = response_generation_method
+        self.response_generation_method = copy.deepcopy(response_generation_method)
 
         if self.response_generation_method:
             if isinstance(self.response_generation_method, JSONVerbalizedDistribution):
-                if self.response_generation_method.output_index_only:
-                    self.response_generation_method.json_fields = {
-                        _option: "probability" for _option in self.answer_texts.indices
-                    }
-                    self.response_generation_method.constraints = {
-                        _option: "float" for _option in self.answer_texts.indices
-                    }
-                else:
-                    self.response_generation_method.json_fields = {
-                        _option: "probability" for _option in self.answer_texts.full_answers
-                    }
-                    self.response_generation_method.constraints = {
-                        _option: "float" for _option in self.answer_texts.full_answers
-                    }
+                options = (
+                    self.answer_texts.indices
+                    if (
+                        self.response_generation_method.output_index_only
+                        and self.answer_texts.indices is not None
+                    )
+                    else self.answer_texts.full_answers
+                )
+                self.response_generation_method.set_verbalized_options(options)
 
             elif isinstance(self.response_generation_method, JSONResponseGenerationMethod):
                 fields = self.response_generation_method.json_fields

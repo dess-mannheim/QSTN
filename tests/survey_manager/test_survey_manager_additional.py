@@ -6,7 +6,11 @@ import pandas as pd
 import pytest
 
 from qstn import survey_manager
-from qstn.inference.response_generation import JSONSingleResponseGenerationMethod
+from qstn.inference.response_generation import (
+    JSONResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
+    JSONVerbalizedDistribution,
+)
 from qstn.parser.llm_answer_parser import raw_responses
 from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities.survey_objects import QuestionLLMResponseTuple
@@ -102,6 +106,43 @@ def test_conduct_survey_battery_uses_json_rgm_and_keeps_logprobs(
     assert len(results) == 1
     assert captured["rgm"]
     assert list(results[0].results.values())[0].logprobs == {"token": -0.3}
+
+
+def test_prepare_battery_batch_merges_mixed_json_methods_per_question():
+    questionnaire_df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    option_5 = generate_likert_options(
+        n=5,
+        answer_texts=["SEHR GUT", "GUT", "TEILS/TEILS", "SCHLECHT", "SEHR SCHLECHT"],
+        response_generation_method=JSONVerbalizedDistribution(),
+    )
+    option_2 = generate_likert_options(
+        n=2,
+        answer_texts=["BIN DERS.MEINUNG", "BIN ANDERER MEINUNG"],
+        response_generation_method=JSONVerbalizedDistribution(),
+    )
+    prompt = LLMPrompt(questionnaire_source=questionnaire_df).prepare_prompt(
+        answer_options={1: option_5, 2: option_2}
+    )
+
+    _, _, response_generation_methods = survey_manager._prepare_battery_batch(
+        current_batch={0: prompt},
+        i=0,
+        item_separator="\n",
+    )
+    merged_method = response_generation_methods[0]
+    assert isinstance(merged_method, JSONResponseGenerationMethod)
+
+    merged_keys = list(merged_method.json_fields.keys())
+    assert "Q1 | q1_o1" in merged_keys
+    assert "Q1... | q1_o5" in merged_keys
+    assert "Q2 | q2_o1" in merged_keys
+    assert "Q2... | q2_o2" in merged_keys
+    assert "Q2... | q2_o3" not in merged_keys
 
 
 def test_conduct_survey_sequential_handles_partial_prefill_and_empty_logprobs(

@@ -7,7 +7,11 @@ from typing import Any, Literal, Self, overload
 
 import pandas as pd
 
-from .inference.response_generation import ResponseGenerationMethod
+from .inference.battery_rgm import resolve_battery_response_generation_method
+from .inference.response_generation import (
+    JSONResponseGenerationMethod,
+    ResponseGenerationMethod,
+)
 from .utilities import constants, placeholder, prompt_templates
 from .utilities.constants import QuestionnairePresentation
 from .utilities.survey_objects import AnswerOptions, AnswerTexts, QuestionnaireItem
@@ -135,8 +139,12 @@ class LLMPrompt:
         automatic_output_instructions = ""
 
         question_map = {question.item_id: question for question in self._questions}
+        reference_item_position = item_position
         if item_id:
             question_item = question_map[item_id]
+            reference_item_position = next(
+                i for i, question in enumerate(self._questions) if question.item_id == item_id
+            )
         elif item_id and item_id not in question_map.keys():
             raise ValueError("item_id does not exist.")
         elif item_position >= len(self._questions):
@@ -189,17 +197,21 @@ class LLMPrompt:
             all_questions_str = item_separator.join(all_questions)
             if question_item.answer_options:
                 options = question_item.answer_options.create_options_str()
-                rgm = question_item.answer_options.response_generation_method
-
-                if rgm is None:  # by default, no response generation method is required
-                    automatic_output_instructions = ""
-                else:
-                    automatic_output_instructions: str = rgm.get_automatic_prompt(
-                        questions=self._questions
-                    )
             else:
                 options = ""
+
+            rgm, is_merged_json_method = resolve_battery_response_generation_method(
+                questions=list(self._questions),
+                item_position=reference_item_position,
+            )
+            if rgm is None:  # by default, no response generation method is required
                 automatic_output_instructions = ""
+            elif isinstance(rgm, JSONResponseGenerationMethod) and not is_merged_json_method:
+                automatic_output_instructions = rgm.get_automatic_prompt(
+                    questions=list(self._questions)
+                )
+            else:
+                automatic_output_instructions = rgm.get_automatic_prompt()
 
             format_dict = {
                 placeholder.PROMPT_QUESTIONS: all_questions_str,

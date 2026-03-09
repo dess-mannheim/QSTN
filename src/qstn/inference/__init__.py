@@ -1,6 +1,6 @@
 """Public exports for inference helpers and response generation methods."""
 
-from . import dynamic_pydantic, response_generation, survey_inference, utils
+from . import battery_rgm, dynamic_pydantic, response_generation, survey_inference, utils
 from .response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -20,6 +20,7 @@ from .survey_inference import (
 __all__ = [
     "batch_generation",
     "batch_turn_by_turn_generation",
+    "battery_rgm",
     "dynamic_pydantic",
     "response_generation",
     "survey_inference",

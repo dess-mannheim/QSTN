@@ -9,9 +9,11 @@ import json_repair
 import numpy as np
 import pandas as pd
 
+from ..inference.battery_rgm import resolve_battery_response_generation_method
 from ..inference.response_generation import (
     JSONResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
+    JSONVerbalizedDistribution,
     ResponseGenerationMethod,
 )
 from ..inference.survey_inference import batch_generation
@@ -165,11 +167,11 @@ def parse_json_battery(
     survey_results: list[InferenceResult],
 ) -> dict[LLMPrompt, pd.DataFrame]:
     """
-    Parse JSON outputs of battery-style survey results.
+    Parse JSON outputs of battery-style survey results using canonical key mapping.
 
-    Expects one aggregated response row per questionnaire (`item_id == -1`) with
-    JSON keys ending in `_<question_content>`, and expands this into one row per
-    questionnaire item.
+    Expects one aggregated response row per questionnaire (`item_id == -1`) and
+    expands this into one row per questionnaire item by matching returned JSON keys
+    against expected canonical keys.
 
     Args:
         survey_results (List[InferenceResult]): Battery-style survey results with
@@ -179,50 +181,219 @@ def parse_json_battery(
         Dict[LLMPrompt, pd.DataFrame]: Mapping from questionnaire to expanded
             per-question dataframe.
     """
-    parsed_results: dict[LLMPrompt, pd.DataFrame] = _parse_json_non_battery(survey_results)
+    return _parse_json_battery_with_expected_methods(
+        survey_results=survey_results,
+        expected_methods_by_questionnaire=None,
+    )
 
-    all_results = {}
 
-    for survey, df in parsed_results.items():
+def _qid_scoped_key_parts(key: str) -> tuple[str | None, str]:
+    """Split `<base>__qid_<question_id>` keys into `(question_id, base)`."""
+    marker = "__qid_"
+    if marker not in key:
+        return None, key
+    base_key, _, question_id = key.rpartition(marker)
+    if question_id == "":
+        return None, key
+    return question_id, base_key
 
-        if "error_col" in df.columns:
-            all_results[survey] = df
+
+def _build_battery_error_df(question: str, llm_response: str, error: str) -> pd.DataFrame:
+    """Create a parser error row for battery-style results."""
+    return pd.DataFrame(
+        data=[(-1, question, llm_response, error)],
+        columns=[
+            constants.QUESTIONNAIRE_ITEM_ID,
+            constants.QUESTION,
+            constants.LLM_RESPONSE,
+            "error_col",
+        ],
+        index=[0],
+    )
+
+
+def _get_verbalized_options_for_question(question: Any) -> list[str]:
+    if question.answer_options is None:
+        return []
+    rgm = question.answer_options.response_generation_method
+    if not isinstance(rgm, JSONVerbalizedDistribution):
+        return []
+
+    options = list(rgm.verbalized_options)
+    if len(options) == 0:
+        if rgm.output_index_only and question.answer_options.answer_texts.indices is not None:
+            options = list(question.answer_options.answer_texts.indices)
+        else:
+            options = list(question.answer_options.answer_texts.full_answers)
+    return options
+
+
+def _build_verbalized_key_map(questionnaire: LLMPrompt) -> dict[str, tuple[Any, str]]:
+    key_map: dict[str, tuple[Any, str]] = {}
+    for question_order, question in enumerate(questionnaire.get_questions(), start=1):
+        if question.answer_options is None:
+            continue
+        rgm = question.answer_options.response_generation_method
+        if not isinstance(rgm, JSONVerbalizedDistribution):
             continue
 
-        source_row = df.iloc[0]
+        options = _get_verbalized_options_for_question(question)
+        seen_option_counts: dict[str, int] = {}
+        for option_index, option in enumerate(options, start=1):
+            key = rgm._format_field(
+                option=option,
+                question=rgm._question_for_field(
+                    question=str(question.question_content),
+                    option_index=option_index,
+                ),
+                option_index=option_index,
+                question_id=question.item_id,
+                question_order=question_order,
+            )
 
-        grouped_items = {}
+            count = seen_option_counts.get(option, 0) + 1
+            seen_option_counts[option] = count
+            column_name = option if count == 1 else f"{option} (option_{option_index})"
 
-        for col_name, cell_value in source_row.items():
-            survey_questions = survey.get_questions()
-            for i in range(len(survey_questions)):
-                current_question = survey_questions[i]
-                current_id = current_question.item_id
-                if col_name.endswith(f"_{current_question.question_content}"):
-                    new_col_name = col_name.removesuffix(f"_{current_question.question_content}")
-                    if current_id not in grouped_items:
-                        grouped_items[current_id] = {constants.QUESTIONNAIRE_ITEM_ID: current_id}
-                    grouped_items[current_id][constants.QUESTION] = survey.generate_question_prompt(
-                        current_question
-                    )
-                    grouped_items[current_id][new_col_name] = cell_value
+            existing = key_map.get(key)
+            if existing is not None and existing != (question.item_id, column_name):
+                raise ValueError(
+                    "Expected battery key map contains duplicate keys with different targets: "
+                    f"'{key}'. Ensure verbalized templates resolve to unique keys."
+                )
+            key_map[key] = (question.item_id, column_name)
+    return key_map
 
-            final_data_list = list(grouped_items.values())
 
-        all_results[survey] = pd.DataFrame(final_data_list)
+def _build_generic_battery_key_map(
+    questionnaire: LLMPrompt,
+    response_generation_method: ResponseGenerationMethod | None = None,
+) -> dict[str, tuple[Any, str]]:
+    questions = list(questionnaire.get_questions())
+    if len(questions) == 0:
+        return {}
 
-        # long_df.loc[0:minimum_rows, constants.INTERVIEW_ITEM_ID] = [
-        #     survey_question.item_id
-        #     for survey_question in survey._questions[0:minimum_rows]
-        # ]
-        # long_df.loc[0:minimum_rows, constants.QUESTION] = [
-        #     survey.generate_question_prompt(survey_question)
-        #     for survey_question in survey._questions[0:minimum_rows]
-        # ]
-        # long_df = long_df.drop(columns=constants.INTERVIEW_ITEM_ID).rename(
-        #     columns={"new_survey_item_id": constants.INTERVIEW_ITEM_ID}
-        # )
-        # all_results[survey] = long_df
+    if response_generation_method is None:
+        response_generation_method, _ = resolve_battery_response_generation_method(
+            questions=questions,
+            item_position=0,
+        )
+
+    if not isinstance(response_generation_method, JSONResponseGenerationMethod):
+        return {
+            f"answer__qid_{question.item_id}": (question.item_id, "answer")
+            for question in questions
+        }
+
+    if isinstance(response_generation_method.json_fields, dict):
+        keys = list(response_generation_method.json_fields.keys())
+    else:
+        keys = list(response_generation_method.json_fields)
+
+    question_by_id_str = {str(question.item_id): question for question in questions}
+    key_map: dict[str, tuple[Any, str]] = {}
+    for key in keys:
+        question_key, base_key = _qid_scoped_key_parts(key)
+        if question_key is None:
+            if len(questions) == 1:
+                item_id = questions[0].item_id
+                key_map[key] = (item_id, base_key)
+            continue
+
+        question = question_by_id_str.get(question_key)
+        if question is None:
+            continue
+        key_map[key] = (question.item_id, base_key)
+    return key_map
+
+
+def _build_expected_battery_key_map(
+    questionnaire: LLMPrompt,
+    response_generation_method: ResponseGenerationMethod | None = None,
+) -> dict[str, tuple[Any, str]]:
+    expected_map = _build_generic_battery_key_map(
+        questionnaire=questionnaire,
+        response_generation_method=response_generation_method,
+    )
+    verbalized_key_map = _build_verbalized_key_map(questionnaire=questionnaire)
+    for key, mapping in verbalized_key_map.items():
+        existing = expected_map.get(key)
+        if existing is not None and existing != mapping:
+            raise ValueError(
+                "Expected battery key map contains duplicate keys with different targets: "
+                f"'{key}'."
+            )
+        expected_map[key] = mapping
+    return expected_map
+
+
+def _parse_json_battery_with_expected_methods(
+    survey_results: list[InferenceResult],
+    expected_methods_by_questionnaire: dict[LLMPrompt, ResponseGenerationMethod | None] | None,
+) -> dict[LLMPrompt, pd.DataFrame]:
+    all_results: dict[LLMPrompt, pd.DataFrame] = {}
+    reserved_keys = {constants.QUESTIONNAIRE_ITEM_ID, constants.QUESTION}
+
+    for survey_result in survey_results:
+        questionnaire = survey_result.questionnaire
+        if not _is_battery_like_result(survey_result):
+            raise ValueError(
+                "`parse_json_battery` expects battery-style survey results with one "
+                "aggregated response (`questionnaire_item_id == -1`) per questionnaire."
+            )
+
+        qa_tuple = survey_result.results[-1]
+        parsed_llm_response = parse_json_str(qa_tuple.llm_response)
+        if not isinstance(parsed_llm_response, dict):
+            all_results[questionnaire] = _build_battery_error_df(
+                question=qa_tuple.question,
+                llm_response=qa_tuple.llm_response,
+                error="ERROR: Parsing",
+            )
+            continue
+
+        method_for_questionnaire = None
+        if expected_methods_by_questionnaire is not None:
+            method_for_questionnaire = expected_methods_by_questionnaire.get(questionnaire)
+
+        expected_key_map = _build_expected_battery_key_map(
+            questionnaire=questionnaire,
+            response_generation_method=method_for_questionnaire,
+        )
+
+        grouped_items: dict[Any, dict[str, Any]] = {}
+        for question in questionnaire.get_questions():
+            grouped_items[question.item_id] = {
+                constants.QUESTIONNAIRE_ITEM_ID: question.item_id,
+                constants.QUESTION: questionnaire.generate_question_prompt(question),
+            }
+
+        unknown_keys: list[str] = []
+        for key, value in parsed_llm_response.items():
+            if key in reserved_keys:
+                continue
+            mapping = expected_key_map.get(key)
+            if mapping is None:
+                unknown_keys.append(str(key))
+                continue
+            questionnaire_item_id, column_name = mapping
+            grouped_items[questionnaire_item_id][column_name] = value
+
+        if len(unknown_keys) > 0:
+            formatted_unknown_keys = ", ".join(sorted(set(unknown_keys)))
+            all_results[questionnaire] = _build_battery_error_df(
+                question=qa_tuple.question,
+                llm_response=qa_tuple.llm_response,
+                error=f"ERROR: Unknown battery JSON keys: {formatted_unknown_keys}",
+            )
+            continue
+
+        ordered_rows = [
+            grouped_items[question.item_id]
+            for question in questionnaire.get_questions()
+            if question.item_id in grouped_items
+        ]
+        all_results[questionnaire] = pd.DataFrame(ordered_rows)
 
     return all_results
 
@@ -416,21 +587,62 @@ def _resolve_choices_for_json_key(
     answer_choices_lookup: dict[Any, list[str]],
 ) -> list[str]:
     questions = list(questionnaire.get_questions())
+    question_by_id_str = {str(question.item_id): question for question in questions}
+    question_key, _ = _qid_scoped_key_parts(key)
 
-    for question in questions:
-        suffix = f"_{question.question_content}"
-        if key.endswith(suffix):
+    if question_key is not None:
+        question = question_by_id_str.get(question_key)
+        if question is not None:
             return list(answer_choices_lookup.get(question.item_id, []))
 
-    if key == "answer" and len(questions) == 1:
+    if len(questions) == 1:
         return list(answer_choices_lookup.get(questions[0].item_id, []))
 
-    all_choices: list[str] = []
-    for question in questions:
-        for choice in answer_choices_lookup.get(question.item_id, []):
-            if choice not in all_choices:
-                all_choices.append(choice)
-    return all_choices
+    return []
+
+
+def _scope_json_method_keys_with_qid(
+    response_generation_method: JSONResponseGenerationMethod,
+    questions: list[Any],
+) -> JSONResponseGenerationMethod:
+    if len(questions) <= 1:
+        return response_generation_method
+
+    if isinstance(response_generation_method.json_fields, dict):
+        original_keys = list(response_generation_method.json_fields.keys())
+    else:
+        original_keys = list(response_generation_method.json_fields)
+
+    scoped_flags = [(_qid_scoped_key_parts(key)[0] is not None) for key in original_keys]
+    if all(scoped_flags):
+        return response_generation_method
+    if any(scoped_flags):
+        raise ValueError(
+            "Battery JSON methods must either scope all fields with `__qid_<question_id>` "
+            "or none of them."
+        )
+
+    if isinstance(response_generation_method.json_fields, dict):
+        scoped_fields: dict[str, str] = {}
+        for question in questions:
+            for key, explanation in response_generation_method.json_fields.items():
+                scoped_fields[f"{key}__qid_{question.item_id}"] = explanation
+        response_generation_method.json_fields = scoped_fields
+    else:
+        scoped_fields_list: list[str] = []
+        for question in questions:
+            for key in response_generation_method.json_fields:
+                scoped_fields_list.append(f"{key}__qid_{question.item_id}")
+        response_generation_method.json_fields = scoped_fields_list
+
+    if response_generation_method.constraints:
+        scoped_constraints: dict[str, Any] = {}
+        for question in questions:
+            for key, value in response_generation_method.constraints.items():
+                scoped_constraints[f"{key}__qid_{question.item_id}"] = deepcopy(value)
+        response_generation_method.constraints = scoped_constraints
+
+    return response_generation_method
 
 
 def _materialize_single_question_response_generation_method(
@@ -488,20 +700,10 @@ def _materialize_battery_response_generation_method(
     adjusted_method = deepcopy(response_generation_method)
 
     questions = list(questionnaire.get_questions())
-    if isinstance(adjusted_method.json_fields, dict):
-        json_keys = list(adjusted_method.json_fields.keys())
-    else:
-        json_keys = list(adjusted_method.json_fields)
-
-    if len(questions) > 1:
-        already_question_scoped = all(
-            any(key.endswith(f"_{question.question_content}") for question in questions)
-            for key in json_keys
-        )
-        if not already_question_scoped:
-            adjusted_method = adjusted_method.create_new_rgm_with_multiple_questions(
-                questions=questions
-            )
+    adjusted_method = _scope_json_method_keys_with_qid(
+        response_generation_method=adjusted_method,
+        questions=questions,
+    )
 
     answer_choices_lookup = _build_answer_choices_lookup(
         questionnaire=questionnaire,
@@ -584,17 +786,17 @@ def _build_default_battery_response_generation_methods(
 ) -> list[ResponseGenerationMethod]:
     methods: list[ResponseGenerationMethod] = []
     for survey_result in survey_results:
+        questions = list(survey_result.questionnaire.get_questions())
         answer_choices_lookup = _build_answer_choices_lookup(
             questionnaire=survey_result.questionnaire,
             answer_options=answer_options,
         )
         json_fields = {
-            f"answer_{question.question_content}": "selected answer option"
-            for question in survey_result.questionnaire.get_questions()
+            f"answer__qid_{question.item_id}": "selected answer option" for question in questions
         }
         constraints: dict[str, list[str]] = {}
-        for question in survey_result.questionnaire.get_questions():
-            key = f"answer_{question.question_content}"
+        for question in questions:
+            key = f"answer__qid_{question.item_id}"
             adjusted_choices = _with_optional_no_answer_choice(
                 answer_choices_lookup.get(question.item_id, []),
                 no_answer_option,
@@ -1002,6 +1204,7 @@ def parse_with_llm_battery(
     parser_jobs: list[dict[str, Any]] = []
     source_response_map: dict[LLMPrompt, str] = {}
     resolved_response_generation_methods: list[ResponseGenerationMethod | None] = []
+    resolved_methods_by_questionnaire: dict[LLMPrompt, ResponseGenerationMethod | None] = {}
 
     if isinstance(response_generation_method, list):
         if len(response_generation_method) != len(survey_results):
@@ -1045,6 +1248,7 @@ def parse_with_llm_battery(
             }
         )
         resolved_response_generation_methods.append(current_method)
+        resolved_methods_by_questionnaire[survey_result.questionnaire] = current_method
         source_response_map[survey_result.questionnaire] = qa_tuple.llm_response
 
     parser_survey_results = _run_llm_parser_jobs(
@@ -1064,7 +1268,10 @@ def parse_with_llm_battery(
     )
 
     if use_parser:
-        parsed_results = parse_json_battery(parser_survey_results)
+        parsed_results = _parse_json_battery_with_expected_methods(
+            survey_results=parser_survey_results,
+            expected_methods_by_questionnaire=resolved_methods_by_questionnaire,
+        )
     else:
         parsed_results = raw_responses(parser_survey_results)
 

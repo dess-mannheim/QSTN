@@ -21,6 +21,7 @@ class DummyLogprobModel:
         class Tokenizer:
             def tokenize(self, txt):
                 return txt.split()
+
         self._tokenizer = Tokenizer()
 
     def get_tokenizer(self):
@@ -29,13 +30,16 @@ class DummyLogprobModel:
 
 def make_output(text, logprobs=None):
     """Create a minimal output object matching vLLM request output shape."""
+
     class Out:
         def __init__(self, text, logprobs):
             self.text = text
             self.logprobs = logprobs
+
     class Req:
         def __init__(self, text, logprobs):
             self.outputs = [Out(text, logprobs)]
+
     return Req(text, logprobs)
 
 
@@ -44,33 +48,49 @@ def test_get_logprobs_various():
     model = DummyLogprobModel()
 
     # prepare fake outputs with two entries
-    out1 = make_output("ignored", logprobs=[SimpleNamespace(values=lambda: [SimpleNamespace(decoded_token=' a', logprob=-1.0)])])
-    out2 = make_output("ignored2", logprobs=[SimpleNamespace(values=lambda: [SimpleNamespace(decoded_token=' b', logprob=-2.0)])])
+    out1 = make_output(
+        "ignored",
+        logprobs=[
+            SimpleNamespace(values=lambda: [SimpleNamespace(decoded_token=" a", logprob=-1.0)])
+        ],
+    )
+    out2 = make_output(
+        "ignored2",
+        logprobs=[
+            SimpleNamespace(values=lambda: [SimpleNamespace(decoded_token=" b", logprob=-2.0)])
+        ],
+    )
     outputs = [out1, out2]
 
     # Baseline behavior without reasoning-aware offset.
     rgm = LogprobResponseGenerationMethod(token_position=0, ignore_reasoning=False)
-    result = local_inference._get_logprobs(model, rgm, "<t>","</t>"," ",outputs, [None, None])
+    result = local_inference._get_logprobs(model, rgm, "<t>", "</t>", " ", outputs, [None, None])
     assert result == [{"a": -1.0}, {"b": -2.0}]
 
     # Reasoning-aware behavior can point past available token positions.
     # In that case, the helper should gracefully return empty dicts.
     rgm2 = LogprobResponseGenerationMethod(token_position=0, ignore_reasoning=True)
     # Provide reasoning text so tokenizer-based offset logic is exercised.
-    result2 = local_inference._get_logprobs(model, rgm2, "<t>","</t>"," ",outputs, ["R","S"])
+    result2 = local_inference._get_logprobs(model, rgm2, "<t>", "</t>", " ", outputs, ["R", "S"])
     assert result2 == [{}, {}]
 
 
 def test_default_model_init_monkeypatched(monkeypatch):
     """`default_model_init` should pass expected constructor kwargs to LLM."""
     calls = {}
+
     class DummyLLM:
         def __init__(self, **kwargs):
             calls.update(kwargs)
+
     monkeypatch.setattr(local_inference, "LLM", DummyLLM)
     # Patch torch internals to keep test fully local and deterministic.
     monkeypatch.setattr(local_inference.torch, "manual_seed", lambda seed: None)
-    monkeypatch.setattr(local_inference.torch, "cuda", SimpleNamespace(device_count=lambda: 2, _is_in_bad_fork=lambda : False))
+    monkeypatch.setattr(
+        local_inference.torch,
+        "cuda",
+        SimpleNamespace(device_count=lambda: 2, _is_in_bad_fork=lambda: False),
+    )
 
     local_inference.default_model_init("foo-model", seed=123, extra=7)
     assert calls.get("model") == "foo-model"
@@ -81,14 +101,22 @@ def test_default_model_init_monkeypatched(monkeypatch):
 
 def test_run_api_batch_async_processing(monkeypatch):
     """Async OpenAI helper should parse reasoning and capture top logprobs."""
+
     class FakeClient:
         def __init__(self):
             self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
         async def _create(self, **kwargs):
             # Return a minimal object with OpenAI-like response structure.
-            msg = SimpleNamespace(content=kwargs.get("messages")[1]["content"], reasoning=None, reasoning_content=None)
+            msg = SimpleNamespace(
+                content=kwargs.get("messages")[1]["content"],
+                reasoning=None,
+                reasoning_content=None,
+            )
             lp = SimpleNamespace(top_logprobs=[SimpleNamespace(token="tok", logprob=-0.5)])
-            resp = SimpleNamespace(choices=[SimpleNamespace(message=msg, logprobs=SimpleNamespace(content=[lp]))])
+            resp = SimpleNamespace(
+                choices=[SimpleNamespace(message=msg, logprobs=SimpleNamespace(content=[lp]))]
+            )
             return resp
 
     fake = FakeClient()
@@ -96,7 +124,12 @@ def test_run_api_batch_async_processing(monkeypatch):
         remote_inference._run_api_batch_async(
             client=fake,
             client_model_name="m",
-            batch_messages=[[{"role":"system","content":"s"},{"role":"user","content":"<think>R</think>ans"}]],
+            batch_messages=[
+                [
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "<think>R</think>ans"},
+                ]
+            ],
             seeds=[1],
             concurrency_limit=1,
             sampling_params=None,
@@ -112,11 +145,13 @@ def test_run_api_batch_async_processing(monkeypatch):
 
 def test_survey_inference_batch_and_conversation(monkeypatch, capsys):
     """Ensure high-level batch functions delegate correctly and optionally print."""
+
     # Stub local inference entry points to avoid external model dependencies.
     def fake_vllm(model, **kwargs):
         # Produce one result per prompt to mimic batch behavior.
         batch_size = len(kwargs.get("system_messages", []))
         return (["ok"] * batch_size, [None] * batch_size, [None] * batch_size)
+
     # Patch both local module and survey_inference bindings.
     monkeypatch.setattr(local_inference, "run_vllm_batch", fake_vllm)
     monkeypatch.setattr(local_inference, "run_vllm_batch_conversation", fake_vllm)
@@ -131,13 +166,13 @@ def test_survey_inference_batch_and_conversation(monkeypatch, capsys):
     # Batch generation with multiple prompts.
     out = survey_inference.batch_generation(
         model=FakeLLM(),
-        system_messages=["s1","s2"],
-        prompts=["p1","p2"],
+        system_messages=["s1", "s2"],
+        prompts=["p1", "p2"],
         response_generation_method=[None, None],
         print_conversation=True,
         number_of_printed_conversations=2,
     )
-    assert out[0] == ["ok","ok"]
+    assert out[0] == ["ok", "ok"]
     captured = capsys.readouterr().out
     assert "-- System Message --" in captured
 
@@ -145,7 +180,7 @@ def test_survey_inference_batch_and_conversation(monkeypatch, capsys):
     out2 = survey_inference.batch_turn_by_turn_generation(
         model=FakeLLM(),
         system_messages=["s"],
-        prompts=[["p1","p2"]],
+        prompts=[["p1", "p2"]],
         assistant_messages=[["a"]],
         response_generation_method=[None],
         print_conversation=True,

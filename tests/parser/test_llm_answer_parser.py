@@ -9,6 +9,7 @@ from pandas.testing import assert_frame_equal
 from qstn.inference.response_generation import (
     JSONReasoningResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
+    JSONVerbalizedDistribution,
 )
 from qstn.parser.llm_answer_parser import (
     SOURCE_LLM_RESPONSE_COLUMN,
@@ -40,6 +41,27 @@ def _make_prompt():
         ]
     )
     return LLMPrompt(questionnaire_source=questionnaire)
+
+
+def _make_prompt_with_answer_options(
+    answer_texts_q1: list[str],
+    answer_texts_q2: list[str],
+    indices_q1: list[str] | None = None,
+    indices_q2: list[str] | None = None,
+    response_generation_method=None,
+):
+    prompt = _make_prompt()
+    answer_options = {
+        1: AnswerOptions(
+            answer_texts=AnswerTexts(answer_texts=answer_texts_q1, indices=indices_q1),
+            response_generation_method=response_generation_method,
+        ),
+        2: AnswerOptions(
+            answer_texts=AnswerTexts(answer_texts=answer_texts_q2, indices=indices_q2),
+            response_generation_method=response_generation_method,
+        ),
+    }
+    return prompt.prepare_prompt(answer_options=answer_options)
 
 
 def test_parse_json_str_handles_valid_repair_and_invalid_json():
@@ -115,7 +137,7 @@ def test_parse_json_battery_groups_columns_per_question():
         results={
             -1: QuestionLLMResponseTuple(
                 question="battery",
-                llm_response='{"answer_Red?":"1","answer_Blue?":"2"}',
+                llm_response='{"answer__qid_1":"1","answer__qid_2":"2"}',
                 logprobs=None,
                 reasoning=None,
             )
@@ -127,6 +149,110 @@ def test_parse_json_battery_groups_columns_per_question():
     assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
     assert "answer" in parsed.columns
     assert set(parsed["answer"]) == {"1", "2"}
+
+
+def test_parse_json_battery_unknown_legacy_keys_return_error():
+    prompt = _make_prompt()
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"option_1__qid_1":"0.4","option_1__qid_2":"0.6"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed = parse_json_battery([battery_result])[prompt]
+
+    assert "error_col" in parsed.columns
+    assert "Unknown battery JSON keys" in parsed.loc[0, "error_col"]
+    assert "option_1__qid_1" in parsed.loc[0, "error_col"]
+
+
+def test_parse_json_battery_legacy_machine_id_keys_return_error():
+    prompt = _make_prompt_with_answer_options(
+        answer_texts_q1=["GAR KEIN VERTRAUEN", "VIEL VERTRAUEN"],
+        answer_texts_q2=["SCHLECHT", "GUT"],
+        indices_q1=["1", "2"],
+        indices_q2=["1", "2"],
+    )
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"q_1_o_1":"0.1","q_2_o_2":"0.9"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed = parse_json_battery([battery_result])[prompt]
+
+    assert "error_col" in parsed.columns
+    assert "Unknown battery JSON keys" in parsed.loc[0, "error_col"]
+    assert "q_1_o_1" in parsed.loc[0, "error_col"]
+
+
+def test_parse_json_battery_machine_keys_map_to_original_option_text_columns():
+    prompt = _make_prompt_with_answer_options(
+        answer_texts_q1=["GAR KEIN VERTRAUEN", "VIEL VERTRAUEN"],
+        answer_texts_q2=["SCHLECHT", "GUT"],
+        indices_q1=["1", "2"],
+        indices_q2=["1", "2"],
+        response_generation_method=JSONVerbalizedDistribution(),
+    )
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"Red? | q1_o1":"0.1","Blue?... | q2_o2":"0.9"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed = parse_json_battery([battery_result])[prompt]
+
+    assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+    assert "1: GAR KEIN VERTRAUEN" in parsed.columns
+    assert "2: GUT" in parsed.columns
+    assert set(parsed["1: GAR KEIN VERTRAUEN"].dropna()) == {"0.1"}
+    assert set(parsed["2: GUT"].dropna()) == {"0.9"}
+
+
+def test_parse_json_battery_machine_keys_disambiguate_duplicate_option_labels():
+    prompt = _make_prompt_with_answer_options(
+        answer_texts_q1=["TEILS_A", "TEILS_B"],
+        answer_texts_q2=["A", "B"],
+        response_generation_method=JSONVerbalizedDistribution(),
+    )
+    prompt.get_question(0).answer_options.response_generation_method.verbalized_options = [
+        "TEILS",
+        "TEILS",
+    ]
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"Red? | q1_o1":"0.2","Red?... | q1_o2":"0.8"}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    parsed = parse_json_battery([battery_result])[prompt]
+
+    assert "TEILS" in parsed.columns
+    assert "TEILS (option_2)" in parsed.columns
 
 
 def test_parse_json_battery_returns_error_frame_unchanged():
@@ -155,7 +281,7 @@ def test_parse_json_auto_routes_battery_to_battery_parser():
         results={
             -1: QuestionLLMResponseTuple(
                 question="battery",
-                llm_response='{"answer_Red?":"1","answer_Blue?":"2"}',
+                llm_response='{"answer__qid_1":"1","answer__qid_2":"2"}',
                 logprobs=None,
                 reasoning=None,
             )
@@ -181,7 +307,7 @@ def test_parse_json_mixed_input_handles_battery_and_non_battery():
         results={
             -1: QuestionLLMResponseTuple(
                 question="battery",
-                llm_response='{"answer_Red?":"1","answer_Blue?":"2"}',
+                llm_response='{"answer__qid_1":"1","answer__qid_2":"2"}',
                 logprobs=None,
                 reasoning=None,
             )
@@ -429,7 +555,7 @@ def test_parse_with_llm_battery_parses_to_expanded_rows_with_source_trace():
         model=object(),
         survey_results=[source_result],
         generation_fn=lambda **_kwargs: (
-            ['{"answer_Red?":"1","answer_Blue?":"2"}'],
+            ['{"answer__qid_1":"1","answer__qid_2":"2"}'],
             None,
             None,
         ),
@@ -471,7 +597,7 @@ def test_parse_with_llm_auto_routes_battery_and_matches_explicit_battery_parser(
     )
 
     def fake_generation_fn(**_kwargs):
-        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+        return ['{"answer__qid_1":"1","answer__qid_2":"2"}'], None, None
 
     parsed_from_router = parse_with_llm(
         model=object(),
@@ -537,7 +663,7 @@ def test_parse_with_llm_mixed_input_handles_battery_and_non_battery():
         outputs = []
         for prompt_text in kwargs["prompts"]:
             if "raw-battery" in prompt_text:
-                outputs.append('{"answer_Red?":"1","answer_Blue?":"2"}')
+                outputs.append('{"answer__qid_1":"1","answer__qid_2":"2"}')
             else:
                 outputs.append('{"answer":"Yes"}')
         return outputs, None, None
@@ -592,7 +718,7 @@ def test_parse_with_llm_battery_uses_default_battery_json_keys_when_parser_enabl
 
     def fake_generation_fn(**kwargs):
         captured["response_generation_method"] = kwargs["response_generation_method"]
-        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+        return ['{"answer__qid_1":"1","answer__qid_2":"2"}'], None, None
 
     parsed = parse_with_llm_battery(
         model=object(),
@@ -604,7 +730,7 @@ def test_parse_with_llm_battery_uses_default_battery_json_keys_when_parser_enabl
     methods = captured["response_generation_method"]
     assert isinstance(methods, list)
     assert len(methods) == 1
-    assert set(methods[0].json_fields.keys()) == {"answer_Red?", "answer_Blue?"}
+    assert set(methods[0].json_fields.keys()) == {"answer__qid_1", "answer__qid_2"}
     assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
 
 
@@ -619,7 +745,7 @@ def test_parse_with_llm_battery_forwards_custom_response_generation_method():
 
     def fake_generation_fn(**kwargs):
         captured["response_generation_method"] = kwargs["response_generation_method"]
-        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+        return ['{"answer__qid_1":"1","answer__qid_2":"2"}'], None, None
 
     parse_with_llm_battery(
         model=object(),
@@ -643,7 +769,7 @@ def test_parse_with_llm_battery_uses_rgm_automatic_output_instructions_in_prompt
     def fake_generation_fn(**kwargs):
         captured["prompt"] = kwargs["prompts"][0]
         captured["method"] = kwargs["response_generation_method"][0]
-        return ['{"answer_Red?":"1","answer_Blue?":"2"}'], None, None
+        return ['{"answer__qid_1":"1","answer__qid_2":"2"}'], None, None
 
     parse_with_llm_battery(
         model=object(),
@@ -666,7 +792,7 @@ def test_parse_with_llm_battery_no_answer_option_is_available():
 
     def fake_generation_fn(**kwargs):
         captured["methods"] = kwargs["response_generation_method"]
-        return ['{"answer_Red?":"LLM_DID_NOT_ANSWER","answer_Blue?":"2"}'], None, None
+        return ['{"answer__qid_1":"LLM_DID_NOT_ANSWER","answer__qid_2":"2"}'], None, None
 
     parsed = parse_with_llm_battery(
         model=object(),
@@ -678,7 +804,7 @@ def test_parse_with_llm_battery_no_answer_option_is_available():
 
     assert "LLM_DID_NOT_ANSWER" in parsed["answer"].tolist()
     methods = captured["methods"]
-    assert "LLM_DID_NOT_ANSWER" in methods[0].constraints["answer_Red?"]
+    assert "LLM_DID_NOT_ANSWER" in methods[0].constraints["answer__qid_1"]
 
 
 def test_parse_with_llm_battery_accepts_answer_options_override_for_optionless_questions():
@@ -696,7 +822,7 @@ def test_parse_with_llm_battery_accepts_answer_options_override_for_optionless_q
     def fake_generation_fn(**kwargs):
         captured["methods"] = kwargs["response_generation_method"]
         captured["prompt"] = kwargs["prompts"][0]
-        return ['{"answer_Red?":"Warm","answer_Blue?":"Blue"}'], None, None
+        return ['{"answer__qid_1":"Warm","answer__qid_2":"Blue"}'], None, None
 
     parsed = parse_with_llm_battery(
         model=object(),
@@ -707,8 +833,8 @@ def test_parse_with_llm_battery_accepts_answer_options_override_for_optionless_q
     )[prompt]
 
     assert set(parsed["answer"]) == {"Warm", "Blue"}
-    assert captured["methods"][0].constraints["answer_Red?"] == ["Warm", "Cold"]
-    assert captured["methods"][0].constraints["answer_Blue?"] == ["Blue", "Green"]
+    assert captured["methods"][0].constraints["answer__qid_1"] == ["Warm", "Cold"]
+    assert captured["methods"][0].constraints["answer__qid_2"] == ["Blue", "Green"]
     assert "Warm" in captured["prompt"] and "Green" in captured["prompt"]
 
 
@@ -722,7 +848,7 @@ def test_parse_with_llm_battery_no_options_avoids_unsatisfiable_answer_constrain
 
     def fake_generation_fn(**kwargs):
         captured["method"] = kwargs["response_generation_method"][0]
-        return ['{"answer_Red?":"free-a","answer_Blue?":"free-b"}'], None, None
+        return ['{"answer__qid_1":"free-a","answer__qid_2":"free-b"}'], None, None
 
     parsed = parse_with_llm_battery(
         model=object(),
@@ -734,6 +860,35 @@ def test_parse_with_llm_battery_no_options_avoids_unsatisfiable_answer_constrain
     assert set(parsed["answer"]) == {"free-a", "free-b"}
     method = captured["method"]
     assert method.constraints is None
+
+
+def test_parse_with_llm_battery_reasoning_json_parses_qid_scoped_fields():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw-battery", None, None)},
+    )
+
+    parsed = parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=JSONReasoningResponseGenerationMethod(),
+        generation_fn=lambda **_kwargs: (
+            [
+                (
+                    '{"reasoning__qid_1":"r1","answer__qid_1":"a1",'
+                    '"reasoning__qid_2":"r2","answer__qid_2":"a2"}'
+                )
+            ],
+            None,
+            None,
+        ),
+        print_progress=False,
+    )[prompt]
+
+    assert sorted(parsed[constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+    assert set(parsed["answer"]) == {"a1", "a2"}
+    assert set(parsed["reasoning"]) == {"r1", "r2"}
 
 
 def test_raw_responses_returns_to_dataframe_mapping():

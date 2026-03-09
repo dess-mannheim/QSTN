@@ -7,11 +7,10 @@ This module validates:
 """
 
 import pytest
-from typing import List
 
+from qstn import survey_manager
 from qstn.parser.llm_answer_parser import raw_responses
 from qstn.prompt_builder import LLMPrompt
-from qstn import survey_manager
 
 
 def test_conduct_survey_single_item_runs_once_per_question(
@@ -69,8 +68,14 @@ def test_conduct_survey_sequential_uses_prefilled_response_without_api_call(
 
     parsed = raw_responses(results)[prompt]
     assert call_counter["count"] == 1
-    assert parsed.loc[parsed["questionnaire_item_id"] == 1, "llm_response"].item() == "prefilled answer"
-    assert parsed.loc[parsed["questionnaire_item_id"] == 2, "llm_response"].item() == "generated answer"
+    assert (
+        parsed.loc[parsed["questionnaire_item_id"] == 1, "llm_response"].item()
+        == "prefilled answer"
+    )
+    assert (
+        parsed.loc[parsed["questionnaire_item_id"] == 2, "llm_response"].item()
+        == "generated answer"
+    )
 
 
 def test_conduct_survey_battery_runs_once_and_keeps_separator(
@@ -78,7 +83,7 @@ def test_conduct_survey_battery_runs_once_and_keeps_separator(
 ):
     """Battery mode should call generation once and include the separator in the prompt."""
     prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
-    captured_prompts: List[str] = []
+    captured_prompts: list[str] = []
 
     def fake_batch_generation(**kwargs):
         captured_prompts[:] = kwargs["prompts"]
@@ -123,8 +128,6 @@ def test_intermediate_save_path_check_creates_directory(tmp_path):
     """When given a nested path, the helper ensures parent directories exist."""
     target = tmp_path / "new_folder" / "results.csv"
 
-    survey_manager._intermediate_save_path_check(
-        n_save_step=1, intermediate_save_path=str(target)
-    )
+    survey_manager._intermediate_save_path_check(n_save_step=1, intermediate_save_path=str(target))
 
     assert target.parent.exists()
