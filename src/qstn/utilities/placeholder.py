@@ -10,3 +10,6 @@ QUESTION_CONTENT: Final[str] = "{{QUESTION_CONTENT_PLACEHOLDER}}"
 
 # JSON Template
 JSON_TEMPLATE: Final[str] = "{{JSON_TEMPLATE}}"
+
+# Compact scale range for JSON explanations
+SCALE_RANGE: Final[str] = "{{SCALE_RANGE_PLACEHOLDER}}"

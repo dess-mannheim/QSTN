@@ -10,11 +10,14 @@ from ..inference.response_generation import (
     JSONVerbalizedDistribution,
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
+    copy_json_response_generation_method,
 )
-from ..utilities import constants, prompt_templates
+from ..utilities import placeholder, prompt_templates
 
 if TYPE_CHECKING:
     from ..prompt_builder import LLMPrompt
+
+from ..utilities import constants
 
 
 @dataclass
@@ -93,10 +96,12 @@ class AnswerTexts:
             if len(self.answer_texts) == 2:
                 self.answer_texts = dummy_answer_texts
         if self.answer_texts and self.indices:
-            self.full_answers = [
-                f"{index}{self.index_answer_seperator}{answer_text}"
-                for answer_text, index in zip(self.answer_texts, self.indices)
-            ]
+            self.full_answers = []
+            for answer_text, index in zip(self.answer_texts, self.indices):
+                if answer_text == "":
+                    self.full_answers.append(f"{index}")
+                else:
+                    self.full_answers.append(f"{index}{self.index_answer_seperator}{answer_text}")
         elif self.answer_texts and self.indices is None:
             self.full_answers = [f"{answer_text}" for answer_text in self.answer_texts]
         elif self.answer_texts is None and self.indices:
@@ -144,6 +149,47 @@ class AnswerOptions:
     scale_prompt_template: str = prompt_templates.SCALE_OPTIONS_DEFAULT
     response_generation_method: ResponseGenerationMethod | None = None
 
+    def _response_generation_options(self) -> list[str]:
+        if self.answer_texts.indices is not None and self.response_generation_method is not None:
+            if self.response_generation_method.output_index_only:
+                return list(self.answer_texts.indices)
+        return list(self.answer_texts.full_answers)
+
+    def _response_generation_options_text(self) -> str:
+        if self.from_to_scale:
+            if self.scale_prompt_template is None:
+                return ", ".join(self._response_generation_options())
+
+            if (
+                self.answer_texts.indices is not None
+                and self.response_generation_method is not None
+            ):
+                if self.response_generation_method.output_index_only:
+                    start_option = self.answer_texts.indices[0]
+                    end_option = self.answer_texts.indices[-1]
+                    return self.scale_prompt_template.format(start=start_option, end=end_option)
+
+            start_option, end_option = self.answer_texts.get_scale_answer_texts()
+            return self.scale_prompt_template.format(start=start_option, end=end_option)
+
+        if self.list_prompt_template is None:
+            return ", ".join(self._response_generation_options())
+
+        return self.list_prompt_template.format(
+            options=self.answer_texts.option_seperators.join(self._response_generation_options())
+        )
+
+    def _response_generation_scale_range_text(self) -> str:
+        if not self.from_to_scale:
+            return ""
+        return self._response_generation_options_text()
+
+    def _response_generation_prompt_formatter(self) -> dict[str, str]:
+        return {
+            placeholder.PROMPT_OPTIONS: self._response_generation_options_text(),
+            placeholder.SCALE_RANGE: self._response_generation_scale_range_text(),
+        }
+
     def __init__(
         self,
         answer_texts: AnswerTexts,
@@ -160,50 +206,29 @@ class AnswerOptions:
 
         if self.response_generation_method:
             if isinstance(self.response_generation_method, JSONVerbalizedDistribution):
-                options = (
-                    self.answer_texts.indices
-                    if (
-                        self.response_generation_method.output_index_only
-                        and self.answer_texts.indices is not None
-                    )
-                    else self.answer_texts.full_answers
+                self.response_generation_method.set_verbalized_options(
+                    self._response_generation_options(),
+                    prompt_formatter=self._response_generation_prompt_formatter(),
                 )
-                self.response_generation_method.set_verbalized_options(options)
 
             elif isinstance(self.response_generation_method, JSONResponseGenerationMethod):
-                fields = self.response_generation_method.json_fields
-                if isinstance(fields, dict):
-                    for key in fields:
-                        if fields[key] == constants.OPTIONS_ADJUST:
-                            if self.response_generation_method.output_index_only:
-                                fields[key] = ", ".join(answer_texts.indices)
-                            else:
-                                fields[key] = ", ".join(answer_texts.full_answers)
-
-                constraints = self.response_generation_method.constraints
-                if constraints:
-                    for key in constraints:
-                        if constraints[key] == constants.OPTIONS_ADJUST:
-                            if self.response_generation_method.output_index_only:
-                                numbers = []
-                                for index in answer_texts.indices:
-                                    try:
-                                        number = int(index)
-                                    except (TypeError, ValueError):
-                                        number = index
-                                    numbers.append(number)
-                                constraints[key] = numbers
-                            else:
-                                constraints[key] = answer_texts.full_answers
+                self.response_generation_method = copy_json_response_generation_method(
+                    self.response_generation_method,
+                    prompt_formatter=self._response_generation_prompt_formatter(),
+                    options=self._response_generation_options_text(),
+                )
 
             elif isinstance(
                 self.response_generation_method, ChoiceResponseGenerationMethod
             ) or isinstance(self.response_generation_method, LogprobResponseGenerationMethod):
-                if self.response_generation_method.allowed_choices == constants.OPTIONS_ADJUST:
-                    if self.response_generation_method.output_index_only:
-                        self.response_generation_method.allowed_choices = answer_texts.indices
-                    else:
-                        self.response_generation_method.allowed_choices = answer_texts.full_answers
+                if self.response_generation_method.allowed_choices_template is not None:
+                    if self.response_generation_method.allowed_choices_template != "{options}":
+                        raise ValueError(
+                            "`allowed_choices_template` currently only supports '{options}'."
+                        )
+                    self.response_generation_method.allowed_choices = (
+                        self._response_generation_options()
+                    )
 
     def create_options_str(self) -> str:
         if self.from_to_scale:

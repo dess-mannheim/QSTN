@@ -9,16 +9,19 @@ import json_repair
 import numpy as np
 import pandas as pd
 
-from ..inference.battery_rgm import resolve_battery_response_generation_method
 from ..inference.response_generation import (
+    Constraints,
+    JSONItem,
+    JSONObject,
     JSONResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
-    JSONVerbalizedDistribution,
     ResponseGenerationMethod,
+    copy_json_response_generation_method,
+    resolve_battery_response_generation_method,
 )
 from ..inference.survey_inference import batch_generation
 from ..prompt_builder import LLMPrompt
-from ..utilities import constants
+from ..utilities import constants, placeholder
 from ..utilities.survey_objects import (
     AnswerOptions,
     InferenceResult,
@@ -95,12 +98,10 @@ def _parse_json_non_battery(
             reasoning = value.reasoning
             logprobs = value.logprobs
             if isinstance(parsed_llm_response, dict):
-                for reserved_key in [constants.QUESTIONNAIRE_ITEM_ID, constants.QUESTION]:
-                    if reserved_key in parsed_llm_response:
-                        parsed_llm_response.pop(reserved_key)
-                answer_format = parsed_llm_response.keys()
+                parsed_payload = _flatten_question_payload(parsed_llm_response)
+                answer_format = parsed_payload.keys()
 
-                row_data = [key, value.question, *parsed_llm_response.values()]
+                row_data = [key, value.question, *parsed_payload.values()]
                 row_columns = [
                     constants.QUESTIONNAIRE_ITEM_ID,
                     constants.QUESTION,
@@ -167,11 +168,12 @@ def parse_json_battery(
     survey_results: list[InferenceResult],
 ) -> dict[LLMPrompt, pd.DataFrame]:
     """
-    Parse JSON outputs of battery-style survey results using canonical key mapping.
+    Parse JSON outputs of battery-style survey results.
 
     Expects one aggregated response row per questionnaire (`item_id == -1`) and
-    expands this into one row per questionnaire item by matching returned JSON keys
-    against expected canonical keys.
+    expands this into one row per questionnaire item by matching top-level JSON
+    keys to questionnaire questions and flattening the nested object for each
+    question into that row.
 
     Args:
         survey_results (List[InferenceResult]): Battery-style survey results with
@@ -185,17 +187,6 @@ def parse_json_battery(
         survey_results=survey_results,
         expected_methods_by_questionnaire=None,
     )
-
-
-def _qid_scoped_key_parts(key: str) -> tuple[str | None, str]:
-    """Split `<base>__qid_<question_id>` keys into `(question_id, base)`."""
-    marker = "__qid_"
-    if marker not in key:
-        return None, key
-    base_key, _, question_id = key.rpartition(marker)
-    if question_id == "":
-        return None, key
-    return question_id, base_key
 
 
 def _build_battery_error_df(question: str, llm_response: str, error: str) -> pd.DataFrame:
@@ -212,127 +203,27 @@ def _build_battery_error_df(question: str, llm_response: str, error: str) -> pd.
     )
 
 
-def _get_verbalized_options_for_question(question: Any) -> list[str]:
-    if question.answer_options is None:
-        return []
-    rgm = question.answer_options.response_generation_method
-    if not isinstance(rgm, JSONVerbalizedDistribution):
-        return []
-
-    options = list(rgm.verbalized_options)
-    if len(options) == 0:
-        if rgm.output_index_only and question.answer_options.answer_texts.indices is not None:
-            options = list(question.answer_options.answer_texts.indices)
+def _flatten_question_payload(payload: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Flatten one question-scoped JSON object into dataframe-ready columns."""
+    reserved_keys = {constants.QUESTIONNAIRE_ITEM_ID, constants.QUESTION}
+    flattened: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in reserved_keys:
+            continue
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            flattened.update(_flatten_question_payload(value, prefix=full_key))
         else:
-            options = list(question.answer_options.answer_texts.full_answers)
-    return options
-
-
-def _build_verbalized_key_map(questionnaire: LLMPrompt) -> dict[str, tuple[Any, str]]:
-    key_map: dict[str, tuple[Any, str]] = {}
-    for question_order, question in enumerate(questionnaire.get_questions(), start=1):
-        if question.answer_options is None:
-            continue
-        rgm = question.answer_options.response_generation_method
-        if not isinstance(rgm, JSONVerbalizedDistribution):
-            continue
-
-        options = _get_verbalized_options_for_question(question)
-        seen_option_counts: dict[str, int] = {}
-        for option_index, option in enumerate(options, start=1):
-            key = rgm._format_field(
-                option=option,
-                question=rgm._question_for_field(
-                    question=str(question.question_content),
-                    option_index=option_index,
-                ),
-                option_index=option_index,
-                question_id=question.item_id,
-                question_order=question_order,
-            )
-
-            count = seen_option_counts.get(option, 0) + 1
-            seen_option_counts[option] = count
-            column_name = option if count == 1 else f"{option} (option_{option_index})"
-
-            existing = key_map.get(key)
-            if existing is not None and existing != (question.item_id, column_name):
-                raise ValueError(
-                    "Expected battery key map contains duplicate keys with different targets: "
-                    f"'{key}'. Ensure verbalized templates resolve to unique keys."
-                )
-            key_map[key] = (question.item_id, column_name)
-    return key_map
-
-
-def _build_generic_battery_key_map(
-    questionnaire: LLMPrompt,
-    response_generation_method: ResponseGenerationMethod | None = None,
-) -> dict[str, tuple[Any, str]]:
-    questions = list(questionnaire.get_questions())
-    if len(questions) == 0:
-        return {}
-
-    if response_generation_method is None:
-        response_generation_method, _ = resolve_battery_response_generation_method(
-            questions=questions,
-            item_position=0,
-        )
-
-    if not isinstance(response_generation_method, JSONResponseGenerationMethod):
-        return {
-            f"answer__qid_{question.item_id}": (question.item_id, "answer")
-            for question in questions
-        }
-
-    if isinstance(response_generation_method.json_fields, dict):
-        keys = list(response_generation_method.json_fields.keys())
-    else:
-        keys = list(response_generation_method.json_fields)
-
-    question_by_id_str = {str(question.item_id): question for question in questions}
-    key_map: dict[str, tuple[Any, str]] = {}
-    for key in keys:
-        question_key, base_key = _qid_scoped_key_parts(key)
-        if question_key is None:
-            if len(questions) == 1:
-                item_id = questions[0].item_id
-                key_map[key] = (item_id, base_key)
-            continue
-
-        question = question_by_id_str.get(question_key)
-        if question is None:
-            continue
-        key_map[key] = (question.item_id, base_key)
-    return key_map
-
-
-def _build_expected_battery_key_map(
-    questionnaire: LLMPrompt,
-    response_generation_method: ResponseGenerationMethod | None = None,
-) -> dict[str, tuple[Any, str]]:
-    expected_map = _build_generic_battery_key_map(
-        questionnaire=questionnaire,
-        response_generation_method=response_generation_method,
-    )
-    verbalized_key_map = _build_verbalized_key_map(questionnaire=questionnaire)
-    for key, mapping in verbalized_key_map.items():
-        existing = expected_map.get(key)
-        if existing is not None and existing != mapping:
-            raise ValueError(
-                "Expected battery key map contains duplicate keys with different targets: "
-                f"'{key}'."
-            )
-        expected_map[key] = mapping
-    return expected_map
+            flattened[full_key] = value
+    return flattened
 
 
 def _parse_json_battery_with_expected_methods(
     survey_results: list[InferenceResult],
     expected_methods_by_questionnaire: dict[LLMPrompt, ResponseGenerationMethod | None] | None,
 ) -> dict[LLMPrompt, pd.DataFrame]:
+    """Parse battery JSON into one dataframe row per questionnaire question."""
     all_results: dict[LLMPrompt, pd.DataFrame] = {}
-    reserved_keys = {constants.QUESTIONNAIRE_ITEM_ID, constants.QUESTION}
 
     for survey_result in survey_results:
         questionnaire = survey_result.questionnaire
@@ -356,28 +247,47 @@ def _parse_json_battery_with_expected_methods(
         if expected_methods_by_questionnaire is not None:
             method_for_questionnaire = expected_methods_by_questionnaire.get(questionnaire)
 
-        expected_key_map = _build_expected_battery_key_map(
-            questionnaire=questionnaire,
-            response_generation_method=method_for_questionnaire,
-        )
-
         grouped_items: dict[Any, dict[str, Any]] = {}
+        question_key_to_id: dict[str, Any] = {}
         for question in questionnaire.get_questions():
             grouped_items[question.item_id] = {
                 constants.QUESTIONNAIRE_ITEM_ID: question.item_id,
                 constants.QUESTION: questionnaire.generate_question_prompt(question),
             }
+            question_key_to_id[str(question.question_content)] = question.item_id
+
+        if method_for_questionnaire is None:
+            method_for_questionnaire = resolve_battery_response_generation_method(
+                questions=list(questionnaire.get_questions()),
+                item_position=0,
+            )
+
+        if isinstance(method_for_questionnaire, JSONResponseGenerationMethod):
+            top_level_objects = [
+                child
+                for child in method_for_questionnaire.json_object.children
+                if isinstance(child, JSONObject) and child.json_field is not None
+            ]
+            questionnaire_questions = list(questionnaire.get_questions())
+            if len(top_level_objects) == len(questionnaire_questions):
+                question_key_to_id = {
+                    str(top_level_object.json_field): question.item_id
+                    for top_level_object, question in zip(
+                        top_level_objects, questionnaire_questions
+                    )
+                }
 
         unknown_keys: list[str] = []
+        invalid_values: list[str] = []
         for key, value in parsed_llm_response.items():
-            if key in reserved_keys:
-                continue
-            mapping = expected_key_map.get(key)
-            if mapping is None:
+            questionnaire_item_id = question_key_to_id.get(str(key))
+            if questionnaire_item_id is None:
                 unknown_keys.append(str(key))
                 continue
-            questionnaire_item_id, column_name = mapping
-            grouped_items[questionnaire_item_id][column_name] = value
+            if not isinstance(value, dict):
+                invalid_values.append(str(key))
+                continue
+            grouped_items[questionnaire_item_id].update(_flatten_question_payload(value))
 
         if len(unknown_keys) > 0:
             formatted_unknown_keys = ", ".join(sorted(set(unknown_keys)))
@@ -385,6 +295,18 @@ def _parse_json_battery_with_expected_methods(
                 question=qa_tuple.question,
                 llm_response=qa_tuple.llm_response,
                 error=f"ERROR: Unknown battery JSON keys: {formatted_unknown_keys}",
+            )
+            continue
+
+        if len(invalid_values) > 0:
+            formatted_invalid_values = ", ".join(sorted(set(invalid_values)))
+            all_results[questionnaire] = _build_battery_error_df(
+                question=qa_tuple.question,
+                llm_response=qa_tuple.llm_response,
+                error=(
+                    "ERROR: Battery JSON question entries must be objects: "
+                    f"{formatted_invalid_values}"
+                ),
             )
             continue
 
@@ -568,8 +490,8 @@ def _with_optional_no_answer_choice(
     return adjusted_choices
 
 
-def _is_options_adjust_placeholder(value: Any) -> bool:
-    return value == constants.OPTIONS_ADJUST
+def _contains_options_placeholder(value: Any) -> bool:
+    return isinstance(value, str) and "{options}" in value
 
 
 def _build_no_answer_option_instruction(no_answer_option: str | None) -> str:
@@ -581,68 +503,38 @@ def _build_no_answer_option_instruction(no_answer_option: str | None) -> str:
     )
 
 
-def _resolve_choices_for_json_key(
-    key: str,
-    questionnaire: LLMPrompt,
-    answer_choices_lookup: dict[Any, list[str]],
-) -> list[str]:
-    questions = list(questionnaire.get_questions())
-    question_by_id_str = {str(question.item_id): question for question in questions}
-    question_key, _ = _qid_scoped_key_parts(key)
+def _materialize_json_items_for_choices(
+    json_object: JSONObject,
+    adjusted_choices: list[str],
+) -> JSONObject:
+    children: list[JSONItem | JSONObject] = []
+    options_text = ", ".join(adjusted_choices) if adjusted_choices else "parsed answer text"
 
-    if question_key is not None:
-        question = question_by_id_str.get(question_key)
-        if question is not None:
-            return list(answer_choices_lookup.get(question.item_id, []))
+    for child in json_object.children:
+        if isinstance(child, JSONItem):
+            new_child = child.copy_with_formatted_strings(
+                prompt_formatter={
+                    placeholder.PROMPT_OPTIONS: options_text,
+                    placeholder.SCALE_RANGE: "",
+                },
+                options=options_text,
+            )
+            if _contains_options_placeholder(child.explanation):
+                new_child.constraints = deepcopy(new_child.constraints)
+                if adjusted_choices:
+                    new_child.constraints.enum = list(adjusted_choices)
+                else:
+                    new_child.constraints.enum = None
+            children.append(new_child)
+            continue
 
-    if len(questions) == 1:
-        return list(answer_choices_lookup.get(questions[0].item_id, []))
+        children.append(_materialize_json_items_for_choices(child, adjusted_choices))
 
-    return []
-
-
-def _scope_json_method_keys_with_qid(
-    response_generation_method: JSONResponseGenerationMethod,
-    questions: list[Any],
-) -> JSONResponseGenerationMethod:
-    if len(questions) <= 1:
-        return response_generation_method
-
-    if isinstance(response_generation_method.json_fields, dict):
-        original_keys = list(response_generation_method.json_fields.keys())
-    else:
-        original_keys = list(response_generation_method.json_fields)
-
-    scoped_flags = [(_qid_scoped_key_parts(key)[0] is not None) for key in original_keys]
-    if all(scoped_flags):
-        return response_generation_method
-    if any(scoped_flags):
-        raise ValueError(
-            "Battery JSON methods must either scope all fields with `__qid_<question_id>` "
-            "or none of them."
-        )
-
-    if isinstance(response_generation_method.json_fields, dict):
-        scoped_fields: dict[str, str] = {}
-        for question in questions:
-            for key, explanation in response_generation_method.json_fields.items():
-                scoped_fields[f"{key}__qid_{question.item_id}"] = explanation
-        response_generation_method.json_fields = scoped_fields
-    else:
-        scoped_fields_list: list[str] = []
-        for question in questions:
-            for key in response_generation_method.json_fields:
-                scoped_fields_list.append(f"{key}__qid_{question.item_id}")
-        response_generation_method.json_fields = scoped_fields_list
-
-    if response_generation_method.constraints:
-        scoped_constraints: dict[str, Any] = {}
-        for question in questions:
-            for key, value in response_generation_method.constraints.items():
-                scoped_constraints[f"{key}__qid_{question.item_id}"] = deepcopy(value)
-        response_generation_method.constraints = scoped_constraints
-
-    return response_generation_method
+    return JSONObject(
+        json_field=json_object.json_field,
+        explanation=json_object.explanation,
+        children=children,
+    )
 
 
 def _materialize_single_question_response_generation_method(
@@ -655,33 +547,15 @@ def _materialize_single_question_response_generation_method(
 
     if not isinstance(response_generation_method, JSONResponseGenerationMethod):
         return response_generation_method
-    adjusted_method = deepcopy(response_generation_method)
 
     adjusted_choices = _with_optional_no_answer_choice(answer_choices, no_answer_option)
-
-    if isinstance(adjusted_method.json_fields, dict):
-        for key in adjusted_method.json_fields:
-            if _is_options_adjust_placeholder(adjusted_method.json_fields[key]):
-                adjusted_method.json_fields[key] = (
-                    ", ".join(adjusted_choices) if adjusted_choices else "parsed answer text"
-                )
-
-    if adjusted_method.constraints:
-        placeholder_keys_to_drop: list[str] = []
-        for key in list(adjusted_method.constraints.keys()):
-            if _is_options_adjust_placeholder(adjusted_method.constraints[key]):
-                if adjusted_choices:
-                    adjusted_method.constraints[key] = list(adjusted_choices)
-                else:
-                    placeholder_keys_to_drop.append(key)
-
-        for key in placeholder_keys_to_drop:
-            adjusted_method.constraints.pop(key, None)
-
-        if len(adjusted_method.constraints) == 0:
-            adjusted_method.constraints = None
-
-    return adjusted_method
+    return copy_json_response_generation_method(
+        response_generation_method,
+        json_object=_materialize_json_items_for_choices(
+            deepcopy(response_generation_method.json_object),
+            adjusted_choices=adjusted_choices,
+        ),
+    )
 
 
 def _materialize_battery_response_generation_method(
@@ -697,46 +571,56 @@ def _materialize_battery_response_generation_method(
 
     if not isinstance(response_generation_method, JSONResponseGenerationMethod):
         return response_generation_method
-    adjusted_method = deepcopy(response_generation_method)
-
-    questions = list(questionnaire.get_questions())
-    adjusted_method = _scope_json_method_keys_with_qid(
-        response_generation_method=adjusted_method,
-        questions=questions,
-    )
 
     answer_choices_lookup = _build_answer_choices_lookup(
         questionnaire=questionnaire,
         answer_options=answer_options,
     )
-
-    if isinstance(adjusted_method.json_fields, dict):
-        for key in adjusted_method.json_fields:
-            if _is_options_adjust_placeholder(adjusted_method.json_fields[key]):
-                choices = _resolve_choices_for_json_key(key, questionnaire, answer_choices_lookup)
-                adjusted_choices = _with_optional_no_answer_choice(choices, no_answer_option)
-                adjusted_method.json_fields[key] = (
-                    ", ".join(adjusted_choices) if adjusted_choices else "parsed answer text"
+    questions = list(questionnaire.get_questions())
+    top_level_objects = [
+        child
+        for child in response_generation_method.json_object.children
+        if isinstance(child, JSONObject)
+    ]
+    is_already_nested = len(top_level_objects) == len(questions)
+    nested_children: list[JSONObject] = []
+    for question in questions:
+        choices = answer_choices_lookup.get(question.item_id, [])
+        adjusted_choices = _with_optional_no_answer_choice(choices, no_answer_option)
+        if is_already_nested:
+            matching_object = next(
+                (
+                    child
+                    for child in top_level_objects
+                    if child.json_field
+                    == response_generation_method.render_battery_question_key(question)
+                ),
+                None,
+            )
+            question_object = (
+                deepcopy(matching_object)
+                if matching_object is not None
+                else JSONObject(
+                    json_field=response_generation_method.render_battery_question_key(question),
+                    children=[],
                 )
+            )
+        else:
+            question_object = JSONObject(
+                json_field=response_generation_method.render_battery_question_key(question),
+                children=deepcopy(response_generation_method.json_object.children),
+            )
+        nested_children.append(
+            _materialize_json_items_for_choices(
+                question_object,
+                adjusted_choices=adjusted_choices,
+            )
+        )
 
-    if adjusted_method.constraints:
-        placeholder_keys_to_drop: list[str] = []
-        for key in list(adjusted_method.constraints.keys()):
-            if _is_options_adjust_placeholder(adjusted_method.constraints[key]):
-                choices = _resolve_choices_for_json_key(key, questionnaire, answer_choices_lookup)
-                adjusted_choices = _with_optional_no_answer_choice(choices, no_answer_option)
-                if adjusted_choices:
-                    adjusted_method.constraints[key] = adjusted_choices
-                else:
-                    placeholder_keys_to_drop.append(key)
-
-        for key in placeholder_keys_to_drop:
-            adjusted_method.constraints.pop(key, None)
-
-        if len(adjusted_method.constraints) == 0:
-            adjusted_method.constraints = None
-
-    return adjusted_method
+    return copy_json_response_generation_method(
+        response_generation_method,
+        json_object=JSONObject(children=nested_children),
+    )
 
 
 def _finalize_response_generation_methods(
@@ -786,28 +670,35 @@ def _build_default_battery_response_generation_methods(
 ) -> list[ResponseGenerationMethod]:
     methods: list[ResponseGenerationMethod] = []
     for survey_result in survey_results:
-        questions = list(survey_result.questionnaire.get_questions())
         answer_choices_lookup = _build_answer_choices_lookup(
             questionnaire=survey_result.questionnaire,
             answer_options=answer_options,
         )
-        json_fields = {
-            f"answer__qid_{question.item_id}": "selected answer option" for question in questions
-        }
-        constraints: dict[str, list[str]] = {}
-        for question in questions:
-            key = f"answer__qid_{question.item_id}"
+        question_children: list[JSONObject] = []
+        for question in survey_result.questionnaire.get_questions():
             adjusted_choices = _with_optional_no_answer_choice(
                 answer_choices_lookup.get(question.item_id, []),
                 no_answer_option,
             )
-            if adjusted_choices:
-                constraints[key] = adjusted_choices
+            answer_item = JSONItem(
+                json_field="answer",
+                explanation=(
+                    "choose one of: " + ", ".join(adjusted_choices)
+                    if adjusted_choices
+                    else "parsed answer text"
+                ),
+                constraints=Constraints(enum=adjusted_choices or None),
+            )
+            question_children.append(
+                JSONObject(
+                    json_field=str(question.question_content),
+                    children=[answer_item],
+                )
+            )
 
         methods.append(
             JSONResponseGenerationMethod(
-                json_fields=json_fields,
-                constraints=constraints or None,
+                json_object=JSONObject(children=question_children),
             )
         )
     return methods
@@ -1041,9 +932,9 @@ def parse_with_llm(
         response_generation_method (
             ResponseGenerationMethod | List[ResponseGenerationMethod], optional
         ): Constraint for parser output. If `use_parser=True` and this is `None`,
-            default JSON constraints are applied. If no answer options are
-            available for a question, constraints for that field are dropped to
-            avoid unsatisfiable schemas (free-text JSON value fallback).
+            default JSON parser schemas are applied. If no answer options are
+            available for a question, the parser falls back to a free-text JSON
+            value for that field instead of enforcing an enum.
         generation_fn (Callable): Generation function following the
             `batch_generation` output contract.
         client_model_name (str, optional): Model name for OpenAI client calls.
@@ -1059,7 +950,7 @@ def parse_with_llm(
         answer_options (AnswerOptions | Dict[int, AnswerOptions] |
             Dict[LLMPrompt, AnswerOptions | Dict[int, AnswerOptions]], optional):
             Optional override for answer options used by parser prompts and
-            JSON constraints. This is useful when original survey questions
+            parser JSON schemas. This is useful when original survey questions
             were run without embedded answer options.
         generation_kwargs: Additional generation kwargs passed to `generation_fn`.
 
@@ -1165,10 +1056,9 @@ def parse_with_llm_battery(
         response_generation_method (
             ResponseGenerationMethod | List[ResponseGenerationMethod], optional
         ): Constraint for parser output. If `use_parser=True` and this is `None`,
-            a default battery-aware JSON constraint is created. If no answer
-            options are available for a question, constraints for that field are
-            dropped to avoid unsatisfiable schemas (free-text JSON value
-            fallback).
+            a default battery-aware JSON schema is created. If no answer
+            options are available for a question, that question falls back to a
+            free-text JSON value instead of enforcing an enum.
         generation_fn (Callable): Generation function following the
             `batch_generation` output contract.
         client_model_name (str, optional): Model name for OpenAI client calls.
@@ -1184,7 +1074,7 @@ def parse_with_llm_battery(
         answer_options (AnswerOptions | Dict[int, AnswerOptions] |
             Dict[LLMPrompt, AnswerOptions | Dict[int, AnswerOptions]], optional):
             Optional override for answer options used by parser prompts and
-            JSON constraints. This is useful when original survey questions
+            parser JSON schemas. This is useful when original survey questions
             were run without embedded answer options.
         generation_kwargs: Additional generation kwargs passed to `generation_fn`.
 

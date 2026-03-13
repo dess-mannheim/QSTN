@@ -8,7 +8,7 @@ from vllm.outputs import RequestOutput  # pyright: ignore[reportMissingImports]
 from vllm.sampling_params import StructuredOutputsParams  # pyright: ignore[reportMissingImports]
 
 from ..utilities.utils import _make_cache_key, generate_seeds
-from .dynamic_pydantic import _generate_pydantic_model
+from .dynamic_pydantic import build_pydantic_model_from_json_object
 from .reasoning_parser import parse_reasoning
 from .response_generation import (
     ChoiceResponseGenerationMethod,
@@ -251,9 +251,8 @@ def _structured_sampling_params(
     # Same for all calls
     if isinstance(response_generation_method, ResponseGenerationMethod):
         if isinstance(response_generation_method, JSONResponseGenerationMethod):
-            pydantic_model = _generate_pydantic_model(
-                fields=response_generation_method.json_fields,
-                constraints=response_generation_method.constraints,
+            pydantic_model = build_pydantic_model_from_json_object(
+                json_object=response_generation_method.json_object,
             )
             json_schema = pydantic_model.model_json_schema()
             global_structured_output = StructuredOutputsParams(json=json_schema)
@@ -282,13 +281,12 @@ def _structured_sampling_params(
         for i in range(batch_size):
             current_method = response_generation_method[i]
             if isinstance(current_method, JSONResponseGenerationMethod):
-                fields = current_method.json_fields
-                cons = current_method.constraints
-
-                key = _make_cache_key(fields, cons)
+                key = _make_cache_key(current_method.get_json_prompt(), None)
 
                 if key not in cache:
-                    pydantic_model = _generate_pydantic_model(fields=fields, constraints=cons)
+                    pydantic_model = build_pydantic_model_from_json_object(
+                        json_object=current_method.json_object,
+                    )
                     json_schema = pydantic_model.model_json_schema()
                     cache[key] = StructuredOutputsParams(json=json_schema)
 

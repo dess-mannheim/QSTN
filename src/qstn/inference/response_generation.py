@@ -1,168 +1,202 @@
-import warnings
+from __future__ import annotations
+
+import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Self
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import qstn.utilities.placeholder
 
-from ..utilities import constants, prompt_creation, prompt_templates, utils
+from ..utilities import prompt_templates, utils
 
 if TYPE_CHECKING:
     from ..utilities.survey_objects import QuestionnaireItem
 
+ScalarType = Literal["string", "float", "int", "bool"]
+
+
+class _SafeFormatDict(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _format_optional_template(
+    value: str | None,
+    prompt_formatter: dict[str, str] | None = None,
+    **kwargs: Any,
+) -> str | None:
+    if value is None:
+        return None
+    if prompt_formatter:
+        value = utils.safe_format_with_regex(value, prompt_formatter)
+    return value.format_map(_SafeFormatDict(kwargs)).strip()
+
+
+@dataclass
+class Constraints:
+    enum: list[str] | None = None
+    ge: float | None = None
+    le: float | None = None
+    min_length: int | None = None
+    max_length: int | None = None
+    pattern: str | None = None
+    nullable: bool = False
+
+
+@dataclass
+class JSONItem:
+    json_field: str
+    value_type: ScalarType = "string"
+    explanation: str | None = None
+    constraints: Constraints = field(default_factory=Constraints)
+
+    def copy_with_formatted_strings(
+        self,
+        prompt_formatter: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> JSONItem:
+        return JSONItem(
+            json_field=(
+                _format_optional_template(
+                    self.json_field,
+                    prompt_formatter=prompt_formatter,
+                    **kwargs,
+                )
+                or self.json_field
+            ),
+            value_type=self.value_type,
+            explanation=_format_optional_template(
+                self.explanation,
+                prompt_formatter=prompt_formatter,
+                **kwargs,
+            ),
+            constraints=deepcopy(self.constraints),
+        )
+
+    def to_prompt_value(self) -> str:
+        if self.explanation is not None:
+            return self.explanation
+
+        if self.constraints.enum is not None:
+            enum_values = ", ".join(str(value) for value in self.constraints.enum)
+            return f"one of: {enum_values}"
+
+        return self.value_type
+
+    def to_prompt_obj(self) -> dict[str, Any]:
+        return {self.json_field: self.to_prompt_value()}
+
+
+@dataclass
+class JSONObject:
+    json_field: str | None = None
+    explanation: str | None = None
+    children: list[JSONItem | JSONObject] = field(default_factory=list)
+
+    def to_prompt_value(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for child in self.children:
+            result.update(child.to_prompt_obj())
+        return result
+
+    def to_prompt_obj(self) -> dict[str, Any]:
+        if self.json_field is None:
+            return self.to_prompt_value()
+        return {self.json_field: self.to_prompt_value()}
+
+    def to_prompt_str(self) -> str:
+        return json.dumps(self.to_prompt_obj(), indent=2, ensure_ascii=False)
+
+    def copy_with_formatted_strings(
+        self,
+        prompt_formatter: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> JSONObject:
+        return JSONObject(
+            json_field=_format_optional_template(
+                self.json_field,
+                prompt_formatter=prompt_formatter,
+                **kwargs,
+            ),
+            explanation=_format_optional_template(
+                self.explanation,
+                prompt_formatter=prompt_formatter,
+                **kwargs,
+            ),
+            children=[
+                child.copy_with_formatted_strings(
+                    prompt_formatter=prompt_formatter,
+                    **kwargs,
+                )
+                for child in self.children
+            ],
+        )
+
+
 # --- Answer Production Base Classes ---
-
-
 class ResponseGenerationMethod(ABC):
     """Abstract base class for constraining model output for closed-ended questions."""
 
     @abstractmethod
-    def get_automatic_prompt(self: Self, questions: list["QuestionnaireItem"] = ()):
+    def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         pass
 
 
 class JSONResponseGenerationMethod(ResponseGenerationMethod):
-    """
-    Base class for constraining the model output using JSON Schema
-
-    Attributes:
-        json_fields: List of field names for JSON output, optionally as dicts
-            of format {"field_name": "explanation"}
-        constraints: Optional constraints for field values
-        system_prompt_template: Template used for formatting the system prompt,
-            e.g., from `..utilities.prompt_templates`
-        output_index_only: If True, constrain output to answer option index
-            rather than the full text of each answer option
-    """
+    """Base class for constraining the model output using a JSON object tree."""
 
     def __init__(
         self,
-        json_fields: list[str] | dict[str, str],  # required
-        constraints: dict[str, list[str]] | None = None,  # remains optional
+        json_object: JSONObject,
         output_template: str = prompt_templates.SYSTEM_JSON_DEFAULT,
         output_index_only: bool = False,
+        battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
     ):
         super().__init__()
-        if constraints is not None:
-            if isinstance(json_fields, dict):
-                difference = set(constraints.keys()) - set(json_fields.keys())
-            else:
-                difference = set(constraints.keys()) - set(json_fields)
-            if len(difference) > 0:
-                warnings.warn(
-                    f"Constraints specified for non-existing fields: {difference}.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-        self.json_fields = json_fields
-        self.constraints = constraints
+        self.json_object = json_object
         self.output_template = output_template
         self.output_index_only = output_index_only
+        self.battery_question_key_template = battery_question_key_template
 
-    def _expand_multi_question_items(
-        self: Self,
-        questions: list["QuestionnaireItem"],
-        attributes: list[str],
-        explanations: list[str] | None = None,
-    ) -> tuple[list[str], list[str] | None]:
-        if len(questions) <= 1:
-            if explanations is None:
-                return list(attributes), None
-            return list(attributes), list(explanations)
+    def get_json_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
+        del questions
+        return self.json_object.to_prompt_str()
 
-        expanded_attributes: list[str] = []
-        expanded_explanations: list[str] | None = [] if explanations is not None else None
-
-        for question in questions:
-            for idx, attribute in enumerate(attributes):
-                expanded_attributes.append(f"{attribute}_{question.question_content}")
-                if expanded_explanations is not None:
-                    expanded_explanations.append(explanations[idx])
-
-        return expanded_attributes, expanded_explanations
-
-    def _expand_multi_question_constraints(
-        self: Self,
-        questions: list["QuestionnaireItem"],
-        constraints: dict[str, list[str]],
-    ) -> dict[str, list[str]]:
-        if len(questions) <= 1:
-            return dict(constraints)
-
-        expanded_constraints: dict[str, list[str]] = {}
-        keys = list(constraints.keys())
-        for question in questions:
-            for key in keys:
-                expanded_constraints[f"{key}_{question.question_content}"] = constraints[key]
-        return expanded_constraints
-
-    def get_json_prompt(self: Self, questions: list["QuestionnaireItem"] = ()):
-        num_questions = len(questions)
-        if isinstance(self.json_fields, dict):
-            json_attributes = list(self.json_fields.keys())
-            json_explanation = list(self.json_fields.values())
-        else:
-            json_attributes = list(self.json_fields)
-            json_explanation = None
-
-        if num_questions > 1:
-            json_attributes, json_explanation = self._expand_multi_question_items(
-                questions=questions,
-                attributes=json_attributes,
-                explanations=json_explanation,
-            )
-        creator = prompt_creation.PromptCreation()
-        creator.set_output_format_json(
-            json_attributes=json_attributes,
-            json_explanation=json_explanation,
-            json_instructions=None,
-        )
-
-        return creator.get_output_prompt()
-
-    def get_automatic_prompt(self: Self, questions: list["QuestionnaireItem"] = ()):
-        formatter = {
-            qstn.utilities.placeholder.JSON_TEMPLATE: self.get_json_prompt(questions=questions)
-        }
+    def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
+        formatter = {qstn.utilities.placeholder.JSON_TEMPLATE: self.get_json_prompt()}
         return utils.safe_format_with_regex(self.output_template, formatter)
 
-    def create_new_rgm_with_multiple_questions(
-        self: Self, questions: list["QuestionnaireItem"] = ()
-    ) -> Self:
-        num_questions = len(questions)
-        if num_questions <= 1:
-            return self
+    def render_battery_question_key(self, question: QuestionnaireItem) -> str:
+        formatter = {
+            qstn.utilities.placeholder.QUESTION_CONTENT: str(question.question_content),
+        }
+        return utils.safe_format_with_regex(self.battery_question_key_template, formatter)
 
-        if isinstance(self.json_fields, dict):
-            original_attributes = list(self.json_fields.keys())
-            original_explanations = list(self.json_fields.values())
-        else:
-            original_attributes = list(self.json_fields)
-            original_explanations = None
 
-        new_attributes, new_explanations = self._expand_multi_question_items(
-            questions=questions,
-            attributes=original_attributes,
-            explanations=original_explanations,
-        )
+def copy_json_response_generation_method(
+    response_generation_method: JSONResponseGenerationMethod,
+    json_object: JSONObject | None = None,
+    prompt_formatter: dict[str, str] | None = None,
+    **format_kwargs: Any,
+) -> JSONResponseGenerationMethod:
+    if json_object is not None and len(format_kwargs) > 0:
+        raise ValueError("Provide either `json_object` or formatting kwargs, not both.")
 
-        if new_explanations is not None:
-            json_fields = dict(zip(new_attributes, new_explanations))
-        else:
-            json_fields = new_attributes
-
-        new_constraints = None
-        if self.constraints:
-            new_constraints = self._expand_multi_question_constraints(
-                questions=questions,
-                constraints=self.constraints,
+    if json_object is None:
+        json_object = response_generation_method.json_object
+        if len(format_kwargs) > 0 or prompt_formatter is not None:
+            json_object = json_object.copy_with_formatted_strings(
+                prompt_formatter=prompt_formatter,
+                **format_kwargs,
             )
 
-        return JSONResponseGenerationMethod(
-            json_fields=json_fields,
-            constraints=new_constraints,
-            output_template=self.output_template,
-            output_index_only=self.output_index_only,
-        )
+    return JSONResponseGenerationMethod(
+        json_object=json_object,
+        output_template=response_generation_method.output_template,
+        output_index_only=response_generation_method.output_index_only,
+        battery_question_key_template=response_generation_method.battery_question_key_template,
+    )
 
 
 class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
@@ -179,16 +213,18 @@ class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
 
     def __init__(
         self,
-        allowed_choices: list[str],  # required
+        allowed_choices: list[str] | None = None,
+        allowed_choices_template: str | None = None,
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
     ):
         super().__init__()
         self.allowed_choices = allowed_choices
+        self.allowed_choices_template = allowed_choices_template
         self.output_template = output_template
         self.output_index_only = output_index_only  # TODO: implement
 
-    def get_automatic_prompt(self: Self, questions: list["QuestionnaireItem"] = ()):
+    def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         return self.output_template
 
 
@@ -218,6 +254,7 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         # OpenAI API default; local vLLM deployments might provide more.
         top_logprobs: int = 20,
         allowed_choices: list[str] | None = None,
+        allowed_choices_template: str | None = None,
         ignore_reasoning: bool = True,
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
@@ -226,14 +263,13 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         self.token_position = token_position
         self.token_limit = token_limit
         self.top_logprobs = top_logprobs
-        self.allowed_choices = (
-            allowed_choices  # same name enables re-using code from Choice_AnswerProductionMethod
-        )
+        self.allowed_choices = allowed_choices
+        self.allowed_choices_template = allowed_choices_template
         self.ignore_reasoning = ignore_reasoning
         self.output_template = output_template
         self.output_index_only = output_index_only
 
-    def get_automatic_prompt(self: Self, questions: list["QuestionnaireItem"] = ()):
+    def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         return self.output_template
 
 
@@ -247,12 +283,23 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
         self,
         output_template=prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
         output_index_only: bool = False,
+        answer_field: str = "answer",
+        answer_explanation: str = "choose one of: {options}",
+        battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
     ):
         super().__init__(
-            json_fields={"answer": constants.OPTIONS_ADJUST},
-            constraints={"answer": constants.OPTIONS_ADJUST},
+            json_object=JSONObject(
+                children=[
+                    JSONItem(
+                        json_field=answer_field,
+                        explanation=answer_explanation,
+                        constraints=Constraints(),
+                    )
+                ]
+            ),
             output_template=output_template,
             output_index_only=output_index_only,
+            battery_question_key_template=battery_question_key_template,
         )
 
 
@@ -263,180 +310,163 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
         self,
         output_template: str = prompt_templates.SYSTEM_JSON_REASONING,
         output_index_only: bool = False,
+        reasoning_field: str = "reasoning",
+        reasoning_explanation: str = "your reasoning about the answer options",
+        answer_field: str = "answer",
+        answer_explanation: str = "choose one of: {options}",
+        battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
     ):
-
-        json_fields = {
-            "reasoning": "your reasoning about the answer options",
-            "answer": constants.OPTIONS_ADJUST,
-        }
-
         super().__init__(
-            json_fields=json_fields,
-            constraints={"answer": constants.OPTIONS_ADJUST},
+            json_object=JSONObject(
+                children=[
+                    JSONItem(
+                        json_field=reasoning_field,
+                        explanation=reasoning_explanation,
+                    ),
+                    JSONItem(
+                        json_field=answer_field,
+                        explanation=answer_explanation,
+                        constraints=Constraints(),
+                    ),
+                ]
+            ),
             output_template=output_template,
             output_index_only=output_index_only,
+            battery_question_key_template=battery_question_key_template,
         )
 
 
 class JSONVerbalizedDistribution(JSONResponseGenerationMethod):
-    """Response generation method for option-wise probability distributions.
-
-    This method materializes one JSON float field per answer option and is
-    primarily used for "verbalized distribution" tasks where the model should
-    return a probability for each option.
-
-    Field keys and explanations are configurable via templates and support the
-    placeholders:
-    - ``{question}``
-    - ``{option}``
-    - ``{question_id}``
-    - ``{question_order}``
-    - ``{option_index}``
-
-    By default, the generated key pattern is
-    ``"{question} | q{question_order}_o{option_index}"`` and explanations are
-    ``"probability for: {option}"``.
-
-    Question shortening is only applied when ``{question}`` is part of the
-    configured field template. The first option keeps the full question text;
-    following options may use a shortened prefix (e.g., ``"Wie groß..."``).
-
-    Args:
-        output_template (str): System prompt template used for automatic
-            output instructions.
-        output_index_only (bool): If True, use option indices instead of full
-            option texts where applicable.
-        json_field_template (str): Template used to generate JSON field keys.
-        json_explanation_template (str): Template used for per-field
-            explanation strings.
-        shorten_question_in_fields (bool): Whether to shorten question text in
-            fields for options after the first one.
-        shorten_to (int): Number of words to keep when shortening.
-    """
+    """Response generation method for option-wise probability distributions."""
 
     def __init__(
         self,
-        output_template=prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
+        output_template: str = prompt_templates.SYSTEM_JSON_ALL_OPTIONS,
         output_index_only: bool = False,
-        json_field_template: str = "{question} | q{question_order}_o{option_index}",
-        json_explanation_template: str = "probability for: {option}",
-        shorten_question_in_fields: bool = True,
-        shorten_to: int = 2,
+        option_field_template: str = "{option}",
+        option_explanation_template: str = "probability for: {option}",
+        explanation_prompt_placeholders_first_option_only: bool = True,
+        battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
     ):
-        self.json_field_template = json_field_template
-        self.json_explanation_template = json_explanation_template
-        self.shorten_question_in_fields = shorten_question_in_fields
-        self.shorten_to = shorten_to
         self.verbalized_options: list[str] = []
+        self.option_field_template = option_field_template
+        self.option_explanation_template = option_explanation_template
+        self.explanation_prompt_placeholders_first_option_only = (
+            explanation_prompt_placeholders_first_option_only
+        )
 
         super().__init__(
-            # will be set when given to answer options
-            json_fields=None,
-            constraints=None,
-            # Variables
+            json_object=JSONObject(),
             output_template=output_template,
             output_index_only=output_index_only,
-        )
-
-    def _question_for_field(self, question: str | None = None, option_index: int = 1) -> str:
-        """Return a normalized question string for field templates."""
-        normalized_question = (question or "").strip()
-        if not normalized_question:
-            return ""
-        if not self.shorten_question_in_fields or option_index <= 1:
-            return normalized_question
-
-        words = normalized_question.split()
-        short_prefix = " ".join(words[: self.shorten_to])
-        return f"{short_prefix}..."
-
-    def _format_field(
-        self,
-        option: str,
-        question: str | None = None,
-        option_index: int | None = None,
-        question_id: str | int | None = None,
-        question_order: int | None = None,
-    ) -> str:
-        """Render ``json_field_template`` with the provided placeholder values."""
-        return self.json_field_template.format(
-            question=(question or ""),
-            option=option,
-            option_index=(option_index or ""),
-            question_id=(question_id or ""),
-            question_order=(question_order or ""),
-        )
-
-    def _format_explanation(
-        self,
-        option: str,
-        question: str | None = None,
-        option_index: int | None = None,
-        question_id: str | int | None = None,
-        question_order: int | None = None,
-    ) -> str:
-        """Render ``json_explanation_template`` with placeholder values."""
-        return self.json_explanation_template.format(
-            question=(question or ""),
-            option=option,
-            option_index=(option_index or ""),
-            question_id=(question_id or ""),
-            question_order=(question_order or ""),
+            battery_question_key_template=battery_question_key_template,
         )
 
     def set_verbalized_options(
         self,
         options: list[str],
-        question: str | None = None,
-        question_id: str | int | None = None,
-        question_order: int | None = None,
+        prompt_formatter: dict[str, str] | None = None,
     ) -> None:
-        """Materialize JSON fields/constraints for the given option set.
-
-        Args:
-            options (list[str]): Options to generate probability fields for.
-            question (str | None): Optional question text used by templates.
-                If provided, field keys are rendered from ``json_field_template``.
-                If omitted, option strings are used as keys directly.
-            question_id (str | int | None): Optional stable question id for
-                template placeholders.
-            question_order (int | None): Optional positional question order for
-                template placeholders.
-
-        Raises:
-            ValueError: If the configured field template resolves to duplicate
-                keys for different options.
-        """
+        """Materialize one float field per answer option."""
         self.verbalized_options = list(options)
-        json_fields: dict[str, str] = {}
-        constraints: dict[str, str] = {}
-        for option_index, option in enumerate(options, start=1):
-            if question is None:
-                field_name = option
-            else:
-                field_name = self._format_field(
-                    option=option,
-                    question=self._question_for_field(
-                        question=question,
-                        option_index=option_index,
-                    ),
-                    option_index=option_index,
-                    question_id=question_id,
-                    question_order=question_order,
-                )
-            if field_name in json_fields:
-                raise ValueError(
-                    "The configured `json_field_template` generates duplicate field names "
-                    f"for option '{option}'. Please include placeholders that make fields unique, "
-                    "for example `{question_order}`, `{question_id}`, and/or `{option_index}`."
-                )
-            json_fields[field_name] = self._format_explanation(
+        children: list[JSONItem] = []
+        seen_field_names: set[str] = set()
+        options_text = ", ".join(str(option) for option in options)
+        for idx, option in enumerate(options):
+            field_name = _format_optional_template(
+                self.option_field_template,
+                prompt_formatter=prompt_formatter,
                 option=option,
-                question=question,
-                option_index=option_index,
-                question_id=question_id,
-                question_order=question_order,
+                options=options_text,
             )
-            constraints[field_name] = "float"
-        self.json_fields = json_fields
-        self.constraints = constraints
+            if field_name is None:
+                raise ValueError("`option_field_template` must produce a JSON field name.")
+            if field_name in seen_field_names:
+                raise ValueError(
+                    "Verbalized distribution contains duplicate option labels. "
+                    f"Cannot create unique JSON fields for option '{option}'."
+                )
+            seen_field_names.add(field_name)
+            explanation_prompt_formatter = prompt_formatter
+            if self.explanation_prompt_placeholders_first_option_only and idx > 0:
+                explanation_prompt_formatter = (
+                    {key: "" for key in prompt_formatter} if prompt_formatter else None
+                )
+            children.append(
+                JSONItem(
+                    json_field=field_name,
+                    value_type="float",
+                    explanation=_format_optional_template(
+                        self.option_explanation_template,
+                        prompt_formatter=explanation_prompt_formatter,
+                        option=option,
+                        options=options_text,
+                    ),
+                )
+            )
+        self.json_object = JSONObject(children=children)
+
+
+def resolve_battery_response_generation_method(
+    questions: list[QuestionnaireItem],
+    item_position: int = 0,
+) -> ResponseGenerationMethod | None:
+    """Resolve the response-generation method to use for battery prompts."""
+    if len(questions) == 0:
+        return None
+
+    safe_item_position = min(max(item_position, 0), len(questions) - 1)
+    selected_question = questions[safe_item_position]
+    fallback_method = None
+    if selected_question.answer_options:
+        fallback_method = selected_question.answer_options.response_generation_method
+
+    question_method_pairs: list[tuple[QuestionnaireItem, ResponseGenerationMethod]] = []
+    for question in questions:
+        if question.answer_options and question.answer_options.response_generation_method:
+            question_method_pairs.append(
+                (question, question.answer_options.response_generation_method)
+            )
+
+    if len(question_method_pairs) == 0:
+        return None
+
+    if not all(
+        isinstance(method, JSONResponseGenerationMethod) for _, method in question_method_pairs
+    ):
+        return fallback_method or question_method_pairs[0][1]
+
+    json_question_method_pairs: list[tuple[QuestionnaireItem, JSONResponseGenerationMethod]] = [
+        (question, method)
+        for question, method in question_method_pairs
+        if isinstance(method, JSONResponseGenerationMethod)
+    ]
+
+    base_method: JSONResponseGenerationMethod
+    if fallback_method and isinstance(fallback_method, JSONResponseGenerationMethod):
+        base_method = fallback_method
+    else:
+        base_method = json_question_method_pairs[0][1]
+
+    nested_children: list[JSONObject] = []
+    seen_question_keys: set[str] = set()
+    for question, method in json_question_method_pairs:
+        question_key = base_method.render_battery_question_key(question)
+        if question_key in seen_question_keys:
+            raise ValueError(
+                "Battery JSON contains duplicate question keys. "
+                f"Cannot create unique top-level field '{question_key}'."
+            )
+        seen_question_keys.add(question_key)
+        nested_children.append(
+            JSONObject(
+                json_field=question_key,
+                children=deepcopy(method.json_object.children),
+            )
+        )
+    merged_method = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=nested_children),
+        output_template=base_method.output_template,
+        output_index_only=base_method.output_index_only,
+    )
+    return merged_method

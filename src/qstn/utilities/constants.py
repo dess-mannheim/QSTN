@@ -22,9 +22,6 @@ ANSWER_OPTION: Final[str] = "answer_option"
 LLM_RESPONSE: Final[str] = "llm_response"
 PARSED_RESPONSE: Final[str] = "parsed_response"
 
-# Structured Output constraints
-OPTIONS_ADJUST: list[str] = ["OPTIONS_ADJUST"]
-
 
 class QuestionnairePresentation(Enum):
     SINGLE_ITEM: str = "questionnaire_type_single_item"
@@ -38,5 +35,4 @@ DEFAULT_SYSTEM_PROMPT: Final[str] = (
 )
 DEFAULT_TASK_INSTRUCTION: Final[str] = ""
 DEFAULT_JSON_STRUCTURE: Final[list[str]] = ["reasoning", "answer"]
-DEFAULT_CONSTRAINTS: Final[dict[str, list[str]]] = {"answer": OPTIONS_ADJUST}
 DEFAULT_QUESTIONNAIRE_ID: Final[str] = "Questionnaire"

@@ -68,10 +68,9 @@ import pandas as pd
 from openai import AsyncOpenAI
 from tqdm.auto import tqdm
 
-from .inference.battery_rgm import resolve_battery_response_generation_method
 from .inference.response_generation import (
-    JSONResponseGenerationMethod,
     ResponseGenerationMethod,
+    resolve_battery_response_generation_method,
 )
 from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
 from .parser.llm_answer_parser import raw_responses
@@ -264,22 +263,10 @@ def _prepare_battery_batch(
 
     response_generation_methods: list[ResponseGenerationMethod | None] = []
     for questionnaire in current_batch.values():
-        (
-            response_generation_method,
-            is_merged_json_method,
-        ) = resolve_battery_response_generation_method(
+        response_generation_method = resolve_battery_response_generation_method(
             questions=list(questionnaire.questions),
             item_position=i,
         )
-        if (
-            isinstance(response_generation_method, JSONResponseGenerationMethod)
-            and not is_merged_json_method
-        ):
-            response_generation_method = (
-                response_generation_method.create_new_rgm_with_multiple_questions(
-                    questions=list(questionnaire.questions)
-                )
-            )
         response_generation_methods.append(response_generation_method)
 
     return list(system_messages), list(prompts), response_generation_methods

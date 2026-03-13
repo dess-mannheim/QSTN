@@ -1,77 +1,115 @@
-import warnings
+import re
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
-
-def _create_enum(name: str, values: list[str | int]) -> Enum:
-    """A helper to create an Enum class dynamically."""
-    return Enum(name, {str(v).upper(): v for v in values})
+from .response_generation import JSONItem, JSONObject
 
 
-def _generate_pydantic_model(
-    fields: list[str] | dict[str, str], constraints: dict[str, list[str]]
-) -> BaseModel:
-    """Dynamically creates a Pydantic model based on a list of fields and constraints.
+def _safe_name(text: str, prefix: str = "field") -> str:
+    name = re.sub(r"\W+", "_", text).strip("_").lower()
+    if not name or name[0].isdigit():
+        name = f"{prefix}_{name}"
+    return name
 
-    This helper function is used to generate a Pydantic `BaseModel` on the fly.
-    It defines fields as strings by default, but can apply specific constraints,
-    such as creating an `Enum` for a field with a predefined list of options, or
-    typing a field as a `float`.
 
-    Args:
-        fields (Union[List[str], Dict[str, str]]): The fields to include in the
-            generated model. If a `List[str]`, each string becomes a field
-            name. If a `Dict[str, str]`, the keys are used as field names (the
-            dictionary values are currently ignored).
-        constraints (Dict[str, Union[List[str], str]]): A dictionary mapping field
-            names to their constraints.
-            - If the value is a `List[str]`, the corresponding field will be
-              constrained to an `Enum` of those string options.
-            - If the value is the literal string 'float', the field will be
-              typed as a `float`, suitable for probabilities or scores.
-            Fields not present in this dictionary will default to type `str`.
+def _model_name(text: str | None, fallback: str) -> str:
+    if text is None:
+        return fallback
+    safe = _safe_name(text, fallback.lower())
+    return "".join(part.capitalize() for part in safe.split("_")) or fallback
 
-    Warns:
-        RuntimeWarning: If the `constraints` dictionary contains keys for fields
-            that are not defined in the `fields` parameter.
 
-    Returns:
-        pydantic.BaseModel: A dynamically generated Pydantic `BaseModel` class
-            with the specified fields and types.
-    """
+def _enum_member_name(value: Any, index: int) -> str:
+    base_name = re.sub(r"\W+", "_", str(value)).strip("_").upper()
+    if not base_name:
+        base_name = "VALUE"
+    if base_name[0].isdigit():
+        base_name = f"VALUE_{base_name}"
+    return f"{base_name}_{index}"
 
-    model_fields = {}
-    if constraints:
-        if isinstance(fields, dict):
-            difference = set(constraints.keys()) - set(fields.keys())
-        else:
-            difference = set(constraints.keys()) - set(fields)
-        if len(difference) > 0:
-            warnings.warn(
-                f"Constraints specified for non-existing fields: {difference}. "
-                + "Constraints should be provided in the format "
-                + "{'a JSON field': ['option 1',...]}.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
 
-    if isinstance(fields, dict):
-        elements = fields.keys()
-    else:
-        elements = fields
+def _create_enum_type(name: str, values: list[Any]) -> type[Enum]:
+    members = {
+        _enum_member_name(value, index): value for index, value in enumerate(values, start=1)
+    }
+    return Enum(name, members)
 
-    for field in elements:
-        if constraints:
-            if field in constraints and isinstance(constraints[field], list):
-                enum_type = _create_enum(field.capitalize() + "Enum", constraints[field])
-                model_fields[str(field)] = (enum_type, ...)
-            # allow for probability distribution across answer options
-            elif field in constraints and constraints[field] == "float":
-                model_fields[str(field)] = (float, ...)
-            elif field not in constraints:
-                model_fields[str(field)] = (str, ...)
-        else:
-            model_fields[str(field)] = (str, ...)
 
-    return create_model("DynamicModel", **model_fields)
+def _base_type_for_item(item: JSONItem) -> type:
+    if item.constraints.enum is not None:
+        return _create_enum_type(
+            _model_name(item.json_field, "EnumValue"),
+            item.constraints.enum,
+        )
+    if item.value_type == "string":
+        return str
+    if item.value_type == "float":
+        return float
+    if item.value_type == "int":
+        return int
+    if item.value_type == "bool":
+        return bool
+    raise ValueError(f"Unsupported value_type: {item.value_type}")
+
+
+def _type_for_item(item: JSONItem) -> type:
+    base_type = _base_type_for_item(item)
+    if item.constraints.nullable:
+        return base_type | None
+    return base_type
+
+
+def _field_for_item(item: JSONItem) -> tuple[type, Any]:
+    field_kwargs: dict[str, Any] = {
+        "alias": item.json_field,
+    }
+
+    if item.value_type in {"float", "int"}:
+        if item.constraints.ge is not None:
+            field_kwargs["ge"] = item.constraints.ge
+        if item.constraints.le is not None:
+            field_kwargs["le"] = item.constraints.le
+
+    if item.value_type == "string":
+        if item.constraints.min_length is not None:
+            field_kwargs["min_length"] = item.constraints.min_length
+        if item.constraints.max_length is not None:
+            field_kwargs["max_length"] = item.constraints.max_length
+        if item.constraints.pattern is not None:
+            field_kwargs["pattern"] = item.constraints.pattern
+
+    return _type_for_item(item), Field(..., **field_kwargs)
+
+
+def build_pydantic_model_from_json_object(
+    json_object: JSONObject,
+    model_name: str = "StructuredOutput",
+) -> type[BaseModel]:
+    model_fields: dict[str, tuple[type, Any]] = {}
+
+    for child in json_object.children:
+        if isinstance(child, JSONItem):
+            internal_name = _safe_name(child.json_field, "field")
+            model_fields[internal_name] = _field_for_item(child)
+            continue
+
+        if child.json_field is None:
+            raise ValueError("Nested JSONObject entries must define `json_field`.")
+
+        nested_model = build_pydantic_model_from_json_object(
+            json_object=child,
+            model_name=_model_name(child.json_field, "NestedObject"),
+        )
+        internal_name = _safe_name(child.json_field, "object")
+        model_fields[internal_name] = (nested_model, Field(..., alias=child.json_field))
+
+    return create_model(
+        model_name,
+        __config__=ConfigDict(
+            populate_by_name=True,
+            extra="forbid",
+        ),
+        **model_fields,
+    )

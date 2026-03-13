@@ -7,10 +7,9 @@ from typing import Any, Literal, Self, overload
 
 import pandas as pd
 
-from .inference.battery_rgm import resolve_battery_response_generation_method
 from .inference.response_generation import (
-    JSONResponseGenerationMethod,
     ResponseGenerationMethod,
+    resolve_battery_response_generation_method,
 )
 from .utilities import constants, placeholder, prompt_templates
 from .utilities.constants import QuestionnairePresentation
@@ -200,16 +199,12 @@ class LLMPrompt:
             else:
                 options = ""
 
-            rgm, is_merged_json_method = resolve_battery_response_generation_method(
+            rgm = resolve_battery_response_generation_method(
                 questions=list(self._questions),
                 item_position=reference_item_position,
             )
             if rgm is None:  # by default, no response generation method is required
                 automatic_output_instructions = ""
-            elif isinstance(rgm, JSONResponseGenerationMethod) and not is_merged_json_method:
-                automatic_output_instructions = rgm.get_automatic_prompt(
-                    questions=list(self._questions)
-                )
             else:
                 automatic_output_instructions = rgm.get_automatic_prompt()
 
