@@ -1,16 +1,22 @@
-import streamlit as st
 import json
+
+import streamlit as st
 from gui_elements.stateful_widget import StatefulWidgets
 
 # --- Page Configuration ---
-st.set_page_config(
-    page_title="Inference Settings",
-    layout="wide"
-)
+st.set_page_config(page_title="Inference Settings", layout="wide")
 
 st.title("AsyncOpenAI API Client & Inference Configurator")
-st.markdown("Use the widgets below to configure the `AsyncOpenAI` client and the inference parameters for an API call. Advanced or less common options can be added as a JSON object.")
-st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Inference", query_params={"section": "inference"})
+st.markdown(
+    "Use the widgets below to configure the `AsyncOpenAI` client and the "
+    "inference parameters for an API call. Advanced or less common options "
+    "can be added as a JSON object."
+)
+st.page_link(
+    "pages/00_Tutorial.py",
+    label="📖 Need help? See tutorial: Inference",
+    query_params={"section": "inference"},
+)
 st.divider()
 
 
@@ -19,22 +25,31 @@ col1, col2 = st.columns(2)
 
 defaults = {
     # Client Config
-    "api_key": "", "organization": "", "project": "", "base_url": "",
-    "timeout": 20, "max_retries": 2,
-    "advanced_client_params_str": '',
+    "api_key": "",
+    "organization": "",
+    "project": "",
+    "base_url": "",
+    "timeout": 20,
+    "max_retries": 2,
+    "advanced_client_params_str": "",
     # Inference Config
-    "model_name": "", "temperature": 1.0, "max_tokens": 1024,
-    "top_p": 1.0, "seed": 42,
-    "advanced_inference_params_str": ''
+    "model_name": "",
+    "temperature": 1.0,
+    "max_tokens": 1024,
+    "top_p": 1.0,
+    "seed": 42,
+    "advanced_inference_params_str": "",
 }
 
 for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
+
 @st.cache_data
 def create_stateful_widget() -> StatefulWidgets:
     return StatefulWidgets()
+
 
 state = create_stateful_widget()
 
@@ -58,7 +73,7 @@ with col1:
             initial_value="",
             type="password",
             placeholder="sk-...",
-            help="Your OpenAI API key. It is handled securely by Streamlit."
+            help="Your OpenAI API key. It is handled securely by Streamlit.",
         )
 
         organization = state.create(
@@ -67,7 +82,7 @@ with col1:
             "Organization ID",
             initial_value="",
             placeholder="org-...",
-            help="Optional identifier for your organization."
+            help="Optional identifier for your organization.",
         )
 
         project = state.create(
@@ -76,7 +91,7 @@ with col1:
             "Project ID",
             initial_value="",
             placeholder="proj_...",
-            help="Optional identifier for your project."
+            help="Optional identifier for your project.",
         )
 
         base_url = state.create(
@@ -85,7 +100,7 @@ with col1:
             "Base URL",
             initial_value="",
             placeholder="https://api.openai.com/v1",
-            help="The base URL for the API. Leave empty for the default."
+            help="The base URL for the API. Leave empty for the default.",
         )
 
         timeout = state.create(
@@ -94,7 +109,7 @@ with col1:
             "Timeout (seconds)",
             initial_value=20,
             min_value=1,
-            help="The timeout for API requests in seconds."
+            help="The timeout for API requests in seconds.",
         )
 
         max_retries = state.create(
@@ -103,7 +118,7 @@ with col1:
             "Max Retries",
             initial_value=2,
             min_value=0,
-            help="The maximum number of times to retry a failed request."
+            help="The maximum number of times to retry a failed request.",
         )
 
         with st.expander("Advanced Client Settings (JSON)"):
@@ -114,7 +129,10 @@ with col1:
                 initial_value="",
                 placeholder='{\n  "default_headers": {"X-Custom-Header": "value"}\n}',
                 height=150,
-                help='Enter any other client init parameters like "default_headers" or "default_query" as a valid JSON object.'
+                help=(
+                    "Enter any other client init parameters like "
+                    '"default_headers" or "default_query" as a valid JSON object.'
+                ),
             )
 
 # ==============================================================================
@@ -128,9 +146,9 @@ with col2:
             st.text_input,
             "model_name",
             "Model Name",
-            #initial_value="meta-llama/Llama-3.1-70B-Instruct",
+            # initial_value="meta-llama/Llama-3.1-70B-Instruct",
             placeholder="meta-llama/Llama-3.1-70B-Instruct",
-            help="The model to use for the inference call."
+            help="The model to use for the inference call.",
         )
 
         temperature = state.create(
@@ -141,7 +159,7 @@ with col2:
             max_value=2.0,
             step=0.01,
             initial_value=1.0,
-            help="Controls randomness. Lower values are more deterministic and less creative."
+            help="Controls randomness. Lower values are more deterministic and less creative.",
         )
 
         max_tokens = state.create(
@@ -150,7 +168,7 @@ with col2:
             "Max Tokens",
             initial_value=1024,
             min_value=1,
-            help="The maximum number of tokens to generate in the completion."
+            help="The maximum number of tokens to generate in the completion.",
         )
 
         top_p = state.create(
@@ -161,7 +179,10 @@ with col2:
             max_value=1.0,
             step=0.01,
             initial_value=1.0,
-            help="Controls nucleus sampling. The model considers tokens with top_p probability mass."
+            help=(
+                "Controls nucleus sampling. The model considers tokens with "
+                "top_p probability mass."
+            ),
         )
 
         seed = state.create(
@@ -170,7 +191,7 @@ with col2:
             "Seed",
             initial_value=42,
             min_value=0,
-            help="A specific seed for reproducibility of results."
+            help="A specific seed for reproducibility of results.",
         )
 
         with st.expander("Advanced Inference Settings (JSON)"):
@@ -181,7 +202,10 @@ with col2:
                 initial_value="",
                 placeholder='{\n  "stop": ["\\n", " Human:"],\n  "presence_penalty": 0\n}',
                 height=150,
-                help='Enter any other valid inference parameters like "stop", "logit_bias", or "frequency_penalty" as a JSON object.'
+                help=(
+                    'Enter any other valid inference parameters like "stop", '
+                    '"logit_bias", or "frequency_penalty" as a JSON object.'
+                ),
             )
 
 
@@ -192,13 +216,14 @@ st.divider()
 
 if st.button("Generate Configuration & Code", type="primary", use_container_width=True):
     # --- Process Client Config ---
-    client_config = {
-        "api_key": api_key
-    }
+    client_config = {"api_key": api_key}
     # Add optional string parameters if they are not empty
-    if organization: client_config["organization"] = organization
-    if project: client_config["project"] = project
-    if base_url: client_config["base_url"] = base_url
+    if organization:
+        client_config["organization"] = organization
+    if project:
+        client_config["project"] = project
+    if base_url:
+        client_config["base_url"] = base_url
     # Add numeric parameters
     client_config["timeout"] = timeout
     client_config["max_retries"] = max_retries
@@ -217,7 +242,7 @@ if st.button("Generate Configuration & Code", type="primary", use_container_widt
         "temperature": temperature,
         "max_tokens": max_tokens,
         "top_p": top_p,
-        "seed": seed
+        "seed": seed,
     }
 
     try:
@@ -233,6 +258,7 @@ if st.button("Generate Configuration & Code", type="primary", use_container_widt
 
     # Auto-save session
     from gui_elements.session_cache import save_session_state
+
     save_session_state()
 
     st.success("Configuration generated successfully!")

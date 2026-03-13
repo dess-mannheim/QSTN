@@ -1,27 +1,30 @@
 import streamlit as st
-from qstn.prompt_builder import LLMPrompt, generate_likert_options
+from gui_elements.stateful_widget import StatefulWidgets
+
+from qstn.inference.response_generation import (
+    ChoiceResponseGenerationMethod,
+    JSONReasoningResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
+    JSONVerbalizedDistribution,
+)
+from qstn.prompt_builder import generate_likert_options
 from qstn.utilities.prompt_templates import (
     LIST_OPTIONS_DEFAULT,
     SCALE_OPTIONS_DEFAULT,
 )
-from qstn.inference.response_generation import (
-    JSONSingleResponseGenerationMethod,
-    JSONVerbalizedDistribution,
-    JSONReasoningResponseGenerationMethod,
-    ChoiceResponseGenerationMethod,
-    LogprobResponseGenerationMethod,
-)
-from qstn.utilities import constants
-
-from gui_elements.stateful_widget import StatefulWidgets
 
 st.set_page_config(layout="wide")
 
 st.title("Likert Scale Options Generator")
 st.write(
-    "This interface allows you to configure and generate Likert scale answer options by adjusting the parameters below."
+    "This interface allows you to configure and generate Likert scale answer "
+    "options by adjusting the parameters below."
 )
-st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Answer options", query_params={"section": "options"})
+st.page_link(
+    "pages/00_Tutorial.py",
+    label="📖 Need help? See tutorial: Answer options",
+    query_params={"section": "options"},
+)
 st.divider()
 
 if "questionnaires" not in st.session_state:
@@ -31,12 +34,16 @@ if "questionnaires" not in st.session_state:
 else:
     disabled = False
 
-#if 'answer_texts_input' not in st.session_state:
-    #st.session_state.answer_texts_input = "Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree"
+# if 'answer_texts_input' not in st.session_state:
+# st.session_state.answer_texts_input = (
+#     "Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree"
+# )
+
 
 @st.cache_data
 def create_stateful_widget() -> StatefulWidgets:
     return StatefulWidgets()
+
 
 state = create_stateful_widget()
 
@@ -87,7 +94,10 @@ with st.container(border=True):
             "only_from_to_scale",
             "From-To Scale Only",
             initial_value=False,
-            help="If checked, only the first and last answer labels are display e.g. 1 Strongly Disagree to 5 Strongly agree.",
+            help=(
+                "If checked, only the first and last answer labels are display "
+                "e.g. 1 Strongly Disagree to 5 Strongly agree."
+            ),
         )
 
     with col2:
@@ -114,7 +124,10 @@ with st.container(border=True):
             "even_order",
             "Even Order",
             initial_value=False,
-            help="If there is an uneven number of answer texts, the middle section is automatically removed.",
+            help=(
+                "If there is an uneven number of answer texts, the middle "
+                "section is automatically removed."
+            ),
         )
 
     # --- Answer Texts Input ---
@@ -157,56 +170,81 @@ with st.container(border=True):
 
     # --- Response Generation Method ---
     st.subheader("Response Generation Method")
-    st.write("Choose how the model output should be constrained. This controls the format of responses.")
-    
+    st.write(
+        "Choose how the model output should be constrained. This controls the format of responses."
+    )
+
     # Global option for all response generation methods
     output_index_only = state.create(
         st.checkbox,
         "output_index_only",
         "Output Indices Only",
         initial_value=False,
-        help="If checked, the model will output only indices (e.g., '1', '2', '3') instead of full text (e.g., '1: Strongly Disagree'). Applies to all response generation methods.",
+        help=(
+            "If checked, the model will output only indices (e.g., '1', '2', "
+            "'3') instead of full text (e.g., '1: Strongly Disagree'). "
+            "Applies to all response generation methods."
+        ),
     )
-    
+
     rgm_type = state.create(
         st.selectbox,
         "rgm_type",
         "Response Generation Method",
-        options=["None", "JSON Single Answer", "JSON All Options (Probabilities)", "JSON with Reasoning", "Choice"],  # "Logprob" commented out - not fully implemented
+        options=[
+            "None",
+            "JSON Single Answer",
+            "JSON All Options (Probabilities)",
+            "JSON with Reasoning",
+            "Choice",
+        ],  # "Logprob" commented out - not fully implemented
         initial_value="None",
-        help="None: Free text output (requires parsing). JSON: Structured JSON output. Choice: Guided choice selection.",
+        help=(
+            "None: Free text output (requires parsing). JSON: Structured JSON "
+            "output. Choice: Guided choice selection."
+        ),
     )
-    
+
     # Show additional options based on selected method
     rgm_config = {}
-    
+
     # Choice configuration - allow user to specify choices
     if rgm_type == "Choice":
         with st.container(border=True):
             st.write("**Choice Configuration:**")
             # Pre-fill with answer texts if available
             if answer_texts:
-                answer_texts_list_preview = [text.strip() for text in answer_texts.split("\n") if text.strip()]
+                answer_texts_list_preview = [
+                    text.strip() for text in answer_texts.split("\n") if text.strip()
+                ]
                 # Format as full text by default: "1: Option 1, 2: Option 2"
                 if output_index_only:
                     # If indices only, just use numbers
-                    default_choices = "\n".join([str(i+1) for i in range(len(answer_texts_list_preview))])
+                    default_choices = "\n".join(
+                        [str(i + 1) for i in range(len(answer_texts_list_preview))]
+                    )
                 else:
                     # Full text format
-                    default_choices = "\n".join([f"{i+1}: {text}" for i, text in enumerate(answer_texts_list_preview)])
+                    default_choices = "\n".join(
+                        [f"{i + 1}: {text}" for i, text in enumerate(answer_texts_list_preview)]
+                    )
             else:
                 default_choices = ""
-            
+
             choice_input = state.create(
                 st.text_area,
                 "choice_allowed_choices",
                 "Allowed Choices (one per line)",
                 initial_value=default_choices,
                 height=100,
-                help="Enter the choices the model can output. Format: indices only (1, 2, 3) or full text (1: Strongly Disagree, 2: Disagree, etc.).",
+                help=(
+                    "Enter the choices the model can output. Format: indices "
+                    "only (1, 2, 3) or full text "
+                    "(1: Strongly Disagree, 2: Disagree, etc.)."
+                ),
             )
             rgm_config["allowed_choices"] = choice_input
-    
+
     # Logprob configuration - commented out until fully implemented
     # if rgm_type == "Logprob":
     #     with st.container(border=True):
@@ -244,9 +282,13 @@ with st.container(border=True):
     #             help="Only consider tokens after reasoning output.",
     #         )
 
-
     # The submit button for the form
-    submitted = st.button("Confirm and Generate Options", disabled=disabled, type="primary", use_container_width=True)
+    submitted = st.button(
+        "Confirm and Generate Options",
+        disabled=disabled,
+        type="primary",
+        use_container_width=True,
+    )
 
     if st.button("Skip", use_container_width=True, icon="❌"):
         st.session_state.survey_options = None
@@ -254,29 +296,30 @@ with st.container(border=True):
 
 # --- Processing and Output ---
 if submitted:
-    #print("Session state answer texts "+ st.session_state.answer_texts_input)
-    #print(answer_texts_input)
+    # print("Session state answer texts "+ st.session_state.answer_texts_input)
+    # print(answer_texts_input)
     # Convert the raw text area string into a list of strings.
-    answer_texts_list = [
-        text.strip() for text in answer_texts.split("\n") if text.strip()
-    ]
+    answer_texts_list = [text.strip() for text in answer_texts.split("\n") if text.strip()]
 
     # --- Input Validation ---
     validation_ok = True
     if only_from_to_scale and len(answer_texts_list) != 2:
         st.error(
-            f"Error: When 'From-To Scale Only' is selected, you must provide exactly 2 answer texts. You provided {len(answer_texts_list)}."
+            "Error: When 'From-To Scale Only' is selected, you must provide "
+            f"exactly 2 answer texts. You provided {len(answer_texts_list)}."
         )
         validation_ok = False
 
     if not only_from_to_scale and len(answer_texts_list) != n_options:
         st.error(
-            f"Error: The number of answer texts ({len(answer_texts_list)}) must match the 'Number of Options' ({n_options})."
+            "Error: The number of answer texts "
+            f"({len(answer_texts_list)}) must match the 'Number of Options' "
+            f"({n_options})."
         )
         validation_ok = False
 
     if reversed_order and random_order:
-        st.error(f"Error: Reversed Order and Random Order cannot both be true.")
+        st.error("Error: Reversed Order and Random Order cannot both be true.")
         validation_ok = False
 
     if validation_ok:
@@ -299,14 +342,16 @@ if submitted:
             choice_text = rgm_config.get("allowed_choices", "")
             if choice_text:
                 # Split by newlines and clean up
-                allowed_choices_list = [choice.strip() for choice in choice_text.split("\n") if choice.strip()]
+                allowed_choices_list = [
+                    choice.strip() for choice in choice_text.split("\n") if choice.strip()
+                ]
+                choice_kwargs = {"allowed_choices": allowed_choices_list}
             else:
-                # Fallback to OPTIONS_ADJUST if no input (will be auto-configured)
-                allowed_choices_list = constants.OPTIONS_ADJUST
-            
+                choice_kwargs = {"allowed_choices_template": "{options}"}
+
             response_generation_method = ChoiceResponseGenerationMethod(
-                allowed_choices=allowed_choices_list,
                 output_index_only=output_index_only,
+                **choice_kwargs,
             )
         # Logprob - commented out until fully implemented
         # elif rgm_type == "Logprob":
@@ -319,7 +364,7 @@ if submitted:
         #         output_index_only=False,
         #     )
         # If rgm_type == "None", response_generation_method stays None
-        
+
         survey_options = generate_likert_options(
             n=n_options,
             answer_texts=answer_texts_list,
@@ -336,11 +381,10 @@ if submitted:
         )
 
         st.session_state.survey_options = survey_options
-        
+
         # Auto-save session
         from gui_elements.session_cache import save_session_state
+
         save_session_state()
-        
+
         st.switch_page("pages/02_Prompt_Configuration.py")
-
-

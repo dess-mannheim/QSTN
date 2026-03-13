@@ -1,41 +1,33 @@
+import queue
+import threading
+import time
+from contextlib import redirect_stderr
+
 import streamlit as st
 from gui_elements.paginator import paginator
 from gui_elements.stateful_widget import StatefulWidgets
-from gui_elements.output_manager import st_capture, TqdmToStreamlit
+from openai import AsyncOpenAI
 
-import io
-import queue
-import time
-import threading
-import asyncio
-import pandas as pd
-
-import logging
-
-from contextlib import redirect_stderr, redirect_stdout
-
-from qstn.parser.llm_answer_parser import raw_responses, parse_json, parse_json_battery
-from qstn.utilities.constants import QuestionnairePresentation
-from qstn.utilities.utils import create_one_dataframe
 from qstn.inference.response_generation import JSONResponseGenerationMethod
+from qstn.parser.llm_answer_parser import parse_json, parse_json_battery, raw_responses
 from qstn.survey_manager import (
-    conduct_survey_sequential,
     conduct_survey_battery,
+    conduct_survey_sequential,
     conduct_survey_single_item,
 )
-
-from streamlit.runtime.scriptrunner import add_script_run_ctx
-
-from openai import AsyncOpenAI
+from qstn.utilities.constants import QuestionnairePresentation
+from qstn.utilities.utils import create_one_dataframe
 
 # Set OpenAI's API key and API base to use vLLM's API server.
 
-st.page_link("pages/00_Tutorial.py", label="📖 Need help? See tutorial: Run & results", query_params={"section": "overview"})
+st.page_link(
+    "pages/00_Tutorial.py",
+    label="📖 Need help? See tutorial: Run & results",
+    query_params={"section": "overview"},
+)
 
 if "questionnaires" not in st.session_state:
-    st.error(
-        "You need to first upload a questionnaire and the population you want to survey."
-    )
+    st.error("You need to first upload a questionnaire and the population you want to survey.")
     st.stop()
     disabled = True
 else:
@@ -99,7 +91,10 @@ with col_llm:
             step=0.01,
             initial_value=1.0,
             disabled=True,
-            help="Controls nucleus sampling. The model considers tokens with top_p probability mass.",
+            help=(
+                "Controls nucleus sampling. The model considers tokens with "
+                "top_p probability mass."
+            ),
         )
 
         seed = state.create(
@@ -120,72 +115,87 @@ with col_llm:
                 initial_value="",
                 height=150,
                 disabled=True,
-                help='Enter any other valid inference parameters like "stop", "logit_bias", or "frequency_penalty" as a JSON object.',
+                help=(
+                    'Enter any other valid inference parameters like "stop", '
+                    '"logit_bias", or "frequency_penalty" as a JSON object.'
+                ),
             )
 
 
 with col_prompt_display:
     st.subheader("📄 Live Preview")
-    
+
     # Survey method selector
     survey_method_options = {
         "Single item": ("single_item", QuestionnairePresentation.SINGLE_ITEM),
         "Battery": ("battery", QuestionnairePresentation.BATTERY),
         "Sequential": ("sequential", QuestionnairePresentation.SEQUENTIAL),
     }
-    
+
     survey_method_display = state.create(
         st.selectbox,
         "survey_method",
         "Questionnaire Method",
         options=list(survey_method_options.keys()),
         initial_value="Single item",
-        help="Choose how to conduct the questionnaire: Single item (one at a time), Battery (all questions together), or Sequential (with conversation history)."
+        help=(
+            "Choose how to conduct the questionnaire: Single item "
+            "(one at a time), Battery (all questions together), or "
+            "Sequential (with conversation history)."
+        ),
     )
-    
+
     # Get the method name and questionnaire type from selection
     selected_method_name, selected_questionnaire_type = survey_method_options[survey_method_display]
 
     with st.container(border=True):
         # Add a visible questionnaire identifier to force Streamlit to update when switching
         # This ensures the preview updates even when "change all" makes content identical
-        st.caption(f"📋 Questionnaire {current_index + 1} of {len(st.session_state.questionnaires)}")
-        
+        st.caption(
+            f"📋 Questionnaire {current_index + 1} of " f"{len(st.session_state.questionnaires)}"
+        )
+
         # For single item mode, show multiple previews (up to 3 items)
         if selected_questionnaire_type == QuestionnairePresentation.SINGLE_ITEM:
             num_questions = len(questionnaires._questions)
             num_previews = min(3, num_questions)  # Show up to 3 previews
-            
+
             if num_previews > 1:
                 st.write(f"**Preview of first {num_previews} items:**")
             else:
                 st.write("**Preview:**")
-            
+
             for i in range(num_previews):
                 if num_previews > 1:
                     st.write(f"**Item {i+1}:**")
-                
-                current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(
-                    selected_questionnaire_type, 
-                    item_position=i
+
+                current_system_prompt, current_prompt = (
+                    questionnaires.get_prompt_for_questionnaire_type(
+                        selected_questionnaire_type,
+                        item_position=i,
+                    )
                 )
                 current_system_prompt = current_system_prompt.replace("\n", "  \n")
                 current_prompt = current_prompt.replace("\n", "  \n")
-                # Use a unique container key for each questionnaire/item to force Streamlit to update when switching
+                # Use a unique container key for each questionnaire/item to
+                # force Streamlit to update when switching
                 # This ensures the preview updates even when content is identical
                 with st.container(key=f"preview_container_{current_index}_{i}"):
                     st.markdown(current_system_prompt)
                     st.write(current_prompt)
-                
+
                 # Add separator between items (except for the last one)
                 if i < num_previews - 1:
                     st.divider()
         else:
             # For battery and sequential, show single preview as before
-            current_system_prompt, current_prompt = questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
+            current_system_prompt, current_prompt = (
+                questionnaires.get_prompt_for_questionnaire_type(selected_questionnaire_type)
+            )
             current_system_prompt = current_system_prompt.replace("\n", "  \n")
             current_prompt = current_prompt.replace("\n", "  \n")
-            # Use a unique container key for each questionnaire to force Streamlit to update when switching
+            # Use a unique container key for each questionnaire to force
+            # Streamlit to update when switching
             # This ensures the preview updates even when content is identical
             with st.container(key=f"preview_container_{current_index}"):
                 st.markdown(current_system_prompt)
@@ -241,7 +251,7 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
                     survey_func = conduct_survey_sequential
                 else:
                     survey_func = conduct_survey_single_item  # Default fallback
-                
+
                 result = survey_func(
                     client,
                     llm_prompts=questionnaires,
@@ -259,7 +269,7 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
     while not log_queue.empty():
         log_queue.get()
     while not result_queue.empty():
-        result_queue.get()  
+        result_queue.get()
 
     # Get the selected survey method
     survey_method_display = st.session_state.get("survey_method", "Single item")
@@ -268,11 +278,20 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
         "Battery": ("battery", QuestionnairePresentation.BATTERY),
         "Sequential": ("sequential", QuestionnairePresentation.SEQUENTIAL),
     }
-    selected_method_name, _ = survey_method_options.get(survey_method_display, ("single_item", QuestionnairePresentation.SINGLE_ITEM))
-    
+    selected_method_name, _ = survey_method_options.get(
+        survey_method_display,
+        ("single_item", QuestionnairePresentation.SINGLE_ITEM),
+    )
+
     thread = threading.Thread(
         target=run_async_in_thread,
-        args=(result_queue, client, st.session_state.questionnaires, model_name, selected_method_name),
+        args=(
+            result_queue,
+            client,
+            st.session_state.questionnaires,
+            model_name,
+            selected_method_name,
+        ),
         kwargs=inference_config,
     )
     thread.start()
@@ -285,7 +304,8 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
             # Here we can write directly to the UI, as it is the main thread
             # TQDM uses carriage returns (\r) to animate in the console, we only show clear lines
             log_message = log_queue.get_nowait()
-            # This is quite a hacky solution for now, we should adjust QSTN to make the messages clearly parsable.
+            # This is quite a hacky solution for now, we should adjust QSTN
+            # to make the messages clearly parsable.
             if "[A" not in log_message and "Processing Prompts" not in log_message:
                 all_questions_placeholder.text(log_message.strip().replace("\r", ""))
 
@@ -311,12 +331,14 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
     has_json_rgm = False
     if isinstance(final_output, list) and len(final_output) > 0:
         for result in final_output:
-            if hasattr(result, 'questionnaire') and hasattr(result.questionnaire, '_questions'):
+            if hasattr(result, "questionnaire") and hasattr(result.questionnaire, "_questions"):
                 for question in result.questionnaire._questions:
-                    if (hasattr(question, 'answer_options') and 
-                        question.answer_options and 
-                        hasattr(question.answer_options, 'response_generation_method') and
-                        question.answer_options.response_generation_method):
+                    if (
+                        hasattr(question, "answer_options")
+                        and question.answer_options
+                        and hasattr(question.answer_options, "response_generation_method")
+                        and question.answer_options.response_generation_method
+                    ):
                         rgm = question.answer_options.response_generation_method
                         if isinstance(rgm, JSONResponseGenerationMethod):
                             has_json_rgm = True
@@ -347,25 +369,25 @@ if st.button("Confirm and Run Questionnaire", type="primary", use_container_widt
 if "inference_completed" in st.session_state and st.session_state.inference_completed:
     st.divider()
     st.subheader("💾 Save Results")
-    
+
     # Text input for filename
     if "save_filename" not in st.session_state:
         st.session_state.save_filename = "questionnaire_results.csv"
-    
+
     save_filename = st.text_input(
         "Save File",
         value=st.session_state.save_filename,
         key="save_filename_input",
-        help="Enter the filename for the results. Should be a CSV file (e.g., results.csv)."
+        help=("Enter the filename for the results. Should be a CSV file " "(e.g., results.csv)."),
     )
-    
+
     # Ensure filename ends with .csv
-    if save_filename and not save_filename.endswith('.csv'):
-        save_filename = save_filename + '.csv'
-    
+    if save_filename and not save_filename.endswith(".csv"):
+        save_filename = save_filename + ".csv"
+
     # Convert dataframe to CSV string for download
     csv = st.session_state.results_dataframe.to_csv(index=False)
-    
+
     st.download_button(
         label="Save Results",
         data=csv,
@@ -373,5 +395,8 @@ if "inference_completed" in st.session_state and st.session_state.inference_comp
         mime="text/csv",
         type="primary",
         use_container_width=True,
-        help="Click to save the results to your computer. You can choose the directory and filename in the save dialog."
+        help=(
+            "Click to save the results to your computer. You can choose "
+            "the directory and filename in the save dialog."
+        ),
     )

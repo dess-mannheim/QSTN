@@ -1,9 +1,11 @@
 import streamlit as st
 
+
 class StatefulWidgets:
     """
     A class to create Streamlit widgets with encapsulated session state management.
     """
+
     def __init__(self, prefix: str = "_"):
         """
         Initializes the StatefulWidgets class.

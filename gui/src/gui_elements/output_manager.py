@@ -1,8 +1,7 @@
-import streamlit as st
+import contextlib
 import io
 from contextlib import contextmanager
-import contextlib
-import re
+
 
 @contextmanager
 def st_capture(output_func):
@@ -17,17 +16,19 @@ def st_capture(output_func):
         stdout.write = new_write
         yield
 
+
 class TqdmToStreamlit(io.StringIO):
     """
     A custom file-like object that redirects tqdm's output to Streamlit's st.progress
     and st.text widgets.
     """
+
     # def __init__(self, progress_bar, text_element):
     #     super().__init__()
     #     self.progress_bar = progress_bar
     #     self.text_element = text_element
     #     self.last_progress = 0
-    
+
     def __init__(self, text_element):
         super().__init__()
         self.text_element = text_element
@@ -44,16 +45,18 @@ class TqdmToStreamlit(io.StringIO):
         self.text_element.text(buf.strip())
 
     def flush(self):
-        pass # No-op
+        pass  # No-op
+
 
 class QueueIO(io.StringIO):
     """
     A custom file-like object that writes to a queue.
     Used to capture stdout/stderr.
     """
+
     def __init__(self, q):
         self.queue = q
-    
+
     def write(self, buf):
         self.queue.put(buf)
 
