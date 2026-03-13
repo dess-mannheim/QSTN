@@ -443,52 +443,7 @@ def _update_logprob_kwargs(response_generation_method, generation_kwargs):
 
     return logprob_config
 
-    # if response_generation_method:
-    #     for rgm in response_generation_method:
-    #         # TODO This is not implemented correcty yet
-    #         if isinstance(rgm, LogprobResponseGenerationMethod):
-    #             logprob_result = []
-    #             # ignore the first k tokens that belong to the reasoning
-    #             if rgm.ignore_reasoning:
-    #                 tokenizer = model.get_tokenizer()
-    #                 logprob_positions = [
-    #                     (
-    #                         len(
-    #                             tokenizer.tokenize(
-    #                                 f"{reasoning_start_token}{_reasoning}{reasoning_end_token}"
-    #                             )
-    #                         )
-    #                         + 1
-    #                         + rgm.token_position
-    #                         if _reasoning is not None
-    #                         else rgm.token_position
-    #                     )
-    #                     for _reasoning in raw_reasonings
-    #                 ]
-    #             else:
-    #                 logprob_positions = [rgm.token_position] * len(outputs)
 
-    #             for req_output, logprob_position in zip(outputs, logprob_positions):
-    #                 try:
-    #                     answer_dict = {
-    #                         x.decoded_token.lstrip(
-    #                             space_char
-    #                         ).lstrip(): x.logprob
-    #                         # strip the space character and whitespace from
-    #                         # tokenization
-    #                         for x in req_output.outputs[0]
-    #                         .logprobs[logprob_position]
-    #                         .values()
-    #                     }
-    #                 except (
-    #                     IndexError
-    #                 ):  # less than [logprob_position] tokens in the output!
-    #                     answer_dict = {}
-    #                 logprob_result.append(answer_dict)
-
-
-# REGEX Method.
-# We could use the thinking ids directly and decode the message again.
 def _extract_reasoning_and_answer(
     reasoning_start_token: str, reasoning_end_token: str, outputs: list[RequestOutput]
 ):
@@ -501,13 +456,23 @@ def _extract_reasoning_and_answer(
     ]
 
     for request_output in outputs:
-        full_text = request_output.outputs[0].text
+        completion_output = request_output.outputs[0]
+        full_text = getattr(completion_output, "text", "") or ""
+
+        reasoning = getattr(completion_output, "reasoning", None) or getattr(
+            completion_output, "reasoning_content", None
+        )
+        content = getattr(completion_output, "content", None)
 
         # If we have no reasoning, directly output everything
         extracted_reasoning = None
         final_answer = full_text
 
-        final_answer, extracted_reasoning = parse_reasoning(full_text, patterns=patterns)
+        if reasoning is None:
+            final_answer, extracted_reasoning = parse_reasoning(full_text, patterns=patterns)
+        else:
+            final_answer = content if content is not None else full_text
+            extracted_reasoning = reasoning
 
         raw_reasonings.append(extracted_reasoning)
         if extracted_reasoning is not None:

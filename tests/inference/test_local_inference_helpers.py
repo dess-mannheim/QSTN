@@ -96,10 +96,20 @@ def test_extract_reasoning_and_answer():
     """Outputs from vllm are parsed correctly into reasoning and answers."""
 
     class FakeOutput:
-        def __init__(self, text):
+        def __init__(
+            self,
+            text,
+            *,
+            reasoning=None,
+            reasoning_content=None,
+            content=None,
+        ):
             class Inner:
                 def __init__(self, txt):
                     self.text = txt
+                    self.reasoning = reasoning
+                    self.reasoning_content = reasoning_content
+                    self.content = content
 
             self.outputs = [Inner(text)]
 
@@ -110,6 +120,41 @@ def test_extract_reasoning_and_answer():
     assert raw[0] == "r"
     assert answers[0] == "hello"
     assert reasonings[1] is None
+
+
+def test_extract_reasoning_and_answer_prefers_vllm_reasoning_fields():
+    """Built-in vLLM reasoning fields should bypass manual tag parsing."""
+
+    class FakeOutput:
+        def __init__(
+            self,
+            text,
+            *,
+            reasoning=None,
+            reasoning_content=None,
+            content=None,
+        ):
+            class Inner:
+                def __init__(self, txt):
+                    self.text = txt
+                    self.reasoning = reasoning
+                    self.reasoning_content = reasoning_content
+                    self.content = content
+
+            self.outputs = [Inner(text)]
+
+    outputs = [
+        FakeOutput("answer-from-text", reasoning="  built in reasoning  ", content="answer"),
+        FakeOutput("fallback-answer", reasoning_content="compat reasoning"),
+    ]
+
+    raw, reasonings, answers = local_inference._extract_reasoning_and_answer(
+        "<think>", "</think>", outputs
+    )
+
+    assert raw == ["  built in reasoning  ", "compat reasoning"]
+    assert reasonings == ["built in reasoning", "compat reasoning"]
+    assert answers == ["answer", "fallback-answer"]
 
 
 def test_get_logprobs_ignores_non_logprob_methods():
