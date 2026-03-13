@@ -17,14 +17,6 @@ Placeholder
    :undoc-members:
    :show-inheritance:
 
-Prompt Creation
--------------------------------------------
-
-.. automodule:: qstn.utilities.prompt_creation
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Prompt Perturbation
 -------------------------------------------
 
@@ -56,4 +48,3 @@ Util Functions
    :members:
    :undoc-members:
    :show-inheritance:
-
