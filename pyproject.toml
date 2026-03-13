@@ -64,6 +64,7 @@ exclude = '''
   | \.venv
   | build
   | dist
+  | src/qstn/_version\.py
 )/
 '''
 
