@@ -8,6 +8,8 @@ import pytest
 from qstn.inference import remote_inference
 from qstn.inference.response_generation import (
     ChoiceResponseGenerationMethod,
+    JSONItem,
+    JSONObject,
     JSONResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
@@ -42,7 +44,7 @@ def test_create_structured_output_and_params():
     )
 
     # single JSON method
-    rgm = JSONResponseGenerationMethod(json_fields=["a"], constraints=None)
+    rgm = JSONResponseGenerationMethod(json_object=JSONObject(children=[JSONItem("a")]))
     out = remote_inference._create_structured_output(batch_size=2, response_generation_method=rgm)
     assert isinstance(out, list) and len(out) == 2
 

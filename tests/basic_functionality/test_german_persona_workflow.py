@@ -5,6 +5,7 @@ while mocking heavy inference calls.
 """
 
 import json
+
 import pandas as pd
 
 from qstn import survey_manager
@@ -133,9 +134,7 @@ def test_notebook_like_prompt_construction():
 
     assert len(llm_prompts) == 2
 
-    system_msg, user_prompt = llm_prompts[0].get_prompt_for_questionnaire_type(
-        item_id="mp18"
-    )
+    system_msg, user_prompt = llm_prompts[0].get_prompt_for_questionnaire_type(item_id="mp18")
     assert "Person A" in system_msg
     assert "Wie zufrieden sind Sie mit der Demokratie?" in user_prompt
     assert "Antwortmöglichkeiten:" in user_prompt

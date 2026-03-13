@@ -4,6 +4,9 @@ import pandas as pd
 import pytest
 
 from qstn.inference.response_generation import (
+    JSONItem,
+    JSONObject,
+    JSONResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
     JSONVerbalizedDistribution,
 )
@@ -153,94 +156,80 @@ def test_battery_mixed_scales_use_per_question_distribution_schema():
         questionnaire_type=QuestionnairePresentation.BATTERY
     )
 
-    assert '"Q1 | q1_o1": <probability for: 1: SEHR GUT>' in system_prompt
-    assert "<probability for: 5: SEHR SCHLECHT>" in system_prompt
-    assert '"Q1... | q1_o5": <probability for: 5: SEHR SCHLECHT>' in system_prompt
-    assert '"Q2 | q2_o1": <probability for: 1: BIN DERS.MEINUNG>' in system_prompt
-    assert '"Q2... | q2_o2": <probability for: 2: BIN ANDERER MEINUNG>' in system_prompt
+    assert '"Q1": {' in system_prompt
+    assert '"1: SEHR GUT": "probability for: 1: SEHR GUT"' in system_prompt
+    assert '"5: SEHR SCHLECHT": "probability for: 5: SEHR SCHLECHT"' in system_prompt
+    assert '"Q2": {' in system_prompt
+    assert '"1: BIN DERS.MEINUNG": "probability for: 1: BIN DERS.MEINUNG"' in system_prompt
+    assert '"2: BIN ANDERER MEINUNG": "probability for: 2: BIN ANDERER MEINUNG"' in system_prompt
 
 
-def test_battery_verbalized_distribution_supports_custom_field_and_explanation_templates():
-    df = pd.DataFrame(
-        [
-            {"questionnaire_item_id": 1, "question_content": "Q1"},
-            {"questionnaire_item_id": 2, "question_content": "Q2"},
-        ]
-    )
-
-    options_q1 = generate_likert_options(
-        n=2,
-        answer_texts=["No", "Yes"],
-        response_generation_method=JSONVerbalizedDistribution(
-            json_field_template="Question: {question} - Option: {option}",
-            json_explanation_template="probability for option {option}",
-        ),
-    )
-    options_q2 = generate_likert_options(
-        n=2,
-        answer_texts=["A", "B"],
-        response_generation_method=JSONVerbalizedDistribution(
-            json_field_template="Question: {question} - Option: {option}",
-            json_explanation_template="probability for option {option}",
-        ),
+def test_json_single_answer_reuses_scale_prompt_format_in_explanations():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+    options = generate_likert_options(
+        n=7,
+        answer_texts=["UNWICHTIG", "SEHR WICHTIG"],
+        only_from_to_scale=True,
+        scale_prompt_template="Antwortmöglichkeiten: {start} bis {end}",
+        response_generation_method=JSONSingleResponseGenerationMethod(),
     )
 
     prompt = LLMPrompt(
         questionnaire_source=df,
         system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
-    ).prepare_prompt(answer_options={1: options_q1, 2: options_q2})
+    ).prepare_prompt(answer_options={1: options})
 
     system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
         questionnaire_type=QuestionnairePresentation.BATTERY
     )
 
-    assert '"Question: Q1 - Option: 1: No": <probability for option 1: No>' in system_prompt
-    assert '"Question: Q2... - Option: 2: B": <probability for option 2: B>' in system_prompt
-
-
-def test_custom_template_with_question_placeholder_does_not_duplicate_question_suffix():
-    df = pd.DataFrame(
-        [
-            {"questionnaire_item_id": 1, "question_content": "Q1"},
-            {"questionnaire_item_id": 2, "question_content": "Q2"},
-        ]
+    assert '"Q1": {' in system_prompt
+    assert (
+        '"answer": "choose one of: Antwortmöglichkeiten: 1: UNWICHTIG bis 7: SEHR WICHTIG"'
+        in system_prompt
     )
+
+
+def test_verbalized_distribution_uses_plain_middle_scale_indices():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
     options = generate_likert_options(
-        n=2,
-        answer_texts=["No", "Yes"],
-        response_generation_method=JSONVerbalizedDistribution(
-            json_field_template="Question: {question} | Option: {option}_{question}",
-            json_explanation_template="probability for: {option}",
-        ),
-    )
-    prompt = LLMPrompt(
-        questionnaire_source=df,
-        system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
-    ).prepare_prompt(answer_options={1: options, 2: options})
-
-    system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
-        questionnaire_type=QuestionnairePresentation.BATTERY
-    )
-
-    assert "_Q1_Q1" not in system_prompt
-    assert "_Q2_Q2" not in system_prompt
-
-
-def test_default_verbalized_distribution_shortens_question_in_battery_fields():
-    df = pd.DataFrame(
-        [
-            {
-                "questionnaire_item_id": 1,
-                "question_content": "Sind Sie bei der folgenden Aussage derselben Meinung?",
-            },
-            {"questionnaire_item_id": 2, "question_content": "Q2"},
-        ]
-    )
-    options = generate_likert_options(
-        n=2,
-        answer_texts=["No", "Yes"],
+        n=7,
+        answer_texts=["SEHR FALSCH", "SEHR RICHTIG"],
+        only_from_to_scale=True,
         response_generation_method=JSONVerbalizedDistribution(),
     )
+
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
+    ).prepare_prompt(answer_options={1: options})
+
+    system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY
+    )
+
+    assert '"1: SEHR FALSCH": "probability for: 1: SEHR FALSCH"' in system_prompt
+    assert '"2": "probability for: 2"' in system_prompt
+    assert '"4": "probability for: 4"' in system_prompt
+    assert '"7: SEHR RICHTIG": "probability for: 7: SEHR RICHTIG"' in system_prompt
+
+
+def test_battery_json_can_use_custom_top_level_key_template():
+    df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    options = generate_likert_options(
+        n=2,
+        answer_texts=["Yes", "No"],
+        response_generation_method=JSONResponseGenerationMethod(
+            json_object=JSONObject(children=[JSONItem(json_field="answer")]),
+            battery_question_key_template="item: {{QUESTION_CONTENT_PLACEHOLDER}}",
+        ),
+    )
+
     prompt = LLMPrompt(
         questionnaire_source=df,
         system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
@@ -250,36 +239,98 @@ def test_default_verbalized_distribution_shortens_question_in_battery_fields():
         questionnaire_type=QuestionnairePresentation.BATTERY
     )
 
-    assert '"Sind Sie bei der folgenden Aussage derselben Meinung? | q1_o1"' in system_prompt
-    assert '"Sind Sie... | q1_o2"' in system_prompt
+    assert '"item: Q1": {' in system_prompt
+    assert '"item: Q2": {' in system_prompt
 
 
-def test_custom_question_only_template_requires_unique_placeholders_in_battery():
-    df = pd.DataFrame(
-        [
-            {
-                "questionnaire_item_id": 1,
-                "question_content": "Wie groß ist Ihr Vertrauen in die politischen Parteien?",
-            },
-            {
-                "questionnaire_item_id": 2,
-                "question_content": "Wie groß ist Ihr Vertrauen in die Bundesregierung?",
-            },
-        ]
-    )
+def test_verbalized_distribution_explanation_supports_options_placeholder():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
     options = generate_likert_options(
-        n=2,
-        answer_texts=["No", "Yes"],
-        response_generation_method=JSONVerbalizedDistribution(json_field_template="{question}"),
-    )
-    prompt = LLMPrompt(questionnaire_source=df).prepare_prompt(
-        answer_options={1: options, 2: options}
+        n=7,
+        answer_texts=["UNWICHTIG", "SEHR WICHTIG"],
+        only_from_to_scale=True,
+        scale_prompt_template="Antwortmöglichkeiten: {start} bis {end}",
+        response_generation_method=JSONVerbalizedDistribution(
+            option_explanation_template=(
+                "Wahrscheinlichkeit für {option} auf {{OPTIONS_PLACEHOLDER}}"
+            )
+        ),
     )
 
-    with pytest.raises(ValueError, match="duplicate keys"):
-        prompt.get_prompt_for_questionnaire_type(
-            questionnaire_type=QuestionnairePresentation.BATTERY
-        )
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
+    ).prepare_prompt(answer_options={1: options})
+
+    system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY
+    )
+
+    assert (
+        '"1: UNWICHTIG": "Wahrscheinlichkeit für 1: UNWICHTIG auf Antwortmöglichkeiten: 1: '
+        'UNWICHTIG bis 7: SEHR WICHTIG"' in system_prompt
+    )
+    assert '"2": "Wahrscheinlichkeit für 2 auf"' in system_prompt
+
+
+def test_verbalized_distribution_options_placeholder_can_be_repeated_for_all_options():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+    options = generate_likert_options(
+        n=7,
+        answer_texts=["UNWICHTIG", "SEHR WICHTIG"],
+        only_from_to_scale=True,
+        scale_prompt_template="Antwortmöglichkeiten: {start} bis {end}",
+        response_generation_method=JSONVerbalizedDistribution(
+            option_explanation_template=(
+                "Wahrscheinlichkeit für {option} auf {{OPTIONS_PLACEHOLDER}}"
+            ),
+            explanation_prompt_placeholders_first_option_only=False,
+        ),
+    )
+
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
+    ).prepare_prompt(answer_options={1: options})
+
+    system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY
+    )
+
+    assert (
+        '"2": "Wahrscheinlichkeit für 2 auf Antwortmöglichkeiten: 1: UNWICHTIG bis 7: SEHR '
+        'WICHTIG"' in system_prompt
+    )
+
+
+def test_verbalized_distribution_explanation_supports_scale_range_placeholder():
+    df = pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q1"}])
+    options = generate_likert_options(
+        n=7,
+        answer_texts=["UNWICHTIG", "SEHR WICHTIG"],
+        only_from_to_scale=True,
+        scale_prompt_template="Antwortmöglichkeiten: {start} bis {end}",
+        response_generation_method=JSONVerbalizedDistribution(
+            option_explanation_template=(
+                "Wahrscheinlichkeit für {option} {{SCALE_RANGE_PLACEHOLDER}}"
+            )
+        ),
+    )
+
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=f"SYS\n{placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS}",
+    ).prepare_prompt(answer_options={1: options})
+
+    system_prompt, _ = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY
+    )
+
+    assert (
+        '"1: UNWICHTIG": "Wahrscheinlichkeit für 1: UNWICHTIG Antwortmöglichkeiten: 1: '
+        'UNWICHTIG bis 7: SEHR WICHTIG"' in system_prompt
+    )
+    assert '"2": "Wahrscheinlichkeit für 2"' in system_prompt
 
 
 def test_get_prompt_for_questionnaire_type_allows_none_system_prompt():

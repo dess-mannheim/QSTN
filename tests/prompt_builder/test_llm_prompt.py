@@ -1,7 +1,7 @@
 """Core behavior tests for `LLMPrompt` prompt building and questionnaire operations."""
 
-import pytest
 import pandas as pd
+import pytest
 
 from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities import placeholder

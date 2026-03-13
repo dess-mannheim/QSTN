@@ -137,12 +137,14 @@ def test_prepare_battery_batch_merges_mixed_json_methods_per_question():
     merged_method = response_generation_methods[0]
     assert isinstance(merged_method, JSONResponseGenerationMethod)
 
-    merged_keys = list(merged_method.json_fields.keys())
-    assert "Q1 | q1_o1" in merged_keys
-    assert "Q1... | q1_o5" in merged_keys
-    assert "Q2 | q2_o1" in merged_keys
-    assert "Q2... | q2_o2" in merged_keys
-    assert "Q2... | q2_o3" not in merged_keys
+    top_level_keys = [child.json_field for child in merged_method.json_object.children]
+    assert top_level_keys == ["Q1", "Q2"]
+    q1_fields = [child.json_field for child in merged_method.json_object.children[0].children]
+    q2_fields = [child.json_field for child in merged_method.json_object.children[1].children]
+    assert len(q1_fields) == 5
+    assert len(q2_fields) == 2
+    assert "1: SEHR GUT" in q1_fields
+    assert "2: BIN ANDERER MEINUNG" in q2_fields
 
 
 def test_conduct_survey_sequential_handles_partial_prefill_and_empty_logprobs(

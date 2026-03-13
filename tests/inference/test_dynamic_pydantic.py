@@ -1,42 +1,68 @@
-"""Tests for dynamic enum/model generation used by structured inference outputs."""
+"""Tests for tree-based pydantic model generation used by structured outputs."""
 
 import pytest
 from pydantic import ValidationError
 
-from qstn.inference.dynamic_pydantic import _generate_pydantic_model, _create_enum
+from qstn.inference.dynamic_pydantic import build_pydantic_model_from_json_object
+from qstn.inference.response_generation import Constraints, JSONItem, JSONObject
 
 
-def test_create_enum_and_model_with_list_constraints():
-    """Enum factory should create correct members and pydantic model enforces values."""
-    enum = _create_enum("Color", ["red", "blue"])
-    assert enum.RED.value == "red"
-    assert enum.BLUE.value == "blue"
+def test_build_pydantic_model_enforces_enum_values():
+    """Enum constraints should produce schema-backed runtime validation."""
+    model = build_pydantic_model_from_json_object(
+        JSONObject(
+            children=[
+                JSONItem(
+                    json_field="color",
+                    constraints=Constraints(enum=["red", "blue"]),
+                )
+            ]
+        )
+    )
 
-    model = _generate_pydantic_model(fields=["color"], constraints={"color": ["red","blue"]})
-    # correct values
     inst = model(color="red")
-    # enum member is returned, verify its value
+
     assert inst.color.value == "red"
-    # invalid should raise
     with pytest.raises(ValidationError):
         model(color="green")
 
 
-def test_generate_model_with_float_constraint():
-    """Float constraint should result in float typed field."""
-    model = _generate_pydantic_model(fields=["score"], constraints={"score": "float"})
+def test_build_pydantic_model_uses_declared_scalar_types():
+    """Declared scalar types should be enforced by the generated model."""
+    model = build_pydantic_model_from_json_object(
+        JSONObject(children=[JSONItem(json_field="score", value_type="float")])
+    )
+
     inst = model(score=0.5)
+
     assert isinstance(inst.score, float)
     with pytest.raises(ValidationError):
         model(score="not a float")
 
 
-def test_generate_model_with_dict_fields_and_warnings():
-    """Providing constraints for nonexistent fields emits a RuntimeWarning."""
-    with pytest.warns(RuntimeWarning):
-        _generate_pydantic_model(fields={"a": "x"}, constraints={"b": ["c"]})
+def test_build_pydantic_model_supports_nested_objects_and_aliases():
+    """Nested JSONObjects should become nested pydantic models with aliases."""
+    model = build_pydantic_model_from_json_object(
+        JSONObject(
+            children=[
+                JSONObject(
+                    json_field="Question 1",
+                    children=[JSONItem(json_field="answer", value_type="int")],
+                )
+            ]
+        )
+    )
 
-    # also ensure fields come through when dict used
-    model = _generate_pydantic_model(fields={"a": "x", "b": "y"}, constraints=None)
-    inst = model(a="hello", b="world")
-    assert inst.a == "hello" and inst.b == "world"
+    inst = model(**{"Question 1": {"answer": 2}})
+
+    assert inst.question_1.answer == 2
+    with pytest.raises(ValidationError):
+        model(**{"Question 1": {"answer": "wrong"}})
+
+
+def test_build_pydantic_model_rejects_nested_objects_without_json_field():
+    """Nested JSONObjects must expose a field name in the parent schema."""
+    with pytest.raises(ValueError, match="Nested JSONObject entries must define `json_field`."):
+        build_pydantic_model_from_json_object(
+            JSONObject(children=[JSONObject(children=[JSONItem(json_field="answer")])])
+        )

@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from qstn.inference import local_inference, survey_inference
 from qstn.inference.response_generation import (
     ChoiceResponseGenerationMethod,
+    JSONItem,
+    JSONObject,
     JSONResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
@@ -38,7 +40,7 @@ def test_update_logprob_kwargs():
 
     kwargs3 = {}
     returned3 = local_inference._update_logprob_kwargs(
-        [JSONResponseGenerationMethod(["a"], {})], kwargs3
+        [JSONResponseGenerationMethod(json_object=JSONObject(children=[JSONItem("a")]))], kwargs3
     )
     assert returned3 is None
 
@@ -46,7 +48,7 @@ def test_update_logprob_kwargs():
 def test_structured_sampling_params_and_cache(monkeypatch):
     """Different response generation methods lead to appropriate SamplingParams."""
     # simple case same method for all
-    rgm = JSONResponseGenerationMethod(json_fields=["a"], constraints=None)
+    rgm = JSONResponseGenerationMethod(json_object=JSONObject(children=[JSONItem("a")]))
     outputs = local_inference._structured_sampling_params(
         batch_size=2,
         seeds=[1, 2],
@@ -83,7 +85,7 @@ def test_create_sampling_params():
     assert not hasattr(simple[0], "structured_outputs")
 
     # with structured but not list
-    rgm = JSONResponseGenerationMethod(json_fields=["a"], constraints=None)
+    rgm = JSONResponseGenerationMethod(json_object=JSONObject(children=[JSONItem("a")]))
     struct = local_inference._create_sampling_params(
         batch_size=1, seeds=[2], response_generation_method=rgm
     )

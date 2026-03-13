@@ -1,12 +1,12 @@
 """Smoke tests for constants and prompt template primitives."""
 
-from qstn.utilities import constants, prompt_templates, placeholder
+from qstn.utilities import constants, placeholder, prompt_templates
 
 
 def test_constants_values():
     """Core constant values should be defined and of expected types."""
     assert constants.SYSTEM_PROMPT_FIELD == "system_prompt"
-    assert isinstance(constants.OPTIONS_ADJUST, list)
+    assert constants.QUESTIONNAIRE_ITEM_ID == "questionnaire_item_id"
 
 
 def test_templates_contain_placeholders():
