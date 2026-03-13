@@ -64,9 +64,12 @@ exclude = '''
   | \.venv
   | build
   | dist
-  | src/qstn/_version\.py
 )/
 '''
+extend-exclude = '''
+src/qstn/_version\.py
+'''
+
 
 [tool.ruff]
 target-version = "py312"
