@@ -12,6 +12,8 @@ Detailed information and guides are available in our [documentation](https://qst
 
 ## Installation
 
+Make sure that the python version in your environment is at least 3.12
+
 We support two type of installations:  
     1. The **base version**, which only installs the dependencies neccessary to use the OpenAI API.  
     2. The **full version**, which supports both API and local inference via `vllm`.
