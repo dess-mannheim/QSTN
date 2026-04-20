@@ -76,12 +76,23 @@ parsed_results = qstn.parser.raw_responses(results)
 If you find QSTN useful in your work, please cite our [paper](https://arxiv.org/abs/2512.08646):
 
 ```bibtex
-@misc{kreutner2025qstnmodularframeworkrobust,
-      title={QSTN: A Modular Framework for Robust Questionnaire Inference with Large Language Models}, 
-      author={Maximilian Kreutner and Jens Rupprecht and Georg Ahnert and Ahmed Salem and Markus Strohmaier},
-      year={2025},
-      eprint={2512.08646},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2512.08646}, 
+@inproceedings{kreutner-etal-2026-qstn,
+    title = "{QSTN}: A Modular Framework for Robust Questionnaire Inference with Large Language Models",
+    author = "Kreutner, Maximilian  and
+      Rupprecht, Jens  and
+      Ahnert, Georg  and
+      Salem, Ahmed  and
+      Strohmaier, Markus",
+    editor = "Croce, Danilo  and
+      Leidner, Jochen  and
+      Moosavi, Nafise Sadat",
+    booktitle = "Proceedings of the 19th Conference of the {E}uropean Chapter of the {A}ssociation for {C}omputational {L}inguistics (Volume 3: System Demonstrations)",
+    month = mar,
+    year = "2026",
+    address = "Rabat, Marocco",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2026.eacl-demo.37/",
+    doi = "10.18653/v1/2026.eacl-demo.37",
+    pages = "537--549",
+    ISBN = "979-8-89176-382-1"
 }
