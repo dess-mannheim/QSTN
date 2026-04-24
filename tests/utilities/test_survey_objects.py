@@ -12,7 +12,9 @@ from qstn.inference.response_generation import (
     ChoiceResponseGenerationMethod,
     JSONItem,
     JSONObject,
+    JSONReasoningResponseGenerationMethod,
     JSONResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
     JSONVerbalizedDistribution,
     LogprobResponseGenerationMethod,
 )
@@ -144,6 +146,117 @@ def test_answeroptions_list_and_scale_and_response_methods():
     ao6 = survey_objects.AnswerOptions(answer_texts=at, response_generation_method=rl)
     assert ao6.response_generation_method.allowed_choices is not None
     assert rl.allowed_choices is None
+
+
+def test_answeroptions_constrains_json_single_answer_options():
+    """JSON single-answer schemas should constrain answers to materialized options."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    ao = survey_objects.AnswerOptions(
+        answer_texts=at,
+        response_generation_method=JSONSingleResponseGenerationMethod(),
+    )
+
+    answer_item = ao.response_generation_method.json_object.children[0]
+
+    assert isinstance(answer_item, JSONItem)
+    assert answer_item.constraints.enum == ["1: a", "2: b"]
+
+
+def test_answeroptions_constrains_json_single_answer_indices():
+    """JSON answer constraints should respect `output_index_only`."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    ao = survey_objects.AnswerOptions(
+        answer_texts=at,
+        response_generation_method=JSONSingleResponseGenerationMethod(output_index_only=True),
+    )
+
+    answer_item = ao.response_generation_method.json_object.children[0]
+
+    assert isinstance(answer_item, JSONItem)
+    assert answer_item.constraints.enum == ["1", "2"]
+
+
+def test_answeroptions_constrains_json_reasoning_answer_only():
+    """JSON reasoning schemas should constrain only the answer field."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    ao = survey_objects.AnswerOptions(
+        answer_texts=at,
+        response_generation_method=JSONReasoningResponseGenerationMethod(),
+    )
+
+    reasoning_item = ao.response_generation_method.json_object.children[0]
+    answer_item = ao.response_generation_method.json_object.children[1]
+
+    assert isinstance(reasoning_item, JSONItem)
+    assert isinstance(answer_item, JSONItem)
+    assert reasoning_item.constraints.enum is None
+    assert answer_item.constraints.enum == ["1: a", "2: b"]
+
+
+def test_answeroptions_can_disable_json_answer_constraints():
+    """Turning off JSON answer constraints should leave prompt formatting intact."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    ao = survey_objects.AnswerOptions(
+        answer_texts=at,
+        response_generation_method=JSONSingleResponseGenerationMethod(
+            constrain_answer_options=False
+        ),
+    )
+
+    answer_item = ao.response_generation_method.json_object.children[0]
+
+    assert isinstance(answer_item, JSONItem)
+    assert answer_item.explanation == "choose one of: Options are: 1: a, 2: b"
+    assert answer_item.constraints.enum is None
+
+
+def test_answeroptions_constrains_generic_json_response_field():
+    """Generic JSON methods constrain the explicitly configured response field."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    method = JSONResponseGenerationMethod(
+        json_object=JSONObject(
+            children=[
+                JSONItem(json_field="reasoning"),
+                JSONItem(json_field="choice", explanation="choose one of: {options}"),
+            ]
+        ),
+        response_field="choice",
+    )
+    ao = survey_objects.AnswerOptions(answer_texts=at, response_generation_method=method)
+
+    reasoning_item = ao.response_generation_method.json_object.children[0]
+    choice_item = ao.response_generation_method.json_object.children[1]
+
+    assert isinstance(reasoning_item, JSONItem)
+    assert isinstance(choice_item, JSONItem)
+    assert reasoning_item.constraints.enum is None
+    assert choice_item.constraints.enum == ["1: a", "2: b"]
+
+
+def test_answeroptions_generic_json_without_response_field_is_unconstrained():
+    """Generic JSON methods need an explicit response field for automatic constraints."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    method = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem(json_field="answer")])
+    )
+    ao = survey_objects.AnswerOptions(answer_texts=at, response_generation_method=method)
+
+    answer_item = ao.response_generation_method.json_object.children[0]
+
+    assert isinstance(answer_item, JSONItem)
+    assert answer_item.constraints.enum is None
+
+
+def test_answeroptions_missing_json_response_field_raises():
+    """Configured JSON response fields must exist when automatic constraints run."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    method = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem(json_field="answer")]),
+        response_field="choice",
+    )
+
+    with pytest.raises(ValueError, match="JSON response field 'choice' was not found"):
+        survey_objects.AnswerOptions(answer_texts=at, response_generation_method=method)
 
 
 def test_answeroptions_isolates_shared_response_generation_method_instances():

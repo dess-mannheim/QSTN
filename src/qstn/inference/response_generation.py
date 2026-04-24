@@ -152,12 +152,16 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         output_template: str = prompt_templates.SYSTEM_JSON_DEFAULT,
         output_index_only: bool = False,
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
+        constrain_answer_options: bool = True,
+        response_field: str | None = None,
     ):
         super().__init__()
         self.json_object = json_object
         self.output_template = output_template
         self.output_index_only = output_index_only
         self.battery_question_key_template = battery_question_key_template
+        self.constrain_answer_options = constrain_answer_options
+        self.response_field = response_field
 
     def get_json_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         del questions
@@ -196,7 +200,47 @@ def copy_json_response_generation_method(
         output_template=response_generation_method.output_template,
         output_index_only=response_generation_method.output_index_only,
         battery_question_key_template=response_generation_method.battery_question_key_template,
+        constrain_answer_options=response_generation_method.constrain_answer_options,
+        response_field=response_generation_method.response_field,
     )
+
+
+def _set_json_item_enum(
+    json_object: JSONObject,
+    response_field: str,
+    options: list[str],
+) -> bool:
+    found = False
+    for child in json_object.children:
+        if isinstance(child, JSONItem):
+            if child.json_field == response_field:
+                child.constraints.enum = list(options)
+                found = True
+            continue
+
+        if _set_json_item_enum(child, response_field, options):
+            found = True
+
+    return found
+
+
+def constrain_json_response_options(
+    json_object: JSONObject,
+    response_field: str | None,
+    options: list[str],
+) -> JSONObject:
+    """Return a JSON object copy with answer-option enum constraints applied."""
+    constrained_json_object = deepcopy(json_object)
+    if response_field is None:
+        return constrained_json_object
+
+    if not _set_json_item_enum(constrained_json_object, response_field, options):
+        raise ValueError(
+            "Cannot constrain answer options because JSON response field "
+            f"'{response_field}' was not found."
+        )
+
+    return constrained_json_object
 
 
 class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
@@ -286,6 +330,7 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
         answer_field: str = "answer",
         answer_explanation: str = "choose one of: {options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
+        constrain_answer_options: bool = True,
     ):
         super().__init__(
             json_object=JSONObject(
@@ -300,6 +345,8 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
             output_template=output_template,
             output_index_only=output_index_only,
             battery_question_key_template=battery_question_key_template,
+            constrain_answer_options=constrain_answer_options,
+            response_field=answer_field,
         )
 
 
@@ -315,6 +362,7 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
         answer_field: str = "answer",
         answer_explanation: str = "choose one of: {options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
+        constrain_answer_options: bool = True,
     ):
         super().__init__(
             json_object=JSONObject(
@@ -333,6 +381,8 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
             output_template=output_template,
             output_index_only=output_index_only,
             battery_question_key_template=battery_question_key_template,
+            constrain_answer_options=constrain_answer_options,
+            response_field=answer_field,
         )
 
 
@@ -468,5 +518,8 @@ def resolve_battery_response_generation_method(
         json_object=JSONObject(children=nested_children),
         output_template=base_method.output_template,
         output_index_only=base_method.output_index_only,
+        battery_question_key_template=base_method.battery_question_key_template,
+        constrain_answer_options=base_method.constrain_answer_options,
+        response_field=base_method.response_field,
     )
     return merged_method

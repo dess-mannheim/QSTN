@@ -10,6 +10,7 @@ from ..inference.response_generation import (
     JSONVerbalizedDistribution,
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
+    constrain_json_response_options,
     copy_json_response_generation_method,
 )
 from ..utilities import placeholder, prompt_templates
@@ -217,6 +218,12 @@ class AnswerOptions:
                     prompt_formatter=self._response_generation_prompt_formatter(),
                     options=self._response_generation_options_text(),
                 )
+                if self.response_generation_method.constrain_answer_options:
+                    self.response_generation_method.json_object = constrain_json_response_options(
+                        json_object=self.response_generation_method.json_object,
+                        response_field=self.response_generation_method.response_field,
+                        options=self._response_generation_options(),
+                    )
 
             elif isinstance(
                 self.response_generation_method, ChoiceResponseGenerationMethod

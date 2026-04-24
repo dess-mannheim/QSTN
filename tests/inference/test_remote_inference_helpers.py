@@ -11,8 +11,10 @@ from qstn.inference.response_generation import (
     JSONItem,
     JSONObject,
     JSONResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
+from qstn.utilities import survey_objects
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +61,28 @@ def test_create_structured_output_and_params():
         batch_size=1, response_generation_method=choice
     )
     assert params2 == [["x"]]
+
+
+def test_create_structured_params_includes_auto_answer_enum():
+    """Remote JSON schemas should include automatic answer-option enums."""
+    answer_texts = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    options = survey_objects.AnswerOptions(
+        answer_texts=answer_texts,
+        response_generation_method=JSONSingleResponseGenerationMethod(),
+    )
+
+    params = remote_inference._create_structured_params(
+        batch_size=1,
+        response_generation_method=options.response_generation_method,
+    )
+
+    definitions = params[0].get("$defs", {})
+    enum_values = [
+        definition["enum"]
+        for definition in definitions.values()
+        if definition.get("enum") == ["1: a", "2: b"]
+    ]
+    assert enum_values == [["1: a", "2: b"]]
 
 
 def test_client_loop_runner_executes_coroutine():
