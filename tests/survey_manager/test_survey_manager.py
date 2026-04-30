@@ -131,3 +131,17 @@ def test_intermediate_save_path_check_creates_directory(tmp_path):
     survey_manager._intermediate_save_path_check(n_save_step=1, intermediate_save_path=str(target))
 
     assert target.parent.exists()
+
+
+def test_survey_step_progress_label(monkeypatch):
+    """Survey step progress should use the clearer tqdm description."""
+    captured: dict[str, str] = {}
+
+    def fake_tqdm(iterable, desc):
+        captured["desc"] = desc
+        return iterable
+
+    monkeypatch.setattr(survey_manager, "tqdm", fake_tqdm)
+
+    assert list(survey_manager._iter_survey_steps(2, print_progress=True)) == [0, 1]
+    assert captured["desc"] == "Running survey steps"

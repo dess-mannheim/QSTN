@@ -73,6 +73,7 @@ from .inference.response_generation import (
     resolve_battery_response_generation_method,
 )
 from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
+from .logger import get_logger
 from .parser.llm_answer_parser import raw_responses
 from .prompt_builder import LLMPrompt, QuestionnairePresentation
 from .utilities import constants, utils
@@ -83,6 +84,8 @@ from .utilities.survey_objects import (
 
 if TYPE_CHECKING:
     from vllm import LLM  # pyright: ignore[reportMissingImports]
+
+logger = get_logger(__name__)
 
 # @dataclass
 # class GenerationFailure:
@@ -110,7 +113,7 @@ def _initialize_question_response_pairs(
 def _iter_survey_steps(max_survey_length: int, print_progress: bool):
     """Yield step indices, optionally wrapped in tqdm."""
     if print_progress:
-        return tqdm(range(max_survey_length), desc="Processing questionnaires")
+        return tqdm(range(max_survey_length), desc="Running survey steps")
     return range(max_survey_length)
 
 
@@ -368,6 +371,11 @@ def conduct_survey_single_item(
 
     max_survey_length: int = max(len(questionnaire) for questionnaire in llm_prompts)
     question_llm_response_pairs = _initialize_question_response_pairs(llm_prompts)
+    logger.info(
+        "Starting single-item survey for %s questionnaires and %s steps.",
+        len(llm_prompts),
+        max_survey_length,
+    )
 
     for i in _iter_survey_steps(max_survey_length, print_progress):
         current_batch = _get_current_batch(llm_prompts, i)
@@ -420,7 +428,9 @@ def conduct_survey_single_item(
             i,
         )
 
-    return _finalize_survey_results(llm_prompts, question_llm_response_pairs)
+    results = _finalize_survey_results(llm_prompts, question_llm_response_pairs)
+    logger.info("Completed single-item survey.")
+    return results
 
 
 def _intermediate_saves(
@@ -532,6 +542,7 @@ def conduct_survey_battery(
     max_survey_length: int = 1
 
     question_llm_response_pairs = _initialize_question_response_pairs(llm_prompts)
+    logger.info("Starting battery survey for %s questionnaires.", len(llm_prompts))
 
     for i in _iter_survey_steps(max_survey_length, print_progress):
         current_batch = _get_current_batch(llm_prompts, i)
@@ -582,7 +593,9 @@ def conduct_survey_battery(
             i,
         )
 
-    return _finalize_survey_results(llm_prompts, question_llm_response_pairs)
+    results = _finalize_survey_results(llm_prompts, question_llm_response_pairs)
+    logger.info("Completed battery survey.")
+    return results
 
 
 def conduct_survey_sequential(
@@ -633,6 +646,11 @@ def conduct_survey_sequential(
 
     prompt_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
     assistant_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
+    logger.info(
+        "Starting sequential survey for %s questionnaires and %s steps.",
+        len(llm_prompts),
+        max_survey_length,
+    )
 
     for i in _iter_survey_steps(max_survey_length, print_progress):
         current_batch = _get_current_batch(llm_prompts, i)
@@ -770,7 +788,9 @@ def conduct_survey_sequential(
             llm_prompts, n_save_step, intermediate_save_file, question_llm_response, i
         )
 
-    return _finalize_survey_results(llm_prompts, question_llm_response)
+    results = _finalize_survey_results(llm_prompts, question_llm_response)
+    logger.info("Completed sequential survey.")
+    return results
 
 
 class SurveyCreator:

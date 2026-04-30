@@ -166,6 +166,35 @@ def test_run_async_in_thread_error(monkeypatch):
         )
 
 
+def test_api_batch_progress_label(monkeypatch):
+    """Remote progress should use the clearer tqdm description."""
+    captured: dict[str, str] = {}
+
+    async def fake_gather(*tasks, total, desc):
+        captured["desc"] = desc
+        captured["total"] = total
+        for task in tasks:
+            task.close()
+        return []
+
+    monkeypatch.setattr(remote_inference.tqdm_asyncio, "gather", fake_gather)
+
+    output, logprobs, reasoning = asyncio.run(
+        remote_inference._run_api_batch_async(
+            client=None,
+            client_model_name="m",
+            batch_messages=[[{"role": "user", "content": "p"}]],
+            seeds=[1],
+            print_progress=True,
+        )
+    )
+
+    assert captured == {"desc": "Generating responses", "total": 1}
+    assert output == []
+    assert logprobs == []
+    assert reasoning == []
+
+
 def test_run_openai_batch_conversation_reuses_same_loop_for_same_client():
     """Two calls with the same client should not hit cross-loop reuse errors."""
 

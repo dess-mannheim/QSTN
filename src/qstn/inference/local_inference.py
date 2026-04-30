@@ -7,6 +7,7 @@ from vllm import LLM, SamplingParams  # pyright: ignore[reportMissingImports]
 from vllm.outputs import RequestOutput  # pyright: ignore[reportMissingImports]
 from vllm.sampling_params import StructuredOutputsParams  # pyright: ignore[reportMissingImports]
 
+from ..logger import get_logger
 from ..utilities.utils import _make_cache_key, generate_seeds
 from .dynamic_pydantic import build_pydantic_model_from_json_object
 from .reasoning_parser import parse_reasoning
@@ -17,6 +18,8 @@ from .response_generation import (
     ResponseGenerationMethod,
 )
 from .utils import normalize_system_messages
+
+logger = get_logger(__name__)
 
 
 def _run_vllm_chat_pipeline(
@@ -199,8 +202,8 @@ def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
     """
     random.seed(seed)
     torch.manual_seed(seed)
-    print("Device_count: " + str(torch.cuda.device_count()))
-    print(model_keywords)
+    logger.info("Initializing vLLM model with %s CUDA devices.", torch.cuda.device_count())
+    logger.debug("vLLM model initialization kwargs: %s", model_keywords)
 
     return LLM(
         model=model_id,

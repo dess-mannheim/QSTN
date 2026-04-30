@@ -1,13 +1,14 @@
 import random
 from typing import TYPE_CHECKING, Any
 
-from tqdm.auto import tqdm
-
+from ..logger import get_logger, tqdm_write
 from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
 from .utils import normalize_system_messages
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -97,7 +98,8 @@ def _print_conversation(
                 current_method = methods[i]
                 if isinstance(current_method, LogprobResponseGenerationMethod):
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
-            tqdm.write(round_print)
+            logger.debug(round_print)
+            tqdm_write(round_print)
     else:
         conversation_print = "--- Conversation ---"
         for i, (system_message, prompt, answer, reasoning, logprob_answer) in enumerate(
@@ -119,7 +121,8 @@ def _print_conversation(
                 current_method = methods[i]
                 if isinstance(current_method, LogprobResponseGenerationMethod):
                     round_print += "\n-- Logprobs --\n" + str(logprob_answer)
-            tqdm.write(round_print)
+            logger.debug(round_print)
+            tqdm_write(round_print)
 
 
 def batch_generation(
@@ -189,6 +192,7 @@ def batch_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    logger.debug("Generating %s responses with %s backend.", len(prompts), model_type)
 
     # Inference
     if HAS_VLLM and isinstance(model, LLM):
@@ -314,6 +318,7 @@ def batch_turn_by_turn_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    logger.debug("Generating %s conversations with %s backend.", len(prompts), model_type)
 
     # Inference
     if HAS_VLLM and isinstance(model, LLM):

@@ -190,7 +190,7 @@ def test_get_logprobs_ignores_non_logprob_methods():
 def test_print_conversation_branches(monkeypatch):
     """Verify that printing handles both plain and multi-turn formats."""
     written = []
-    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+    monkeypatch.setattr(survey_inference, "tqdm_write", lambda msg: written.append(msg))
     # case without assistant_messages
     survey_inference._print_conversation(
         system_messages=["s1"],
@@ -224,7 +224,7 @@ def test_print_conversation_branches(monkeypatch):
 def test_print_conversation_with_none_methods(monkeypatch):
     """Conversation printing should tolerate `response_generation_method=None`."""
     written = []
-    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+    monkeypatch.setattr(survey_inference, "tqdm_write", lambda msg: written.append(msg))
 
     survey_inference._print_conversation(
         system_messages=["s"],
@@ -241,7 +241,7 @@ def test_print_conversation_with_none_methods(monkeypatch):
 
 def test_print_conversation_omits_none_system_message(monkeypatch):
     written = []
-    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+    monkeypatch.setattr(survey_inference, "tqdm_write", lambda msg: written.append(msg))
 
     survey_inference._print_conversation(
         system_messages=[None],
@@ -259,7 +259,7 @@ def test_print_conversation_omits_none_system_message(monkeypatch):
 
 def test_print_conversation_keeps_empty_system_message(monkeypatch):
     written = []
-    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+    monkeypatch.setattr(survey_inference, "tqdm_write", lambda msg: written.append(msg))
 
     survey_inference._print_conversation(
         system_messages=[""],

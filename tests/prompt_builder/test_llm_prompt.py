@@ -17,6 +17,11 @@ def test_load_questionnaire_and_len(mock_questionnaires):
     assert prompt.get_question(0).question_content == "How do you feel about Red?"
 
 
+def test_verbose_parameter_is_deprecated():
+    with pytest.warns(DeprecationWarning, match="verbose"):
+        LLMPrompt(verbose=True)
+
+
 def test_prepare_prompt_applies_per_item_configuration(mock_questionnaires):
     prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
     options = generate_likert_options(n=2, answer_texts=["No", "Yes"])

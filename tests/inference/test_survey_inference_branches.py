@@ -38,7 +38,7 @@ def test_batch_generation_vllm_branch_supports_print_with_none_methods(monkeypat
 
     written = []
     monkeypatch.setattr(survey_inference, "run_vllm_batch", fake_run_vllm_batch)
-    monkeypatch.setattr(survey_inference.tqdm, "write", lambda msg: written.append(msg))
+    monkeypatch.setattr(survey_inference, "tqdm_write", lambda msg: written.append(msg))
 
     out = survey_inference.batch_generation(
         model=FakeLLM(),

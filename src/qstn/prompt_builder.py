@@ -46,7 +46,7 @@ class LLMPrompt:
         questionnaire_name: str = DEFAULT_QUESTIONNAIRE_ID,
         system_prompt: str | None = DEFAULT_SYSTEM_PROMPT,
         prompt: str = DEFAULT_PROMPT_STRUCTURE,
-        verbose=False,
+        verbose: bool = False,
         seed: int = 42,
     ):
         """
@@ -62,9 +62,18 @@ class LLMPrompt:
             system_prompt (str | None): System prompt for all questions.
                 Set to `None` to omit a system message.
             prompt (str): Prompt for all questions.
-            verbose (bool): If True, enables verbose output. (Not implemented yet)
+            verbose (bool): Deprecated. Use `qstn.logger.configure_logging`
+                to enable logging output.
             seed (int): Random seed for reproducibility.
         """
+        if verbose:
+            warnings.warn(
+                "`verbose` is deprecated and will be removed in a future release. "
+                "Use `qstn.logger.configure_logging` to enable logging output.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         random.seed(seed)
 
         self._questions: list[QuestionnaireItem] = []

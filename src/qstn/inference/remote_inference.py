@@ -8,6 +8,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
 
+from ..logger import get_logger
 from ..utilities.utils import _make_cache_key, generate_seeds
 from .dynamic_pydantic import build_pydantic_model_from_json_object
 from .reasoning_parser import parse_reasoning
@@ -18,6 +19,8 @@ from .response_generation import (
     ResponseGenerationMethod,
 )
 from .utils import normalize_system_messages
+
+logger = get_logger(__name__)
 
 
 class _ClientLoopRunner:
@@ -345,7 +348,7 @@ async def _run_api_batch_async(
             for messages, seed in zip(batch_messages, seeds)
         ]
     if print_progress:
-        responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Processing Prompts")
+        responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Generating responses")
     else:
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -359,7 +362,7 @@ async def _run_api_batch_async(
 
     for response in responses:
         if isinstance(response, Exception):
-            print(f"A request failed permanently after all retries: {response}")
+            logger.warning("A request failed permanently after all retries: %s", response)
             final_results.append(f"Error: {response}")
         else:
             msg = response.choices[0].message
