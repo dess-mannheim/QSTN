@@ -162,6 +162,38 @@ def test_answeroptions_constrains_json_single_answer_options():
     assert answer_item.constraints.enum == ["1: a", "2: b"]
 
 
+def test_answeroptions_prepares_json_method_assigned_after_init():
+    """Assigning response generation methods later should run init-time preparation."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    method = JSONSingleResponseGenerationMethod(output_index_only=True)
+    ao = survey_objects.AnswerOptions(answer_texts=at)
+
+    ao.response_generation_method = method
+
+    answer_item = ao.response_generation_method.json_object.children[0]
+    original_answer_item = method.json_object.children[0]
+
+    assert isinstance(answer_item, JSONItem)
+    assert isinstance(original_answer_item, JSONItem)
+    assert answer_item.constraints.enum == ["1", "2"]
+    assert original_answer_item.constraints.enum is None
+
+
+def test_answeroptions_prepares_choice_method_assigned_after_init():
+    """Choice-style methods assigned later should receive materialized choices."""
+    at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
+    method = ChoiceResponseGenerationMethod(
+        allowed_choices_template="{options}",
+        output_index_only=True,
+    )
+    ao = survey_objects.AnswerOptions(answer_texts=at)
+
+    ao.response_generation_method = method
+
+    assert ao.response_generation_method.allowed_choices == ["1", "2"]
+    assert method.allowed_choices is None
+
+
 def test_answeroptions_constrains_json_single_answer_indices():
     """JSON answer constraints should respect `output_index_only`."""
     at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
