@@ -1,5 +1,8 @@
 """Core behavior tests for `LLMPrompt` prompt building and questionnaire operations."""
 
+import sys
+import types
+
 import pandas as pd
 import pytest
 
@@ -174,3 +177,240 @@ def test_base_model_prompt_template_setter_accepts_template_object(mock_question
 
     assert returned is prompt
     assert prompt.base_model_prompt_template is template
+
+
+class _FakeTiktokenEncoding:
+    def encode(self, text, disallowed_special=()):
+        del disallowed_special
+        return list(text)
+
+
+def _install_fake_tiktoken(monkeypatch):
+    module = types.ModuleType("tiktoken")
+    calls = []
+
+    def encoding_for_model(model_id):
+        calls.append(model_id)
+        return _FakeTiktokenEncoding()
+
+    module.encoding_for_model = encoding_for_model
+    monkeypatch.setitem(sys.modules, "tiktoken", module)
+    return calls
+
+
+def _install_fake_transformers(monkeypatch):
+    module = types.ModuleType("transformers")
+    calls = []
+
+    class FakeTokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert add_special_tokens is False
+            return list(text)
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(model_id):
+            calls.append(model_id)
+            return FakeTokenizer()
+
+    module.AutoTokenizer = FakeAutoTokenizer
+    monkeypatch.setitem(sys.modules, "transformers", module)
+    return calls
+
+
+def test_calculate_input_token_estimate_uses_tiktoken_backend(monkeypatch):
+    calls = _install_fake_tiktoken(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q"}]),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="gpt-test",
+        tokenizer_backend="tiktoken",
+    )
+
+    _, user_prompt = prompt.get_prompt_for_questionnaire_type()
+    assert calls == ["gpt-test"]
+    assert estimate == len("SYS") + len(user_prompt) + 2 * 3 + 3
+
+
+def test_calculate_input_token_estimate_uses_lazy_transformers_backend(monkeypatch):
+    calls = _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q"}]),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+    )
+
+    _, user_prompt = prompt.get_prompt_for_questionnaire_type()
+    assert calls == ["hf-test"]
+    assert estimate == len("SYS") + len(user_prompt)
+
+
+def test_calculate_input_token_estimate_transformers_backend_requires_auto_tokenizer(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q"}])
+    )
+
+    with pytest.raises(ImportError, match="optional 'transformers' package"):
+        prompt.calculate_input_token_estimate(
+            model_id="hf-test",
+            tokenizer_backend="transformers",
+        )
+
+
+def test_calculate_input_token_estimate_single_item_returns_largest_item(monkeypatch):
+    _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame(
+            [
+                {"questionnaire_item_id": 1, "question_content": "Q"},
+                {"questionnaire_item_id": 2, "question_content": "A much longer question"},
+            ]
+        ),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+    )
+
+    expected = max(
+        len(system_prompt or "") + len(user_prompt)
+        for system_prompt, user_prompt in (
+            prompt.get_prompt_for_questionnaire_type(item_position=0),
+            prompt.get_prompt_for_questionnaire_type(item_position=1),
+        )
+    )
+    assert estimate == expected
+
+
+def test_calculate_input_token_estimate_battery_renders_once(monkeypatch):
+    _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame(
+            [
+                {"questionnaire_item_id": 1, "question_content": "Q1"},
+                {"questionnaire_item_id": 2, "question_content": "Q2"},
+            ]
+        ),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+    original_get_prompt = prompt.get_prompt_for_questionnaire_type
+    calls = []
+
+    def spy_get_prompt_for_questionnaire_type(*args, **kwargs):
+        calls.append(kwargs.get("item_position"))
+        return original_get_prompt(*args, **kwargs)
+
+    monkeypatch.setattr(
+        prompt,
+        "get_prompt_for_questionnaire_type",
+        spy_get_prompt_for_questionnaire_type,
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator=" || ",
+    )
+
+    system_prompt, user_prompt = original_get_prompt(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_position=0,
+        item_separator=" || ",
+    )
+    assert calls == [0]
+    assert estimate == len(system_prompt or "") + len(user_prompt)
+
+
+def test_calculate_input_token_estimate_sequential_uses_default_response_estimate(monkeypatch):
+    _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame(
+            [
+                {"questionnaire_item_id": 1, "question_content": "Q1"},
+                {"questionnaire_item_id": 2, "question_content": "Q2"},
+            ]
+        ),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+        questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+    )
+
+    first_system_prompt, first_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+        item_position=0,
+    )
+    _, second_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+        item_position=1,
+    )
+    assert estimate == len(first_system_prompt or "") + len(first_prompt) + len(second_prompt) + 100
+
+
+def test_calculate_input_token_estimate_sequential_allows_custom_response_estimate(
+    monkeypatch,
+):
+    _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame(
+            [
+                {"questionnaire_item_id": 1, "question_content": "Q1"},
+                {"questionnaire_item_id": 2, "question_content": "Q2"},
+            ]
+        ),
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    default_estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+        questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+    )
+    custom_estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+        questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+        previous_response_token_estimate=50,
+    )
+
+    assert default_estimate - custom_estimate == 50
+
+
+def test_calculate_input_token_estimate_counts_none_system_prompt_as_zero(monkeypatch):
+    _install_fake_transformers(monkeypatch)
+    prompt = LLMPrompt(
+        questionnaire_source=pd.DataFrame([{"questionnaire_item_id": 1, "question_content": "Q"}]),
+        system_prompt=None,
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    )
+
+    estimate = prompt.calculate_input_token_estimate(
+        model_id="hf-test",
+        tokenizer_backend="transformers",
+        inference_type="generation",
+    )
+
+    _, rendered_prompt = prompt.get_prompt_for_questionnaire_type(inference_type="generation")
+    assert estimate == len(rendered_prompt)

@@ -32,8 +32,6 @@ from .utilities.constants import QuestionnairePresentation
 from .utilities.survey_objects import AnswerOptions, AnswerTexts, QuestionnaireItem
 from .utilities.utils import safe_format_with_regex
 
-# from transformers import AutoTokenizer
-
 
 class ResponseGenerationPreset(StrEnum):
     """Named response-generation methods supported by questionnaire loading."""
@@ -584,36 +582,151 @@ class LLMPrompt:
 
         return system_prompt, prompt
 
-    # Currently disallowed to allow lightweight import. This should be reenabled in the future.
-    # def calculate_input_token_estimate(
-    #     self, model_id: str, questionnaire_type: QuestionnairePresentation =
-    # QuestionnairePresentation.SINGLE_ITEM
-    # ) -> int:
-    #     """
-    #     Estimate the number of input tokens for the prompt, given a model and questionnaire type.
-    #     Remember that the model also has to have enough context length to fit its own response
-    #     in case of CONTEXT and ONE_PROMPT type.
+    def _get_token_counter(
+        self,
+        model_id: str,
+        tokenizer_backend: Literal["tiktoken", "transformers"],
+    ):
+        if tokenizer_backend == "tiktoken":
+            import tiktoken
 
-    #     Args:
-    #         model_id (str): Huggingface model id.
-    #         questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
+            encoding = tiktoken.encoding_for_model(model_id)
 
-    #     Returns:
-    #         int: Estimated number of input tokens.
-    #     """
-    #     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    #     system_prompt, prompt = self.get_prompt_for_questionnaire_type(
-    #         questionnaire_type=questionnaire_type
-    #     )
-    #     system_tokens = tokenizer.encode(system_prompt)
-    #     tokens = tokenizer.encode(prompt)
-    #     total_tokens = len(system_tokens) + len(tokens)
+            def count_tokens(text: str | None) -> int:
+                if text is None:
+                    return 0
+                return len(encoding.encode(text, disallowed_special=()))
 
-    #     return (
-    #         total_tokens
-    #         if questionnaire_type != QuestionnairePresentation.SEQUENTIAL
-    #         else len(total_tokens) * 3
-    #     )
+            return count_tokens
+
+        if tokenizer_backend == "transformers":
+            try:
+                from transformers import AutoTokenizer
+            except ImportError as exc:
+                raise ImportError(
+                    "Token estimation with tokenizer_backend='transformers' requires "
+                    "the optional 'transformers' package."
+                ) from exc
+
+            tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+            def count_tokens(text: str | None) -> int:
+                if text is None:
+                    return 0
+                return len(tokenizer.encode(text, add_special_tokens=False))
+
+            return count_tokens
+
+        raise ValueError("`tokenizer_backend` must be either 'tiktoken' or 'transformers'.")
+
+    @staticmethod
+    def _count_chat_input_tokens(
+        system_prompt: str | None,
+        prompt: str,
+        count_tokens,
+        tokenizer_backend: Literal["tiktoken", "transformers"],
+    ) -> int:
+        """Count chat message content with a small OpenAI chat wrapper estimate."""
+        message_count = 1 + (1 if system_prompt is not None else 0)
+        content_tokens = count_tokens(system_prompt) + count_tokens(prompt)
+        if tokenizer_backend == "tiktoken":
+            # OpenAI chat APIs add structural tokens around each message plus a reply cue.
+            return content_tokens + message_count * 3 + 3
+        return content_tokens
+
+    def calculate_input_token_estimate(
+        self,
+        model_id: str,
+        tokenizer_backend: Literal["tiktoken", "transformers"],
+        questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
+        inference_type: Literal["chat", "generation"] = "chat",
+        item_separator: str = "\n",
+        previous_response_token_estimate: int = 100,
+    ) -> int:
+        """Estimate the largest input-token context for a questionnaire prompt.
+
+        Args:
+            model_id (str): Model identifier for the selected tokenizer backend.
+            tokenizer_backend (str): Tokenizer backend, either "tiktoken" or "transformers".
+            questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
+            inference_type (str): If "chat", count chat message inputs. If "generation",
+                count the rendered base-model prompt.
+            item_separator (str): Separator used between items for battery prompts.
+            previous_response_token_estimate (int): Estimated tokens per previous assistant
+                answer in sequential presentation.
+
+        Returns:
+            int: Estimated largest input-token context for a single model request.
+        """
+        if inference_type not in {"chat", "generation"}:
+            raise ValueError("`inference_type` must be either 'chat' or 'generation'.")
+        if previous_response_token_estimate < 0:
+            raise ValueError("`previous_response_token_estimate` must be non-negative.")
+
+        count_tokens = self._get_token_counter(model_id, tokenizer_backend)
+
+        def count_prompt(system_prompt: str | None, prompt: str) -> int:
+            if inference_type == "generation":
+                return count_tokens(prompt)
+            return self._count_chat_input_tokens(
+                system_prompt,
+                prompt,
+                count_tokens,
+                tokenizer_backend,
+            )
+
+        if questionnaire_type == QuestionnairePresentation.SINGLE_ITEM:
+            return max(
+                count_prompt(
+                    *self.get_prompt_for_questionnaire_type(
+                        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
+                        item_position=item_position,
+                        inference_type=inference_type,
+                    )
+                )
+                for item_position in range(len(self._questions))
+            )
+
+        if questionnaire_type == QuestionnairePresentation.BATTERY:
+            return count_prompt(
+                *self.get_prompt_for_questionnaire_type(
+                    questionnaire_type=QuestionnairePresentation.BATTERY,
+                    item_position=0,
+                    item_separator=item_separator,
+                    inference_type=inference_type,
+                )
+            )
+
+        if questionnaire_type == QuestionnairePresentation.SEQUENTIAL:
+            prompts: list[str] = []
+            answer_count = max(len(self._questions) - 1, 0)
+            system_prompt: str | None = None
+            for item_position in range(len(self._questions)):
+                current_system_prompt, current_prompt = self.get_prompt_for_questionnaire_type(
+                    questionnaire_type=QuestionnairePresentation.SEQUENTIAL,
+                    item_position=item_position,
+                )
+                system_prompt = current_system_prompt
+                prompts.append(current_prompt)
+
+            if inference_type == "generation":
+                rendered_prompt = self.render_base_model_prompt(system_prompt, prompts)
+                return count_tokens(rendered_prompt) + (
+                    answer_count * previous_response_token_estimate
+                )
+
+            content_tokens = count_tokens(system_prompt) + sum(
+                count_tokens(prompt) for prompt in prompts
+            )
+            previous_answer_tokens = answer_count * previous_response_token_estimate
+            if tokenizer_backend == "tiktoken":
+                message_count = (
+                    len(prompts) + answer_count + (1 if system_prompt is not None else 0)
+                )
+                return content_tokens + previous_answer_tokens + message_count * 3 + 3
+            return content_tokens + previous_answer_tokens
+
+        raise ValueError(f"Unsupported questionnaire_type: {questionnaire_type}.")
 
     def get_questions(self) -> tuple[QuestionnaireItem, ...]:
         """
