@@ -4,11 +4,13 @@ import pandas as pd
 import pytest
 
 from qstn.inference.response_generation import (
+    ChoiceResponseGenerationMethod,
     JSONItem,
     JSONObject,
     JSONResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
     JSONVerbalizedDistribution,
+    LogprobResponseGenerationMethod,
 )
 from qstn.prompt_builder import LLMPrompt, generate_likert_options
 from qstn.utilities import placeholder
@@ -45,6 +47,215 @@ def test_load_questionnaire_format_from_csv_without_optional_columns(tmp_path):
     assert prompt.get_question(0).item_id == 9
     assert prompt.get_question(0).question_content is None
     assert prompt.get_question(0).question_stem is None
+
+
+def test_load_questionnaire_format_accepts_dataframe_python_lists():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": "risk",
+                "question_content": "Is this a risk or chance?",
+                "question_stem": "Please answer:",
+                "prefilled_response": "prefilled",
+                "answer_texts": [
+                    "RISIKO UEBERWIEGT",
+                    "EHER RISIKO",
+                    "WEDER NOCH",
+                    "EHER CHANCE",
+                    "CHANCE UEBERWIEGT",
+                ],
+                "answer_codes": ["1", "2", "3", "4", "5"],
+            }
+        ]
+    )
+
+    prompt = LLMPrompt(questionnaire_source=df)
+    question = prompt.get_question(0)
+
+    assert question.item_id == "risk"
+    assert question.question_stem == "Please answer:"
+    assert question.prefilled_response == "prefilled"
+    assert question.answer_options.answer_texts.full_answers == [
+        "1: RISIKO UEBERWIEGT",
+        "2: EHER RISIKO",
+        "3: WEDER NOCH",
+        "4: EHER CHANCE",
+        "5: CHANCE UEBERWIEGT",
+    ]
+
+
+def test_load_questionnaire_format_accepts_csv_python_list_strings(tmp_path):
+    csv_path = tmp_path / "questionnaire.csv"
+    pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": '["No", "Yes"]',
+                "answer_codes": '["0", "1"]',
+                "response_generation_method": "json_single",
+                "output_index_only": "True",
+            }
+        ]
+    ).to_csv(csv_path, index=False)
+
+    prompt = LLMPrompt(questionnaire_source=str(csv_path))
+    options = prompt.get_question(0).answer_options
+
+    assert options.answer_texts.full_answers == ["0: No", "1: Yes"]
+    assert isinstance(options.response_generation_method, JSONResponseGenerationMethod)
+    answer_item = options.response_generation_method.json_object.children[0]
+    assert isinstance(answer_item, JSONItem)
+    assert answer_item.constraints.enum == ["0", "1"]
+
+
+def test_load_questionnaire_format_generates_likert_with_inferred_n():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Maybe", "Yes"],
+                "likert_start_idx": 0,
+            }
+        ]
+    )
+
+    prompt = LLMPrompt(questionnaire_source=df)
+    options = prompt.get_question(0).answer_options
+
+    assert options.answer_texts.full_answers == ["0: No", "1: Maybe", "2: Yes"]
+
+
+def test_load_questionnaire_format_generates_likert_with_explicit_n_and_start_idx():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["Low", "High"],
+                "likert_n": 4,
+                "likert_only_from_to_scale": True,
+                "likert_start_idx": 2,
+                "scale_prompt_template": "Scale: {start} through {end}",
+            }
+        ]
+    )
+
+    prompt = LLMPrompt(questionnaire_source=df)
+    options = prompt.get_question(0).answer_options
+
+    assert options.create_options_str() == "Scale: 2: Low through 5: High"
+    assert options.answer_texts.full_answers == ["2: Low", "3", "4", "5: High"]
+
+
+def test_load_questionnaire_format_from_to_scale_requires_explicit_n():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["Low", "High"],
+                "likert_only_from_to_scale": True,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="likert_n"):
+        LLMPrompt(questionnaire_source=df)
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected_type"),
+    [
+        ("choice", ChoiceResponseGenerationMethod),
+        ("logprob", LogprobResponseGenerationMethod),
+        ("json_single", JSONResponseGenerationMethod),
+        ("json_reasoning", JSONResponseGenerationMethod),
+        ("json_distribution", JSONVerbalizedDistribution),
+    ],
+)
+def test_load_questionnaire_format_response_generation_presets(preset, expected_type):
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Yes"],
+                "response_generation_method": preset,
+                "output_index_only": True,
+            }
+        ]
+    )
+
+    prompt = LLMPrompt(questionnaire_source=df)
+    method = prompt.get_question(0).answer_options.response_generation_method
+
+    assert isinstance(method, expected_type)
+    assert method.output_index_only is True
+
+
+def test_load_questionnaire_format_rejects_invalid_python_list_string():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": "No|Yes",
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Python list literal"):
+        LLMPrompt(questionnaire_source=df)
+
+
+def test_load_questionnaire_format_rejects_non_python_bool_literal():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Yes"],
+                "likert_random_order": "true",
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="True or False"):
+        LLMPrompt(questionnaire_source=df)
+
+
+def test_load_questionnaire_format_rejects_invalid_likert_idx_type():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Yes"],
+                "likert_idx_type": "roman",
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="likert_idx_type"):
+        LLMPrompt(questionnaire_source=df)
+
+
+def test_load_questionnaire_format_rejects_mismatched_answer_texts_and_codes():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Yes"],
+                "answer_codes": ["1"],
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="same length"):
+        LLMPrompt(questionnaire_source=df)
 
 
 def test_prepare_prompt_other_combinations_and_randomized_order(monkeypatch):

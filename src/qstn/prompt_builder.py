@@ -3,12 +3,27 @@ import random
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from string import ascii_lowercase, ascii_uppercase
 from typing import Any, Literal, Self, overload
 
 import pandas as pd
 
+from ._questionnaire_loader import (
+    QuestionnaireLoaderColumn,
+    optional_bool,
+    optional_int,
+    optional_list,
+    optional_row_value,
+    optional_template,
+    row_has_value,
+)
 from .inference.response_generation import (
+    ChoiceResponseGenerationMethod,
+    JSONReasoningResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
+    JSONVerbalizedDistribution,
+    LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
     resolve_battery_response_generation_method,
 )
@@ -18,6 +33,17 @@ from .utilities.survey_objects import AnswerOptions, AnswerTexts, QuestionnaireI
 from .utilities.utils import safe_format_with_regex
 
 # from transformers import AutoTokenizer
+
+
+class ResponseGenerationPreset(StrEnum):
+    """Named response-generation methods supported by questionnaire loading."""
+
+    NONE = "none"
+    CHOICE = "choice"
+    LOGPROB = "logprob"
+    JSON_SINGLE = "json_single"
+    JSON_REASONING = "json_reasoning"
+    JSON_DISTRIBUTION = "json_distribution"
 
 
 @dataclass(frozen=True)
@@ -60,6 +86,222 @@ def messages_to_base_model_prompt(
     if template.assistant_prefix is not None:
         blocks.append(template.assistant_prefix)
     return template.separator.join(blocks)
+
+
+def _build_response_generation_method(
+    row: pd.Series,
+    item_id: Any,
+) -> ResponseGenerationMethod | None:
+    column = QuestionnaireLoaderColumn.RESPONSE_GENERATION_METHOD
+    value = optional_row_value(row, column)
+    if value is None:
+        return None
+    if isinstance(value, ResponseGenerationMethod):
+        return value
+
+    preset_value = str(value).strip().lower()
+    try:
+        preset = ResponseGenerationPreset(preset_value)
+    except ValueError as exc:
+        supported = ", ".join(preset.value for preset in ResponseGenerationPreset)
+        raise ValueError(
+            f"Unsupported response_generation_method '{value}' for questionnaire_item_id "
+            f"'{item_id}'. Supported presets are: {supported}."
+        ) from exc
+
+    if preset == ResponseGenerationPreset.NONE:
+        return None
+
+    output_index_only = optional_bool(
+        row,
+        QuestionnaireLoaderColumn.OUTPUT_INDEX_ONLY,
+        item_id,
+        default=False,
+    )
+    constrain_answer_options = optional_bool(
+        row,
+        QuestionnaireLoaderColumn.CONSTRAIN_ANSWER_OPTIONS,
+        item_id,
+        default=True,
+    )
+
+    if preset == ResponseGenerationPreset.CHOICE:
+        return ChoiceResponseGenerationMethod(
+            allowed_choices_template="{options}",
+            output_index_only=output_index_only,
+        )
+    if preset == ResponseGenerationPreset.LOGPROB:
+        return LogprobResponseGenerationMethod(
+            allowed_choices_template="{options}",
+            output_index_only=output_index_only,
+        )
+    if preset == ResponseGenerationPreset.JSON_SINGLE:
+        return JSONSingleResponseGenerationMethod(
+            output_index_only=output_index_only,
+            constrain_answer_options=constrain_answer_options,
+        )
+    if preset == ResponseGenerationPreset.JSON_REASONING:
+        return JSONReasoningResponseGenerationMethod(
+            output_index_only=output_index_only,
+            constrain_answer_options=constrain_answer_options,
+        )
+    if preset == ResponseGenerationPreset.JSON_DISTRIBUTION:
+        return JSONVerbalizedDistribution(output_index_only=output_index_only)
+
+    return None
+
+
+def _has_likert_config(row: pd.Series) -> bool:
+    return any(
+        row_has_value(row, column)
+        for column in QuestionnaireLoaderColumn
+        if column.value.startswith("likert_")
+    )
+
+
+def _build_answer_options_from_row(row: pd.Series, item_id: Any) -> AnswerOptions | None:
+    answer_texts = optional_list(row, QuestionnaireLoaderColumn.ANSWER_TEXTS, item_id)
+    answer_codes = optional_list(row, QuestionnaireLoaderColumn.ANSWER_CODES, item_id)
+    response_generation_method = _build_response_generation_method(row, item_id)
+    list_prompt_template = optional_template(
+        row,
+        QuestionnaireLoaderColumn.LIST_PROMPT_TEMPLATE,
+        prompt_templates.LIST_OPTIONS_DEFAULT,
+    )
+    scale_prompt_template = optional_template(
+        row,
+        QuestionnaireLoaderColumn.SCALE_PROMPT_TEMPLATE,
+        prompt_templates.SCALE_OPTIONS_DEFAULT,
+    )
+    index_answer_separator = optional_template(
+        row,
+        QuestionnaireLoaderColumn.INDEX_ANSWER_SEPARATOR,
+        ": ",
+    )
+    options_separator = optional_template(row, QuestionnaireLoaderColumn.OPTIONS_SEPARATOR, ", ")
+
+    if _has_likert_config(row):
+        only_from_to_scale = optional_bool(
+            row,
+            QuestionnaireLoaderColumn.LIKERT_ONLY_FROM_TO_SCALE,
+            item_id,
+            default=False,
+        )
+        explicit_n = optional_int(row, QuestionnaireLoaderColumn.LIKERT_N, item_id)
+        if explicit_n is None:
+            if only_from_to_scale:
+                raise ValueError(
+                    f"Column '{QuestionnaireLoaderColumn.LIKERT_N}' is required for "
+                    f"from-to Likert scales on questionnaire_item_id '{item_id}'."
+                )
+            if answer_texts is None:
+                raise ValueError(
+                    f"Column '{QuestionnaireLoaderColumn.LIKERT_N}' is required when "
+                    f"'{QuestionnaireLoaderColumn.ANSWER_TEXTS}' is missing for "
+                    f"questionnaire_item_id '{item_id}'."
+                )
+            n = len(answer_texts)
+        else:
+            n = explicit_n
+
+        idx_type = str(
+            optional_row_value(row, QuestionnaireLoaderColumn.LIKERT_IDX_TYPE, "integer")
+        )
+        if idx_type not in {"char_lower", "char_upper", "integer", "no_index"}:
+            raise ValueError(
+                f"Column '{QuestionnaireLoaderColumn.LIKERT_IDX_TYPE}' for "
+                f"questionnaire_item_id '{item_id}' must be one of: "
+                "char_lower, char_upper, integer, no_index."
+            )
+
+        return generate_likert_options(
+            n=n,
+            answer_texts=answer_texts,
+            only_from_to_scale=only_from_to_scale,
+            random_order=optional_bool(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_RANDOM_ORDER,
+                item_id,
+                default=False,
+            ),
+            reversed_order=optional_bool(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_REVERSED_ORDER,
+                item_id,
+                default=False,
+            ),
+            even_order=optional_bool(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_EVEN_ORDER,
+                item_id,
+                default=False,
+            ),
+            add_middle_category=optional_bool(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_ADD_MIDDLE_CATEGORY,
+                item_id,
+                default=False,
+            ),
+            str_middle_cat=str(
+                optional_row_value(
+                    row,
+                    QuestionnaireLoaderColumn.LIKERT_MIDDLE_CATEGORY,
+                    "Neutral",
+                )
+            ),
+            add_refusal=optional_bool(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_ADD_REFUSAL,
+                item_id,
+                default=False,
+            ),
+            refusal_code=str(
+                optional_row_value(row, QuestionnaireLoaderColumn.LIKERT_REFUSAL_CODE, "-99")
+            ),
+            start_idx=optional_int(
+                row,
+                QuestionnaireLoaderColumn.LIKERT_START_IDX,
+                item_id,
+                default=1,
+            ),
+            list_prompt_template=list_prompt_template,
+            scale_prompt_template=scale_prompt_template,
+            index_answer_separator=index_answer_separator,
+            options_separator=options_separator,
+            idx_type=idx_type,
+            response_generation_method=response_generation_method,
+        )
+
+    if answer_texts is None and answer_codes is None:
+        if response_generation_method is not None:
+            raise ValueError(
+                f"questionnaire_item_id '{item_id}' defines a response_generation_method "
+                "but no answer_texts or answer_codes."
+            )
+        return None
+
+    if (
+        answer_texts is not None
+        and answer_codes is not None
+        and len(answer_texts) != len(answer_codes)
+    ):
+        raise ValueError(
+            f"answer_texts and answer_codes must have the same length for "
+            f"questionnaire_item_id '{item_id}'."
+        )
+
+    answer_texts_object = AnswerTexts(
+        answer_texts=answer_texts,
+        indices=answer_codes,
+        index_answer_seperator=index_answer_separator,
+        option_seperators=options_separator,
+    )
+    return AnswerOptions(
+        answer_texts=answer_texts_object,
+        list_prompt_template=list_prompt_template,
+        scale_prompt_template=scale_prompt_template,
+        response_generation_method=response_generation_method,
+    )
 
 
 class LLMPrompt:
@@ -404,14 +646,15 @@ class LLMPrompt:
         return self._questions[position].item_id
 
     def load_questionnaire_format(self, questionnaire_source: str | pd.DataFrame) -> Self:
-        """
-        Load the questionnaire format from a CSV file or a pandas DataFrame.
+        """Load questionnaire items from a CSV file or pandas DataFrame.
 
-        The CSV or pd.Dataframe must have the columns: questionnaire_item_id, question_content
-        Optionally it can also have a question_stem.
+        The source must include `questionnaire_item_id`. It may also include question text,
+        stems, prefilled responses, answer option columns, Likert generation columns, and
+        simple response-generation presets. List-like columns must contain Python lists or
+        Python-list strings, for example `["No", "Yes"]`.
 
         Args:
-            questionnaire_source (str or pd.Dataframe): Path to a valid CSV file or pd.Dataframe.
+            questionnaire_source (str or pd.Dataframe): Path to a CSV file or a DataFrame.
 
         Returns:
             Self: The updated instance with loaded questions.
@@ -430,22 +673,23 @@ class LLMPrompt:
 
         for _, row in df.iterrows():
             questionnaire_item_id = row[constants.QUESTIONNAIRE_ITEM_ID]
-            # if constants.QUESTION in df.columns:
-            #     question = row[constants.QUESTION]
-            if constants.QUESTION_CONTENT in df.columns:
-                questionnaire_question_content = row[constants.QUESTION_CONTENT]
-            else:
-                questionnaire_question_content = None
-
-            if constants.QUESTION_STEM in df.columns:
-                question_stem = row[constants.QUESTION_STEM]
-            else:
-                question_stem = None
+            questionnaire_question_content = optional_row_value(
+                row,
+                constants.QUESTION_CONTENT,
+            )
+            question_stem = optional_row_value(row, constants.QUESTION_STEM)
+            prefilled_response = optional_row_value(
+                row,
+                QuestionnaireLoaderColumn.PREFILLED_RESPONSE,
+            )
+            answer_options = _build_answer_options_from_row(row, questionnaire_item_id)
 
             generated_questionnaire_question = QuestionnaireItem(
                 item_id=questionnaire_item_id,
                 question_content=questionnaire_question_content,
                 question_stem=question_stem,
+                answer_options=answer_options,
+                prefilled_response=prefilled_response,
             )
             questionnaire_questions.append(generated_questionnaire_question)
 
