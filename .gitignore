@@ -184,3 +184,4 @@ AGENTS.md
 
 # version file
 src/qstn/_version.py
+scripts/easy_test_runs.ipynb
