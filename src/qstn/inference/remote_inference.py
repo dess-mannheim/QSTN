@@ -18,7 +18,7 @@ from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
-from .utils import normalize_system_messages
+from .utils import InferenceMode, normalize_system_messages, validate_inference_mode
 
 logger = get_logger(__name__)
 
@@ -115,8 +115,10 @@ def run_openai_batch(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     print_progress: bool = True,
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    inference_mode = validate_inference_mode(inference_mode)
     normalized_system_messages = normalize_system_messages(
         system_messages=system_messages,
         batch_size=len(prompts),
@@ -144,6 +146,7 @@ def run_openai_batch(
         print_progress=print_progress,
         reasoning_start_token=reasoning_start_token,
         reasoning_end_token=reasoning_end_token,
+        inference_mode=inference_mode,
         **generation_kwargs,
     )
 
@@ -164,8 +167,10 @@ def run_openai_batch_conversation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     print_progress: bool = True,
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    inference_mode = validate_inference_mode(inference_mode)
     normalized_system_messages = normalize_system_messages(
         system_messages=system_messages,
         batch_size=len(prompts),
@@ -204,6 +209,7 @@ def run_openai_batch_conversation(
         print_progress=print_progress,
         reasoning_start_token=reasoning_start_token,
         reasoning_end_token=reasoning_end_token,
+        inference_mode=inference_mode,
         **generation_kwargs,
     )
 
@@ -222,28 +228,45 @@ def _run_async_in_thread(
     ) = None,
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs,
 ):
+    inference_mode = validate_inference_mode(inference_mode)
     logprob_config = _update_logprob_kwargs(response_generation_method, generation_kwargs)
 
-    sampling_params = _create_structured_output(
-        batch_size=len(batch_messages),
-        response_generation_method=response_generation_method,
-    )
-    coro = _run_api_batch_async(
-        client=client,
-        client_model_name=client_model_name,
-        batch_messages=batch_messages,
-        seeds=seeds,
-        concurrency_limit=concurrency_limit,
-        print_progress=print_progress,
-        response_generation_method=response_generation_method,
-        sampling_params=sampling_params,
-        logprob_config=logprob_config,
-        reasoning_start_token=reasoning_start_token,
-        reasoning_end_token=reasoning_end_token,
-        **generation_kwargs,
-    )
+    if inference_mode == "completion":
+        _validate_completion_response_generation_method(response_generation_method)
+        coro = _run_api_completion_batch_async(
+            client=client,
+            client_model_name=client_model_name,
+            batch_messages=batch_messages,
+            seeds=seeds,
+            concurrency_limit=concurrency_limit,
+            print_progress=print_progress,
+            logprob_config=logprob_config,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            **generation_kwargs,
+        )
+    else:
+        sampling_params = _create_structured_output(
+            batch_size=len(batch_messages),
+            response_generation_method=response_generation_method,
+        )
+        coro = _run_api_batch_async(
+            client=client,
+            client_model_name=client_model_name,
+            batch_messages=batch_messages,
+            seeds=seeds,
+            concurrency_limit=concurrency_limit,
+            print_progress=print_progress,
+            response_generation_method=response_generation_method,
+            sampling_params=sampling_params,
+            logprob_config=logprob_config,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            **generation_kwargs,
+        )
 
     runner = _get_or_create_runner(client)
     try:
@@ -252,6 +275,90 @@ def _run_async_in_thread(
         coro.close()
         raise
     return future.result()
+
+
+def _validate_completion_response_generation_method(
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
+) -> None:
+    """Reject structured-output methods unsupported by OpenAI completions."""
+    methods: list[ResponseGenerationMethod | None]
+    if response_generation_method is None:
+        methods = []
+    elif isinstance(response_generation_method, ResponseGenerationMethod):
+        methods = [response_generation_method]
+    else:
+        methods = list(response_generation_method)
+
+    unsupported = [
+        method
+        for method in methods
+        if isinstance(method, (JSONResponseGenerationMethod, ChoiceResponseGenerationMethod))
+    ]
+    if unsupported:
+        raise ValueError(
+            "OpenAI completion mode does not support JSON or strict choice response "
+            "generation methods. Use chat mode or local vLLM completion mode."
+        )
+
+
+async def _run_api_completion_batch_async(
+    client: AsyncOpenAI,
+    client_model_name: str,
+    batch_messages: list[list[dict[str, str]]],
+    seeds: list[int] = (),
+    concurrency_limit: int = 10,
+    print_progress: bool = True,
+    logprob_config: LogprobResponseGenerationMethod | None = None,
+    reasoning_start_token: str = "<think>",
+    reasoning_end_token: str = "</think>",
+    **generation_kwargs,
+) -> list[str]:
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    rendered_prompts = [messages[-1]["content"] for messages in batch_messages]
+
+    async def get_completion(prompt: str, seed: int, **generation_kwargs):
+        async with semaphore:
+            request_kwargs = {
+                "model": client_model_name,
+                "prompt": prompt,
+                "seed": seed,
+                **generation_kwargs,
+            }
+            return await client.completions.create(**request_kwargs)
+
+    tasks = [
+        get_completion(prompt, seed, **generation_kwargs)
+        for prompt, seed in zip(rendered_prompts, seeds)
+    ]
+    if print_progress:
+        responses = await tqdm_asyncio.gather(*tasks, total=len(tasks), desc="Generating responses")
+    else:
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+    final_results = []
+    reasoning_output = []
+    logprob_result = []
+    patterns = [(reasoning_start_token, reasoning_end_token)]
+
+    for response in responses:
+        if isinstance(response, Exception):
+            logger.warning("A request failed permanently after all retries: %s", response)
+            final_results.append(f"Error: {response}")
+            reasoning_output.append(None)
+            logprob_result.append(None)
+            continue
+
+        choice = response.choices[0]
+        final_answer, extracted_reasoning = parse_reasoning(choice.text, patterns=patterns)
+        final_results.append(final_answer)
+        reasoning_output.append(extracted_reasoning.strip() if extracted_reasoning else None)
+
+        if logprob_config and getattr(choice, "logprobs", None):
+            logprob_result.append(choice.logprobs)
+        else:
+            logprob_result.append(None)
+
+    return final_results, logprob_result, reasoning_output
 
 
 async def _run_api_batch_async(

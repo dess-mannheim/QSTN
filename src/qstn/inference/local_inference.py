@@ -17,27 +17,20 @@ from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
-from .utils import normalize_system_messages
+from .utils import InferenceMode, normalize_system_messages, validate_inference_mode
 
 logger = get_logger(__name__)
 
 
-def _run_vllm_chat_pipeline(
-    model: LLM,
-    batch_messages: list[list[dict[str, str]]],
+def _prepare_vllm_generation(
+    batch_size: int,
     response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     seed: int,
     print_progress: bool,
-    reasoning_start_token: str,
-    reasoning_end_token: str,
-    space_char: str,
-    **generation_kwargs: Any,
-) -> tuple[list[str], list[str], list[str]]:
-    """Run the shared vLLM chat pipeline for single and conversation batching."""
-    batch_size = len(batch_messages)
+    generation_kwargs: dict[str, Any],
+) -> tuple[list[SamplingParams], bool, dict[str, Any], LogprobResponseGenerationMethod | None]:
+    """Prepare shared vLLM sampling and execution options."""
     seeds = generate_seeds(seed, batch_size=batch_size)
-
-    logprob_result = None
     logprob_config = _update_logprob_kwargs(response_generation_method, generation_kwargs)
 
     # If users specify use_tqdm themselves, we use that flag instead.
@@ -54,22 +47,26 @@ def _run_vllm_chat_pipeline(
         )
         generation_kwargs.pop("sampling_params")
 
-    gen_kwargs, chat_kwargs = _split_kwargs(generation_kwargs)
-
+    gen_kwargs, call_kwargs = _split_kwargs(generation_kwargs)
     sampling_params_list = _create_sampling_params(
         batch_size=batch_size,
         seeds=seeds,
         response_generation_method=response_generation_method,
         **gen_kwargs,
     )
+    return sampling_params_list, print_progress, call_kwargs, logprob_config
 
-    outputs: list[RequestOutput] = model.chat(
-        batch_messages,
-        sampling_params=sampling_params_list,
-        use_tqdm=print_progress,
-        **chat_kwargs,
-    )
 
+def _finalize_vllm_outputs(
+    model: LLM,
+    outputs: list[RequestOutput],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
+    logprob_config: LogprobResponseGenerationMethod | None,
+    reasoning_start_token: str,
+    reasoning_end_token: str,
+    space_char: str,
+) -> tuple[list[str], list[str], list[str]]:
+    """Parse shared vLLM outputs into answer, logprob, and reasoning lists."""
     raw_reasonings, reasoning_outputs, plain_results = _extract_reasoning_and_answer(
         reasoning_start_token, reasoning_end_token, outputs
     )
@@ -90,6 +87,85 @@ def _run_vllm_chat_pipeline(
     return (plain_results, logprob_result, reasoning_outputs)
 
 
+def _run_vllm_chat_pipeline(
+    model: LLM,
+    batch_messages: list[list[dict[str, str]]],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
+    seed: int,
+    print_progress: bool,
+    reasoning_start_token: str,
+    reasoning_end_token: str,
+    space_char: str,
+    **generation_kwargs: Any,
+) -> tuple[list[str], list[str], list[str]]:
+    """Run the shared vLLM chat pipeline for single and conversation batching."""
+    sampling_params_list, print_progress, chat_kwargs, logprob_config = _prepare_vllm_generation(
+        batch_size=len(batch_messages),
+        response_generation_method=response_generation_method,
+        seed=seed,
+        print_progress=print_progress,
+        generation_kwargs=generation_kwargs,
+    )
+
+    outputs: list[RequestOutput] = model.chat(
+        batch_messages,
+        sampling_params=sampling_params_list,
+        use_tqdm=print_progress,
+        **chat_kwargs,
+    )
+
+    return _finalize_vllm_outputs(
+        model=model,
+        outputs=outputs,
+        response_generation_method=response_generation_method,
+        logprob_config=logprob_config,
+        reasoning_start_token=reasoning_start_token,
+        reasoning_end_token=reasoning_end_token,
+        space_char=space_char,
+    )
+
+
+def _run_vllm_completion_pipeline(
+    model: LLM,
+    batch_messages: list[list[dict[str, str]]],
+    response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
+    seed: int,
+    print_progress: bool,
+    reasoning_start_token: str,
+    reasoning_end_token: str,
+    space_char: str,
+    **generation_kwargs: Any,
+) -> tuple[list[str], list[str], list[str]]:
+    """Run vLLM completion generation for base models."""
+    sampling_params_list, print_progress, generate_kwargs, logprob_config = (
+        _prepare_vllm_generation(
+            batch_size=len(batch_messages),
+            response_generation_method=response_generation_method,
+            seed=seed,
+            print_progress=print_progress,
+            generation_kwargs=generation_kwargs,
+        )
+    )
+    rendered_prompts = [messages[-1]["content"] for messages in batch_messages]
+
+    outputs: list[RequestOutput] = model.generate(
+        rendered_prompts,
+        sampling_params=sampling_params_list,
+        use_tqdm=print_progress,
+        **generate_kwargs,
+    )
+
+    return _finalize_vllm_outputs(
+        model=model,
+        outputs=outputs,
+        response_generation_method=response_generation_method,
+        logprob_config=logprob_config,
+        reasoning_start_token=reasoning_start_token,
+        reasoning_end_token=reasoning_end_token,
+        space_char=space_char,
+    )
+
+
 def run_vllm_batch(
     model: LLM,
     system_messages: Sequence[str | None] | None = ("You are a helpful assistant.",),
@@ -104,8 +180,10 @@ def run_vllm_batch(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    inference_mode = validate_inference_mode(inference_mode)
     normalized_system_messages = normalize_system_messages(
         system_messages=system_messages,
         batch_size=len(prompts),
@@ -118,6 +196,19 @@ def run_vllm_batch(
         if system_message is not None:
             messages.insert(0, {"role": "system", "content": system_message})
         batch_messages.append(messages)
+
+    if inference_mode == "completion":
+        return _run_vllm_completion_pipeline(
+            model=model,
+            batch_messages=batch_messages,
+            response_generation_method=response_generation_method,
+            seed=seed,
+            print_progress=print_progress,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            space_char=space_char,
+            **generation_kwargs,
+        )
 
     return _run_vllm_chat_pipeline(
         model=model,
@@ -147,8 +238,10 @@ def run_vllm_batch_conversation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[str], list[str]]:
+    inference_mode = validate_inference_mode(inference_mode)
     normalized_system_messages = normalize_system_messages(
         system_messages=system_messages,
         batch_size=len(prompts),
@@ -174,6 +267,19 @@ def run_vllm_batch_conversation(
                 messages.append({"role": "assistant", "content": assistant_messages[i][j]})
 
         batch_messages.append(messages)
+
+    if inference_mode == "completion":
+        return _run_vllm_completion_pipeline(
+            model=model,
+            batch_messages=batch_messages,
+            response_generation_method=response_generation_method,
+            seed=seed,
+            print_progress=print_progress,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            space_char=space_char,
+            **generation_kwargs,
+        )
 
     return _run_vllm_chat_pipeline(
         model=model,

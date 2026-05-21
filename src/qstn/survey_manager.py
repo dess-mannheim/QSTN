@@ -73,6 +73,7 @@ from .inference.response_generation import (
     resolve_battery_response_generation_method,
 )
 from .inference.survey_inference import batch_generation, batch_turn_by_turn_generation
+from .inference.utils import InferenceMode
 from .logger import get_logger
 from .parser.llm_answer_parser import raw_responses
 from .prompt_builder import LLMPrompt, QuestionnairePresentation
@@ -162,6 +163,7 @@ def _run_batch_generation(
     print_conversation: bool,
     print_progress: bool,
     seed: int,
+    inference_mode: InferenceMode,
     **generation_kwargs: Any,
 ) -> tuple[list[str], list[Any], list[Any]]:
     """Thin wrapper around `batch_generation` with normalized optional outputs."""
@@ -175,6 +177,7 @@ def _run_batch_generation(
         print_conversation=print_conversation,
         print_progress=print_progress,
         seed=seed,
+        inference_mode=inference_mode,
         **generation_kwargs,
     )
     return _normalize_generation_outputs(
@@ -220,7 +223,7 @@ def _store_question_responses(
 
 
 def _prepare_single_item_batch(
-    current_batch: dict[int, LLMPrompt], i: int
+    current_batch: dict[int, LLMPrompt], i: int, inference_mode: InferenceMode = "chat"
 ) -> tuple[list[str | None], list[str], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and metadata for a single-item survey step."""
     system_messages, prompts = zip(
@@ -228,6 +231,7 @@ def _prepare_single_item_batch(
             questionnaire.get_prompt_for_questionnaire_type(
                 QuestionnairePresentation.SINGLE_ITEM,
                 questionnaire.get_question_item_id(i),
+                inference_type=("generation" if inference_mode == "completion" else "chat"),
             )
             for questionnaire in current_batch.values()
         ]
@@ -250,7 +254,10 @@ def _prepare_single_item_batch(
 
 
 def _prepare_battery_batch(
-    current_batch: dict[int, LLMPrompt], i: int, item_separator: str
+    current_batch: dict[int, LLMPrompt],
+    i: int,
+    item_separator: str,
+    inference_mode: InferenceMode = "chat",
 ) -> tuple[list[str | None], list[str], list[ResponseGenerationMethod | None]]:
     """Prepare messages and response-generation methods for battery mode."""
     system_messages, prompts = zip(
@@ -259,6 +266,7 @@ def _prepare_battery_batch(
                 QuestionnairePresentation.BATTERY,
                 questionnaire.get_question_item_id(i),
                 item_separator=item_separator,
+                inference_type=("generation" if inference_mode == "completion" else "chat"),
             )
             for questionnaire in current_batch.values()
         ]
@@ -337,6 +345,7 @@ def conduct_survey_single_item(
     n_save_step: int | None = None,
     intermediate_save_file: str | None = None,
     seed: int = 42,
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> list[InferenceResult]:
     """
@@ -357,8 +366,10 @@ def conduct_survey_single_item(
         intermediate_save_file (str, optional): Path to save intermediate results.
             Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
-        generation_kwargs: Additional generation parameters that will be given to vllm.chat(),
-            vllm.SamplingParams, or client.chat.completions.create().
+        inference_mode (str): Use "chat" for message-based models or
+            "completion" for base-model text generation. Defaults to "chat".
+        generation_kwargs: Additional generation parameters that will be given to vllm,
+            vllm.SamplingParams, or OpenAI-compatible generation calls.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and
@@ -385,7 +396,7 @@ def conduct_survey_single_item(
             prompts,
             questions,
             response_generation_methods,
-        ) = _prepare_single_item_batch(current_batch, i)
+        ) = _prepare_single_item_batch(current_batch, i, inference_mode)
 
         # TODO Implement Retrying for errors.
         # try:
@@ -399,6 +410,7 @@ def conduct_survey_single_item(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
         # except Exception as e:
@@ -505,6 +517,7 @@ def conduct_survey_battery(
     print_progress: bool = True,
     seed: int = 42,
     item_separator: str = "\n",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> list[InferenceResult]:
     """
@@ -525,9 +538,10 @@ def conduct_survey_battery(
             results. Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
         item_separator (str): The str that separates each question. Defaults to a newline.
+        inference_mode (str): Use "chat" for message-based models or
+            "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters that will be given
-            to vllm.chat(), vllm.SamplingParams, or
-            client.chat.completions.create().
+            to vllm, vllm.SamplingParams, or OpenAI-compatible generation calls.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and
@@ -550,7 +564,7 @@ def conduct_survey_battery(
             system_messages,
             prompts,
             response_generation_methods,
-        ) = _prepare_battery_batch(current_batch, i, item_separator)
+        ) = _prepare_battery_batch(current_batch, i, item_separator, inference_mode)
 
         # TODO Implement Retrying for errors.
         # try:
@@ -564,6 +578,7 @@ def conduct_survey_battery(
             print_conversation=print_conversation,
             print_progress=print_progress,
             seed=seed,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
         # except Exception as e:
@@ -608,6 +623,7 @@ def conduct_survey_sequential(
     n_save_step: int | None = None,
     intermediate_save_file: str | None = None,
     seed: int = 42,
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> list[InferenceResult]:
     """
@@ -629,9 +645,10 @@ def conduct_survey_sequential(
         intermediate_save_file (str, optional): Path to save intermediate
             results. Has to be provided if n_save_step.
         seed (int): Random seed for reproducibility. Defaults to 42.
+        inference_mode (str): Use "chat" for message-based models or
+            "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters that will be given
-            to vllm.chat(), vllm.SamplingParams, or
-            client.chat.completions.create().
+            to vllm, vllm.SamplingParams, or OpenAI-compatible generation calls.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and
@@ -724,19 +741,54 @@ def conduct_survey_sequential(
         needed_prompt_history = [prompt_history[survey_id] for survey_id in needed_survey_ids]
         needed_assistant_history = [assistant_history[survey_id] for survey_id in needed_survey_ids]
 
-        needed_output, logprobs, reasoning_output = batch_turn_by_turn_generation(
-            model=model,
-            system_messages=needed_system_messages,
-            prompts=needed_prompt_history,
-            assistant_messages=needed_assistant_history,
-            response_generation_method=needed_response_generation_methods,
-            client_model_name=client_model_name,
-            api_concurrency=api_concurrency,
-            print_conversation=print_conversation,
-            print_progress=print_progress,
-            seed=seed,
-            **generation_kwargs,
-        )
+        if inference_mode == "completion":
+            rendered_prompts = []
+            for (
+                survey_id,
+                system_message,
+                prompt_history_for_survey,
+                assistant_history_for_survey,
+            ) in zip(
+                needed_survey_ids,
+                needed_system_messages,
+                needed_prompt_history,
+                needed_assistant_history,
+            ):
+                rendered_prompts.append(
+                    llm_prompts[survey_id].render_base_model_prompt(
+                        system_message=system_message,
+                        prompts=prompt_history_for_survey,
+                        assistant_messages=assistant_history_for_survey,
+                    )
+                )
+            needed_output, logprobs, reasoning_output = _run_batch_generation(
+                model=model,
+                system_messages=[None] * needed_batch_size,
+                prompts=rendered_prompts,
+                response_generation_methods=needed_response_generation_methods,
+                client_model_name=client_model_name,
+                api_concurrency=api_concurrency,
+                print_conversation=print_conversation,
+                print_progress=print_progress,
+                seed=seed,
+                inference_mode=inference_mode,
+                **generation_kwargs,
+            )
+        else:
+            needed_output, logprobs, reasoning_output = batch_turn_by_turn_generation(
+                model=model,
+                system_messages=needed_system_messages,
+                prompts=needed_prompt_history,
+                assistant_messages=needed_assistant_history,
+                response_generation_method=needed_response_generation_methods,
+                client_model_name=client_model_name,
+                api_concurrency=api_concurrency,
+                print_conversation=print_conversation,
+                print_progress=print_progress,
+                seed=seed,
+                inference_mode=inference_mode,
+                **generation_kwargs,
+            )
 
         # Make sure that outputs are available
         if reasoning_output is None:

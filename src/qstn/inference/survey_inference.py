@@ -6,7 +6,7 @@ from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
 )
-from .utils import normalize_system_messages
+from .utils import InferenceMode, normalize_system_messages, validate_inference_mode
 
 logger = get_logger(__name__)
 
@@ -141,6 +141,7 @@ def batch_generation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs: Any,
 ) -> tuple:
     """
@@ -173,6 +174,8 @@ def batch_generation(
             fails.
         space_token (str): Special char to encode spaces in tokens ("Ġ" for
             most byte-pair tokenizers).
+        inference_mode (str): Use "chat" for message-based models or
+            "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters
 
     Returns:
@@ -186,6 +189,7 @@ def batch_generation(
         raise ImportError("You are trying to use OpenAI, but 'openai' is not installed.")
     if model_type != "LLM" and model_type != "AsyncOpenAI":
         raise ValueError(f"Unsupported model type: {type(model)}")
+    inference_mode = validate_inference_mode(inference_mode)
     random.seed(seed)
 
     normalized_system_messages = normalize_system_messages(
@@ -206,6 +210,7 @@ def batch_generation(
             reasoning_start_token=reasoning_start_token,
             reasoning_end_token=reasoning_end_token,
             space_char=space_char,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
     elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
@@ -220,6 +225,7 @@ def batch_generation(
             api_concurrency=api_concurrency,
             reasoning_start_token=reasoning_start_token,
             reasoning_end_token=reasoning_end_token,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
     else:
@@ -262,6 +268,7 @@ def batch_turn_by_turn_generation(
     reasoning_start_token: str = "<think>",
     reasoning_end_token: str = "</think>",
     space_char: str = "Ġ",
+    inference_mode: InferenceMode = "chat",
     **generation_kwargs,
 ) -> list[str]:
     """
@@ -299,6 +306,8 @@ def batch_turn_by_turn_generation(
             fails.
         space_token (str): Special char to encode spaces in tokens ("Ġ" for
             most byte-pair tokenizers).
+        inference_mode (str): Use "chat" for message-based models or
+            "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters.
 
     Returns:
@@ -312,6 +321,7 @@ def batch_turn_by_turn_generation(
         raise ImportError("You are trying to use OpenAI, but 'openai' is not installed.")
     elif model_type != "LLM" and model_type != "AsyncOpenAI":
         raise ValueError(f"Unsupported model type: {type(model)}")
+    inference_mode = validate_inference_mode(inference_mode)
     random.seed(seed)
 
     normalized_system_messages = normalize_system_messages(
@@ -333,6 +343,7 @@ def batch_turn_by_turn_generation(
             reasoning_start_token=reasoning_start_token,
             reasoning_end_token=reasoning_end_token,
             space_char=space_char,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
     elif HAS_OPENAI and isinstance(model, AsyncOpenAI):
@@ -346,6 +357,9 @@ def batch_turn_by_turn_generation(
             seed=seed,
             print_progress=print_progress,
             api_concurrency=api_concurrency,
+            reasoning_start_token=reasoning_start_token,
+            reasoning_end_token=reasoning_end_token,
+            inference_mode=inference_mode,
             **generation_kwargs,
         )
     else:

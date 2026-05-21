@@ -10,6 +10,7 @@ class DummyModel:
     def __init__(self, return_texts):
         self.return_texts = return_texts
         self.last_chat = None
+        self.last_generate = None
 
         # mimic a tokenizer with tokenize method for logprob test
         class Tokenizer:
@@ -26,6 +27,23 @@ class DummyModel:
             "kwargs": kwargs,
         }
         # return list of fake RequestOutput objects with text from return_texts
+        outputs = []
+        for txt in self.return_texts:
+
+            class Inner:
+                def __init__(self, text):
+                    self.outputs = [type("O", (), {"text": text, "logprobs": []})]
+
+            outputs.append(Inner(txt))
+        return outputs
+
+    def generate(self, prompts, sampling_params=None, use_tqdm=None, **kwargs):
+        self.last_generate = {
+            "prompts": prompts,
+            "sampling_params": sampling_params,
+            "use_tqdm": use_tqdm,
+            "kwargs": kwargs,
+        }
         outputs = []
         for txt in self.return_texts:
 
@@ -145,3 +163,33 @@ def test_run_vllm_batch_warns_for_sampling_params_and_respects_use_tqdm(monkeypa
     assert model.last_chat["use_tqdm"] is False
     assert model.last_chat["kwargs"] == {"custom_flag": True}
     assert model.last_chat["sampling_params"][0].temperature == 0.2
+
+
+def test_run_vllm_batch_completion_mode_uses_generate_with_exact_prompt():
+    model = DummyModel(["answer"])
+
+    out = run_vllm_batch(
+        model,
+        system_messages=["SYS"],
+        prompts=["Prompt"],
+        inference_mode="completion",
+        seed=123,
+    )
+
+    assert out[0] == ["answer"]
+    assert model.last_chat is None
+    assert model.last_generate["prompts"] == ["Prompt"]
+
+
+def test_run_vllm_batch_conversation_completion_mode_uses_final_prompt_text():
+    model = DummyModel(["next"])
+
+    run_vllm_batch_conversation(
+        model,
+        system_messages=[None],
+        prompts=[["p1", "p2"]],
+        assistant_messages=[["a1"]],
+        inference_mode="completion",
+    )
+
+    assert model.last_generate["prompts"] == ["p2"]

@@ -1,7 +1,8 @@
 import copy
 import random
 import warnings
-from dataclasses import replace
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from string import ascii_lowercase, ascii_uppercase
 from typing import Any, Literal, Self, overload
 
@@ -17,6 +18,48 @@ from .utilities.survey_objects import AnswerOptions, AnswerTexts, QuestionnaireI
 from .utilities.utils import safe_format_with_regex
 
 # from transformers import AutoTokenizer
+
+
+@dataclass(frozen=True)
+class BaseModelPromptTemplate:
+    """Template used to render chat-style turns for base-model prompts."""
+
+    user_prefix: str | None = "User:"
+    assistant_prefix: str | None = "Assistant:"
+    separator: str = "\n"
+    system_prefix: str | None = None
+
+
+def _render_prefixed(prefix: str | None, content: str) -> str:
+    """Render a single prompt block, preserving empty prefixes and content."""
+    if prefix is None:
+        return content
+    return f"{prefix}\n{content}"
+
+
+def messages_to_base_model_prompt(
+    messages: Sequence[dict[str, str]],
+    prompt_template: BaseModelPromptTemplate | None = None,
+) -> str:
+    """Render chat-style messages into a plain prompt for base models."""
+    template = prompt_template or BaseModelPromptTemplate()
+    blocks: list[str] = []
+
+    for message in messages:
+        role = message["role"]
+        content = message["content"]
+        if role == "system":
+            blocks.append(_render_prefixed(template.system_prefix, content))
+        elif role == "user":
+            blocks.append(_render_prefixed(template.user_prefix, content))
+        elif role == "assistant":
+            blocks.append(_render_prefixed(template.assistant_prefix, content))
+        else:
+            raise ValueError(f"Unsupported message role for base-model rendering: {role}")
+
+    if template.assistant_prefix is not None:
+        blocks.append(template.assistant_prefix)
+    return template.separator.join(blocks)
 
 
 class LLMPrompt:
@@ -87,6 +130,7 @@ class LLMPrompt:
 
         self.system_prompt: str | None = system_prompt
         self.prompt: str = prompt
+        self.base_model_prompt_template: BaseModelPromptTemplate | None = None
 
     def _check_valid_questionnaire(self, questionnaire_source: str | pd.DataFrame = None) -> bool:
         # No Object
@@ -118,12 +162,72 @@ class LLMPrompt:
         """
         return copy.deepcopy(self)
 
+    def set_base_model_prompt_template(
+        self,
+        template: BaseModelPromptTemplate | None = None,
+        user_prefix: str | None = "User:",
+        assistant_prefix: str | None = "Assistant:",
+        separator: str = "\n",
+        system_prefix: str | None = None,
+    ) -> Self:
+        """Set the template used when rendering prompts for base-model completion mode.
+
+        Args:
+            template (BaseModelPromptTemplate | None): Existing template object to store.
+            user_prefix (str | None): Prefix placed before each user turn.
+            assistant_prefix (str | None): Prefix placed before assistant turns and final cue.
+            separator (str): Text inserted between rendered conversation blocks.
+            system_prefix (str | None): Optional prefix placed before the system prompt.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+        """
+        if template is not None:
+            self.base_model_prompt_template = template
+        else:
+            self.base_model_prompt_template = BaseModelPromptTemplate(
+                user_prefix=user_prefix,
+                assistant_prefix=assistant_prefix,
+                separator=separator,
+                system_prefix=system_prefix,
+            )
+        return self
+
+    def render_base_model_prompt(
+        self,
+        system_message: str | None,
+        prompts: list[str],
+        assistant_messages: list[str] | None = None,
+    ) -> str:
+        """Render chat-style turns into the exact prompt used for base-model generation.
+
+        Args:
+            system_message (str | None): Optional system text to place before the turns.
+            prompts (list[str]): User turns to render.
+            assistant_messages (list[str] | None): Assistant history between user turns.
+
+        Returns:
+            str: Rendered base-model prompt.
+        """
+        messages = []
+        if system_message is not None:
+            messages.append({"role": "system", "content": system_message})
+
+        assistant_messages = assistant_messages or []
+        for index, prompt in enumerate(prompts):
+            messages.append({"role": "user", "content": prompt})
+            if index < len(assistant_messages):
+                messages.append({"role": "assistant", "content": assistant_messages[index]})
+
+        return messages_to_base_model_prompt(messages, self.base_model_prompt_template)
+
     def get_prompt_for_questionnaire_type(
         self,
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
         item_id: str | int | None = None,
         item_position: int | None = 0,
         item_separator: str = "\n",
+        inference_type: Literal["chat", "generation"] = "chat",
     ) -> tuple[str | None, str]:
         """
         Generate the full prompt for a given questionnaire presentation.
@@ -139,6 +243,8 @@ class LLMPrompt:
                 Defaults to the first question.
             item_separator (str): For QuestionnairePresentation.BATTERY decides the str
                 that seperates each question.
+            inference_type (str): If "chat", return system and user messages.
+                If "generation", return the exact rendered base-model prompt.
         Returns:
             Tuple(str | None, str): The first element corresponds to the system_prompt,
                 the second element to the prompt.
@@ -228,6 +334,11 @@ class LLMPrompt:
         else:
             system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
         prompt = safe_format_with_regex(self.prompt, format_dict)
+
+        if inference_type == "generation":
+            return None, self.render_base_model_prompt(system_prompt, [prompt])
+        if inference_type != "chat":
+            raise ValueError("`inference_type` must be either 'chat' or 'generation'.")
 
         return system_prompt, prompt
 

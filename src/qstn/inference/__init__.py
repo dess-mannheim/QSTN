@@ -17,6 +17,7 @@ from .survey_inference import (
     batch_generation,
     batch_turn_by_turn_generation,
 )
+from .utils import InferenceMode
 
 __all__ = [
     "batch_generation",
@@ -27,6 +28,7 @@ __all__ = [
     "utils",
     "HAS_OPENAI",
     "HAS_VLLM",
+    "InferenceMode",
     "ResponseGenerationMethod",
     "JSONResponseGenerationMethod",
     "ChoiceResponseGenerationMethod",

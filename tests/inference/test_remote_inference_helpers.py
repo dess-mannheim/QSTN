@@ -249,3 +249,50 @@ def test_run_openai_batch_conversation_reuses_same_loop_for_same_client():
 
     assert first_output == ["ok"] * 5
     assert second_output == ["ok"]
+
+
+def test_validate_completion_response_generation_rejects_structured_methods():
+    rgm = JSONResponseGenerationMethod(json_object=JSONObject(children=[JSONItem("a")]))
+
+    with pytest.raises(ValueError, match="completion mode does not support"):
+        remote_inference._validate_completion_response_generation_method(rgm)
+
+
+def test_api_completion_batch_uses_exact_prompts_and_parses_reasoning():
+    captured = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+
+            class Choice:
+                text = "<think>why</think>answer"
+                logprobs = None
+
+            class Response:
+                choices = [Choice()]
+
+            return Response()
+
+    class Client:
+        completions = Completions()
+
+    output, logprobs, reasoning = asyncio.run(
+        remote_inference._run_api_completion_batch_async(
+            client=Client(),
+            client_model_name="m",
+            batch_messages=[
+                [
+                    {"role": "system", "content": "SYS"},
+                    {"role": "user", "content": "p"},
+                ]
+            ],
+            seeds=[1],
+            print_progress=False,
+        )
+    )
+
+    assert captured["prompt"] == "p"
+    assert output == ["answer"]
+    assert logprobs == [None]
+    assert reasoning == ["why"]

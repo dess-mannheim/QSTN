@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from qstn.prompt_builder import LLMPrompt, generate_likert_options
+from qstn.prompt_builder import BaseModelPromptTemplate, LLMPrompt, generate_likert_options
 from qstn.utilities import placeholder
 from qstn.utilities.constants import QuestionnairePresentation
 from qstn.utilities.survey_objects import QuestionnaireItem
@@ -99,3 +99,78 @@ def test_load_questionnaire_format_rejects_empty_dataframe():
     with pytest.warns(UserWarning, match="provided Dataframe is empty"):
         with pytest.raises(ValueError, match="non empty DataFrame"):
             prompt.load_questionnaire_format(questionnaire_source=pd.DataFrame())
+
+
+def test_base_model_prompt_template_setter_is_fluent(mock_questionnaires):
+    prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
+
+    returned = prompt.set_base_model_prompt_template(
+        user_prefix="### Instruction:",
+        assistant_prefix="### Response:",
+        separator="\n---\n",
+    )
+
+    assert returned is prompt
+    assert prompt.base_model_prompt_template.user_prefix == "### Instruction:"
+    assert prompt.base_model_prompt_template.assistant_prefix == "### Response:"
+    assert prompt.base_model_prompt_template.separator == "\n---\n"
+
+
+def test_get_prompt_for_questionnaire_type_generation_returns_exact_base_model_prompt(
+    mock_questionnaires,
+):
+    prompt = LLMPrompt(
+        questionnaire_source=mock_questionnaires,
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    ).set_base_model_prompt_template(
+        user_prefix="Instruction:",
+        assistant_prefix="Response:",
+    )
+
+    system_message, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
+        item_position=0,
+        inference_type="generation",
+    )
+
+    assert system_message is None
+    assert rendered_prompt.startswith("SYS\nInstruction:")
+    assert "How do you feel about Red?" in rendered_prompt
+    assert rendered_prompt.endswith("Response:")
+
+
+def test_base_model_prompt_template_allows_none_prefixes(mock_questionnaires):
+    prompt = LLMPrompt(
+        questionnaire_source=mock_questionnaires,
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    ).set_base_model_prompt_template(
+        user_prefix=None,
+        assistant_prefix=None,
+        system_prefix=None,
+    )
+
+    _, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
+        item_position=0,
+        inference_type="generation",
+    )
+
+    assert rendered_prompt.startswith("SYS\nASK")
+    assert "User:" not in rendered_prompt
+    assert "Assistant:" not in rendered_prompt
+    assert not rendered_prompt.endswith("None")
+
+
+def test_base_model_prompt_template_setter_accepts_template_object(mock_questionnaires):
+    prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
+    template = BaseModelPromptTemplate(
+        user_prefix="Instruction:",
+        assistant_prefix="Response:",
+    )
+
+    returned = prompt.set_base_model_prompt_template(template)
+
+    assert returned is prompt
+    assert prompt.base_model_prompt_template is template
