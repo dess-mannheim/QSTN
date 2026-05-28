@@ -29,7 +29,7 @@ pip install qstn
 The full version can be installed with this command:
 
 ```bash
-pip install qstn[vllm]
+pip install "qstn[vllm]"
 ```
 
 You can also install this package from source:
