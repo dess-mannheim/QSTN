@@ -48,8 +48,8 @@ class ResponseGenerationPreset(StrEnum):
 class BaseModelPromptTemplate:
     """Template used to render chat-style turns for base-model prompts."""
 
-    user_prefix: str | None = "User:"
-    assistant_prefix: str | None = "Assistant:"
+    user_prefix: str | None = None
+    assistant_prefix: str | None = None
     separator: str = "\n"
     system_prefix: str | None = None
 
@@ -405,8 +405,8 @@ class LLMPrompt:
     def set_base_model_prompt_template(
         self,
         template: BaseModelPromptTemplate | None = None,
-        user_prefix: str | None = "User:",
-        assistant_prefix: str | None = "Assistant:",
+        user_prefix: str | None = None,
+        assistant_prefix: str | None = None,
         separator: str = "\n",
         system_prefix: str | None = None,
     ) -> Self:

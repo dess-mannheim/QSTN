@@ -119,6 +119,27 @@ def test_base_model_prompt_template_setter_is_fluent(mock_questionnaires):
     assert prompt.base_model_prompt_template.separator == "\n---\n"
 
 
+def test_generation_uses_plain_prompt_text_by_default(mock_questionnaires):
+    prompt = LLMPrompt(
+        questionnaire_source=mock_questionnaires,
+        system_prompt="SYS",
+        prompt="ASK {{QUESTION_PLACEHOLDER}}",
+    ).set_base_model_prompt_template()
+
+    system_message, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
+        item_position=0,
+        inference_type="generation",
+    )
+
+    assert system_message is None
+    assert rendered_prompt.startswith("SYS\nASK")
+    assert prompt.base_model_prompt_template.user_prefix is None
+    assert prompt.base_model_prompt_template.assistant_prefix is None
+    assert "User:" not in rendered_prompt
+    assert "Assistant:" not in rendered_prompt
+
+
 def test_get_prompt_for_questionnaire_type_generation_returns_exact_base_model_prompt(
     mock_questionnaires,
 ):

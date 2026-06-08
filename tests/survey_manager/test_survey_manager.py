@@ -81,7 +81,10 @@ def test_conduct_survey_sequential_uses_prefilled_response_without_api_call(
 def test_conduct_survey_sequential_completion_renders_history_before_inference(
     mock_questionnaires, mock_openai_client, monkeypatch
 ):
-    prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
+    prompt = LLMPrompt(questionnaire_source=mock_questionnaires).set_base_model_prompt_template(
+        user_prefix="User:",
+        assistant_prefix="Assistant:",
+    )
     captured_prompts: list[str] = []
 
     def fake_batch_generation(**kwargs):
