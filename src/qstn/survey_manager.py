@@ -237,7 +237,7 @@ def _prepare_single_item_batch(
             questionnaire.get_prompt_for_questionnaire_type(
                 QuestionnairePresentation.SINGLE_ITEM,
                 questionnaire.get_question_item_id(i),
-                inference_type=("generation" if inference_mode == "completion" else "chat"),
+                inference_mode=inference_mode,
             )
             for questionnaire in current_batch.values()
         ]
@@ -344,7 +344,7 @@ def _prepare_battery_batch(
                 QuestionnairePresentation.BATTERY,
                 questionnaire.get_question_item_id(i),
                 item_separator=item_separator,
-                inference_type=("generation" if inference_mode == "completion" else "chat"),
+                inference_mode=inference_mode,
             )
             for questionnaire in current_batch.values()
         ]
