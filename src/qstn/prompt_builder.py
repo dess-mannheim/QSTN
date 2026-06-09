@@ -874,7 +874,7 @@ class LLMPrompt:
         model_id: str,
         tokenizer_backend: Literal["tiktoken", "transformers"],
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
-        inference_type: Literal["chat", "generation"] = "chat",
+        inference_mode: InferenceMode = "chat",
         item_separator: str = "\n",
         previous_response_token_estimate: int = 100,
     ) -> int:
@@ -884,7 +884,7 @@ class LLMPrompt:
             model_id (str): Model identifier for the selected tokenizer backend.
             tokenizer_backend (str): Tokenizer backend, either "tiktoken" or "transformers".
             questionnaire_type (QuestionnairePresentation): Type of questionnaire prompt.
-            inference_type (str): If "chat", count chat message inputs. If "generation",
+            inference_mode (str): If "chat", count chat message inputs. If "generation",
                 count the rendered base-model prompt.
             item_separator (str): Separator used between items for battery prompts.
             previous_response_token_estimate (int): Estimated tokens per previous assistant
@@ -893,15 +893,15 @@ class LLMPrompt:
         Returns:
             int: Estimated largest input-token context for a single model request.
         """
-        if inference_type not in {"chat", "generation"}:
-            raise ValueError("`inference_type` must be either 'chat' or 'generation'.")
+        if inference_mode not in {"chat", "completion"}:
+            raise ValueError("`inference_mode` must be either 'chat' or 'completion'.")
         if previous_response_token_estimate < 0:
             raise ValueError("`previous_response_token_estimate` must be non-negative.")
 
         count_tokens = self._get_token_counter(model_id, tokenizer_backend)
 
         def count_prompt(system_prompt: str | None, prompt: str) -> int:
-            if inference_type == "generation":
+            if inference_mode == "completion":
                 return count_tokens(prompt)
             return self._count_chat_input_tokens(
                 system_prompt,
@@ -916,7 +916,7 @@ class LLMPrompt:
                     *self.get_prompt_for_questionnaire_type(
                         questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
                         item_position=item_position,
-                        inference_type=inference_type,
+                        inference_mode=inference_mode,
                     )
                 )
                 for item_position in range(len(self._questions))
@@ -928,7 +928,7 @@ class LLMPrompt:
                     questionnaire_type=QuestionnairePresentation.BATTERY,
                     item_position=0,
                     item_separator=item_separator,
-                    inference_type=inference_type,
+                    inference_mode=inference_mode,
                 )
             )
 
@@ -944,7 +944,7 @@ class LLMPrompt:
                 system_prompt = current_system_prompt
                 prompts.append(current_prompt)
 
-            if inference_type == "generation":
+            if inference_mode == "completion":
                 rendered_prompt = self.render_base_model_prompt(system_prompt, prompts)
                 return count_tokens(rendered_prompt) + (
                     answer_count * previous_response_token_estimate
