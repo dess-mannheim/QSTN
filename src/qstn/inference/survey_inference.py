@@ -2,6 +2,12 @@ import random
 from typing import TYPE_CHECKING, Any
 
 from ..logger import get_logger, tqdm_write
+from .multimodal import (
+    BatchPromptContent,
+    ConversationPromptContent,
+    validate_conversation_prompt_content_inference_mode,
+    validate_prompt_content_inference_mode,
+)
 from .response_generation import (
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
@@ -38,7 +44,7 @@ except ImportError:
 
 def _print_conversation(
     system_messages: list[str | None],
-    prompts: list[str],
+    prompts: BatchPromptContent | ConversationPromptContent,
     assistant_messages: list[str] | None,
     plain_results: list[str],
     reasoning_output: list[str],
@@ -128,7 +134,7 @@ def _print_conversation(
 def batch_generation(
     model: LLM | AsyncOpenAI,  # pyright: ignore[reportInvalidTypeForm]
     system_messages: list[str | None] | None = ("You are a helpful assistant.",),
-    prompts: list[str] = ("Hi there! What is your name?",),
+    prompts: BatchPromptContent = ("Hi there! What is your name?",),
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
     ) = None,
@@ -156,7 +162,8 @@ def batch_generation(
     Args:
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
-        prompts (List(str)): User prompts to generate responses for.
+        prompts: User prompts. Each request may be a string or an ordered sequence
+            of string and ImageInput blocks.
         response_generation_method (
             ResponseGenerationMethod or List(ResponseGenerationMethod), optional
         ): Configuration for structured output.
@@ -196,6 +203,7 @@ def batch_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    validate_prompt_content_inference_mode(inference_mode, prompts)
     logger.debug("Generating %s responses with %s backend.", len(prompts), model_type)
 
     # Inference
@@ -249,7 +257,7 @@ def batch_generation(
 def batch_turn_by_turn_generation(
     model: LLM | AsyncOpenAI,  # type: ignore
     system_messages: list[str | None] | None = ("You are a helpful assistant.",),
-    prompts: list[list[str]] = (
+    prompts: ConversationPromptContent = (
         (
             "Hi there! What is your name?",
             "Interesting",
@@ -284,8 +292,8 @@ def batch_turn_by_turn_generation(
     Args:
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
-        prompts (List(List(str))): User prompts to generate responses for. Can
-            include multiple requests per system prompt.
+        prompts: User prompts grouped by conversation. Each turn may be a string
+            or an ordered sequence of string and ImageInput blocks.
         assistant_messages (List(List(str)), optional): Prefilled assistant
             responses. For example, if the first list contains one entry, the
             first assistant turn is prefilled and not inferred.
@@ -328,6 +336,7 @@ def batch_turn_by_turn_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    validate_conversation_prompt_content_inference_mode(inference_mode, prompts)
     logger.debug("Generating %s conversations with %s backend.", len(prompts), model_type)
 
     # Inference
@@ -378,88 +387,3 @@ def batch_turn_by_turn_generation(
         )
 
     return (plain_results, logprob_result, reasoning_outputs)
-
-
-# def batch_decoding(
-#     model: Union[LLM, AsyncOpenAI],
-#     prompts: List[str] = ["Hi there! What is your name?"],
-#     stop_tokens: List[str] = ["\nA:"],
-#     structured_output_options: Optional[
-#         Union[ResponseGenerationMethod, List[ResponseGenerationMethod]]
-#     ] = None,
-#     seed: int = 42,
-#     client_model_name: Optional[str] = None,
-#     api_concurrency: int = 10,
-#     print_conversation: bool = False,
-#     print_progress: bool = True,
-#     **generation_kwargs: Any,
-# ):
-#     """
-#     Generate responses for a batch of prompts.
-
-#     Handles both vLLM and OpenAI API generation with support for:
-#     - Structured output (JSON or choice format)
-#     - Conversation printing
-#     - Progress tracking
-#     - Concurrent API requests
-
-#     Args:
-#         model: vLLM model or AsyncOpenAI client
-#         system_messages: System prompts for each conversation
-#         prompts: User prompts to generate responses for
-#         structured_output_options: Configuration for structured output
-#         seed: Random seed for reproducibility
-#         client_model_name: Model name when using OpenAI API
-#         api_concurrency: Max concurrent API requests
-#         print_conversation: If True, prints conversations
-#         print_progress: If True, shows progress bar
-#         **generation_kwargs: Additional generation parameters
-
-#     Returns:
-#         List[str]: Generated responses
-#     """
-#     random.seed(seed)
-
-#     batch_size: int = len(prompts)
-
-#     seeds = _generate_seeds(seed, batch_size=batch_size)
-
-#     if isinstance(model, LLM):
-#         sampling_params_list = _create_sampling_params(
-#             batch_size=batch_size,
-#             seeds=seeds,
-#             structured_output_options=structured_output_options,
-#             stop_tokens=stop_tokens,
-#             **generation_kwargs,
-#         )
-#         outputs: List[RequestOutput] = model.generate(
-#             prompts,
-#             sampling_params=sampling_params_list,
-#             use_tqdm=print_progress,
-#         )
-#         result = [output.outputs[0].text for output in outputs]
-
-#     else:
-#         result = _run_async_in_thread(
-#             client=model,
-#             client_model_name=client_model_name,
-#             batch_messages=prompts,
-#             seeds=seeds,
-#             concurrency_limit=api_concurrency,
-#             structured_output_options=structured_output_options,
-#             **generation_kwargs,
-#         )
-
-#     # TODO add argument to specify how many conversations should be printed.
-#     # The base argument should be reasonable.
-#     if print_conversation:
-#         conversation_print = "Conversation:"
-#         for prompt, answer in zip(prompts, result):
-#             round_print = (
-#                 f"{conversation_print}\nUser Message:\n{prompt}"
-#                 f"\nGenerated Message\n{answer}"
-#             )
-#             print(round_print, flush=True)
-#             break
-
-#     return result

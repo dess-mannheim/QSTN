@@ -68,6 +68,12 @@ import pandas as pd
 from openai import AsyncOpenAI
 from tqdm.auto import tqdm
 
+from .inference.multimodal import (
+    ImageInput,
+    PromptContent,
+    PromptContentBlock,
+    validate_conversation_prompt_content_inference_mode,
+)
 from .inference.response_generation import (
     ResponseGenerationMethod,
     resolve_battery_response_generation_method,
@@ -156,7 +162,7 @@ def _validate_lengths_against_expected(
 def _run_batch_generation(
     model: Union["LLM", AsyncOpenAI],
     system_messages: list[str | None],
-    prompts: list[str],
+    prompts: list[PromptContent],
     response_generation_methods: list[ResponseGenerationMethod] | None,
     client_model_name: str | None,
     api_concurrency: int,
@@ -251,6 +257,78 @@ def _prepare_single_item_batch(
     ]
 
     return list(system_messages), list(prompts), questions, response_generation_methods
+
+
+def _combine_prompt_and_images(
+    prompt: str,
+    images: tuple[ImageInput, ...],
+) -> PromptContent:
+    """Return plain text unchanged or append its ordered image blocks."""
+    if not images:
+        return prompt
+    return (prompt, *images)
+
+
+def _prepare_single_item_content(
+    current_batch: dict[int, LLMPrompt],
+    i: int,
+    prompts: list[str],
+) -> list[PromptContent]:
+    """Attach global and current-item images to each single-item prompt."""
+    return [
+        _combine_prompt_and_images(
+            prompt,
+            questionnaire.get_images(item_id=questionnaire.get_question_item_id(i)),
+        )
+        for questionnaire, prompt in zip(current_batch.values(), prompts)
+    ]
+
+
+def _prepare_battery_prompt_content(
+    current_batch: dict[int, LLMPrompt],
+    prompts: list[str],
+    item_separator: str,
+) -> list[PromptContent]:
+    """Interleave each battery question with its assigned images."""
+    batch_content: list[PromptContent] = []
+
+    for questionnaire, prompt in zip(current_batch.values(), prompts):
+        global_images = questionnaire.get_images()
+        item_images = [
+            questionnaire.get_images(item_id=question.item_id, include_global=False)
+            for question in questionnaire.questions
+        ]
+        if not global_images and not any(item_images):
+            batch_content.append(prompt)
+            continue
+
+        question_prompts = [
+            questionnaire.generate_question_prompt(question) for question in questionnaire.questions
+        ]
+        all_questions = item_separator.join(question_prompts)
+        if prompt.count(all_questions) != 1:
+            raise ValueError(
+                "Image-bearing battery prompts must contain the rendered questionnaire "
+                "items exactly once via the question placeholder."
+            )
+        prefix, suffix = prompt.split(all_questions, maxsplit=1)
+
+        content: list[PromptContentBlock] = []
+        if prefix:
+            content.append(prefix)
+        content.extend(global_images)
+        for index, (question, question_prompt, images) in enumerate(
+            zip(questionnaire.questions, question_prompts, item_images)
+        ):
+            separator = item_separator if index else ""
+            content.append(f"{separator}Questionnaire item {question.item_id}\n{question_prompt}")
+            content.extend(images)
+        if suffix:
+            content.append(suffix)
+
+        batch_content.append(tuple(content))
+
+    return batch_content
 
 
 def _prepare_battery_batch(
@@ -397,13 +475,14 @@ def conduct_survey_single_item(
             questions,
             response_generation_methods,
         ) = _prepare_single_item_batch(current_batch, i, inference_mode)
+        prompt_content = _prepare_single_item_content(current_batch, i, prompts)
 
         # TODO Implement Retrying for errors.
         # try:
         output, logprobs, reasoning_output = _run_batch_generation(
             model=model,
             system_messages=system_messages,
-            prompts=prompts,
+            prompts=prompt_content,
             response_generation_methods=response_generation_methods,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
@@ -565,13 +644,14 @@ def conduct_survey_battery(
             prompts,
             response_generation_methods,
         ) = _prepare_battery_batch(current_batch, i, item_separator, inference_mode)
+        prompt_content = _prepare_battery_prompt_content(current_batch, prompts, item_separator)
 
         # TODO Implement Retrying for errors.
         # try:
         output, logprobs, reasoning_output = _run_batch_generation(
             model=model,
             system_messages=system_messages,
-            prompts=prompts,
+            prompts=prompt_content,
             response_generation_methods=response_generation_methods,
             client_model_name=client_model_name,
             api_concurrency=api_concurrency,
@@ -661,7 +741,7 @@ def conduct_survey_sequential(
 
     question_llm_response = _initialize_question_response_pairs(llm_prompts)
 
-    prompt_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
+    prompt_history: dict[int, list[PromptContent]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
     assistant_history: dict[int, list[str]] = {idx: [] for idx, _ in enumerate(llm_prompts)}
     logger.info(
         "Starting sequential survey for %s questionnaires and %s steps.",
@@ -691,7 +771,12 @@ def conduct_survey_sequential(
         )
 
         for survey_id, prompt in zip(current_survey_ids, prompts):
-            prompt_history[survey_id].append(prompt)
+            questionnaire = current_batch[survey_id]
+            images = questionnaire.get_images(
+                item_id=questionnaire.get_question_item_id(i),
+                include_global=(i == 0),
+            )
+            prompt_history[survey_id].append(_combine_prompt_and_images(prompt, images))
 
         prefilled_by_position: dict[int, str] = {}
         needed_survey_ids: list[int] = []
@@ -740,6 +825,7 @@ def conduct_survey_sequential(
 
         needed_prompt_history = [prompt_history[survey_id] for survey_id in needed_survey_ids]
         needed_assistant_history = [assistant_history[survey_id] for survey_id in needed_survey_ids]
+        validate_conversation_prompt_content_inference_mode(inference_mode, needed_prompt_history)
 
         if inference_mode == "completion":
             rendered_prompts = []

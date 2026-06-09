@@ -18,6 +18,7 @@ from ._questionnaire_loader import (
     optional_template,
     row_has_value,
 )
+from .inference.multimodal import ImageInput, ImageSource, normalize_images
 from .inference.response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -360,6 +361,8 @@ class LLMPrompt:
         random.seed(seed)
 
         self._questions: list[QuestionnaireItem] = []
+        self._images: tuple[ImageInput, ...] = ()
+        self._item_images: dict[Any, tuple[ImageInput, ...]] = {}
 
         if self._check_valid_questionnaire(questionnaire_source):
             self.load_questionnaire_format(questionnaire_source=questionnaire_source)
@@ -401,6 +404,89 @@ class LLMPrompt:
             LLMQuestionnaire: A deep copy of the current object.
         """
         return copy.deepcopy(self)
+
+    def add_image(self, image: ImageSource, *, item_id: Any = None) -> Self:
+        """Add an image globally or to one questionnaire item.
+
+        Args:
+            image: Image input, URL, data URL, or local image path.
+            item_id: Questionnaire item receiving the image. If omitted, the image
+                applies to the full prompt.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+        """
+        normalized_image = normalize_images([image])[0]
+        if item_id is None:
+            self._images = (*self._images, normalized_image)
+            return self
+
+        self._validate_image_item_id(item_id)
+        self._item_images[item_id] = (*self._item_images.get(item_id, ()), normalized_image)
+        return self
+
+    def set_images(
+        self,
+        images: Sequence[ImageSource],
+        *,
+        item_id: Any = None,
+    ) -> Self:
+        """Replace global images or the images for one questionnaire item.
+
+        Args:
+            images: Images, URLs, data URLs, or local image paths to store.
+            item_id: Questionnaire item receiving the images. If omitted, replaces
+                prompt-wide images.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+        """
+        normalized_image_inputs = normalize_images(images)
+        if item_id is None:
+            self._images = normalized_image_inputs
+            return self
+
+        self._validate_image_item_id(item_id)
+        if normalized_image_inputs:
+            self._item_images[item_id] = normalized_image_inputs
+        else:
+            self._item_images.pop(item_id, None)
+        return self
+
+    def get_images(
+        self,
+        *,
+        item_id: Any = None,
+        include_global: bool = True,
+    ) -> tuple[ImageInput, ...]:
+        """Return prompt-wide and optionally item-specific images.
+
+        Args:
+            item_id: Questionnaire item whose images should be included.
+            include_global: Whether prompt-wide images should be returned first.
+
+        Returns:
+            tuple[ImageInput, ...]: Immutable image collection.
+        """
+        global_images = self._images if include_global else ()
+        if item_id is None:
+            return global_images
+        self._validate_image_item_id(item_id)
+        return (*global_images, *self._item_images.get(item_id, ()))
+
+    def _validate_image_item_id(self, item_id: Any) -> None:
+        if item_id not in {question.item_id for question in self._questions}:
+            raise ValueError(
+                f"Cannot attach images: questionnaire item '{item_id}' does not exist."
+            )
+
+    def _drop_stale_item_images(self) -> None:
+        valid_item_ids = {question.item_id for question in self._questions}
+        self._item_images = {
+            item_id: images
+            for item_id, images in self._item_images.items()
+            if item_id in valid_item_ids
+        }
 
     def set_base_model_prompt_template(
         self,
@@ -653,7 +739,7 @@ class LLMPrompt:
                 count the rendered base-model prompt.
             item_separator (str): Separator used between items for battery prompts.
             previous_response_token_estimate (int): Estimated tokens per previous assistant
-                answer in sequential presentation.
+                answer in sequential presentation. Image tokens are not included in the estimate.
 
         Returns:
             int: Estimated largest input-token context for a single model request.
@@ -749,10 +835,12 @@ class LLMPrompt:
     def replace_question(self, position: int, questionnaire_item: QuestionnaireItem) -> None:
         """Replace the question at a given index."""
         self._questions[position] = questionnaire_item
+        self._drop_stale_item_images()
 
     def remove_question(self, position: int) -> None:
         """Remove the question at a given index."""
         del self._questions[position]
+        self._drop_stale_item_images()
 
     def get_question_item_id(self, position: int) -> Any:
         """Return the questionnaire item id at a given index."""
@@ -807,6 +895,7 @@ class LLMPrompt:
             questionnaire_questions.append(generated_questionnaire_question)
 
         self._questions = questionnaire_questions
+        self._drop_stale_item_images()
         return self
 
     # TODO Item order could be given by ids

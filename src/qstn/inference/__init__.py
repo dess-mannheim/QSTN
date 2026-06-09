@@ -1,6 +1,7 @@
 """Public exports for inference helpers and response generation methods."""
 
-from . import dynamic_pydantic, response_generation, survey_inference, utils
+from . import dynamic_pydantic, multimodal, response_generation, survey_inference, utils
+from .multimodal import ImageInput
 from .response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -23,12 +24,14 @@ __all__ = [
     "batch_generation",
     "batch_turn_by_turn_generation",
     "dynamic_pydantic",
+    "multimodal",
     "response_generation",
     "survey_inference",
     "utils",
     "HAS_OPENAI",
     "HAS_VLLM",
     "InferenceMode",
+    "ImageInput",
     "ResponseGenerationMethod",
     "JSONResponseGenerationMethod",
     "ChoiceResponseGenerationMethod",

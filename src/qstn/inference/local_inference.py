@@ -10,6 +10,13 @@ from vllm.sampling_params import StructuredOutputsParams  # pyright: ignore[repo
 from ..logger import get_logger
 from ..utilities.utils import _make_cache_key, generate_seeds
 from .dynamic_pydantic import build_pydantic_model_from_json_object
+from .multimodal import (
+    BatchPromptContent,
+    ConversationPromptContent,
+    build_user_content,
+    validate_conversation_prompt_content_inference_mode,
+    validate_prompt_content_inference_mode,
+)
 from .reasoning_parser import parse_reasoning
 from .response_generation import (
     ChoiceResponseGenerationMethod,
@@ -89,7 +96,7 @@ def _finalize_vllm_outputs(
 
 def _run_vllm_chat_pipeline(
     model: LLM,
-    batch_messages: list[list[dict[str, str]]],
+    batch_messages: list[list[dict[str, Any]]],
     response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     seed: int,
     print_progress: bool,
@@ -127,7 +134,7 @@ def _run_vllm_chat_pipeline(
 
 def _run_vllm_completion_pipeline(
     model: LLM,
-    batch_messages: list[list[dict[str, str]]],
+    batch_messages: list[list[dict[str, Any]]],
     response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     seed: int,
     print_progress: bool,
@@ -169,7 +176,7 @@ def _run_vllm_completion_pipeline(
 def run_vllm_batch(
     model: LLM,
     system_messages: Sequence[str | None] | None = ("You are a helpful assistant.",),
-    prompts: Sequence[str] = ("Hi there! What is your name?",),
+    prompts: BatchPromptContent = ("Hi there! What is your name?",),
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
     ) = None,
@@ -188,11 +195,13 @@ def run_vllm_batch(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    validate_prompt_content_inference_mode(inference_mode, prompts)
 
     # Prepare batch of messages
-    batch_messages: list[list[dict[str, str]]] = []
+    batch_messages: list[list[dict[str, Any]]] = []
     for system_message, prompt in zip(normalized_system_messages, prompts):
-        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
+        user_content = build_user_content(prompt)
+        messages: list[dict[str, Any]] = [{"role": "user", "content": user_content}]
         if system_message is not None:
             messages.insert(0, {"role": "system", "content": system_message})
         batch_messages.append(messages)
@@ -226,7 +235,7 @@ def run_vllm_batch(
 def run_vllm_batch_conversation(
     model: LLM,
     system_messages: Sequence[str | None] | None = ("You are a helpful assistant.",),
-    prompts: Sequence[Sequence[str]] = (("Hi there! What is your name?",),),
+    prompts: ConversationPromptContent = (("Hi there! What is your name?",),),
     assistant_messages: Sequence[Sequence[str]] = (),
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
@@ -246,6 +255,7 @@ def run_vllm_batch_conversation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
+    validate_conversation_prompt_content_inference_mode(inference_mode, prompts)
 
     batch_messages = []
     batch_size = len(normalized_system_messages)
@@ -262,7 +272,12 @@ def run_vllm_batch_conversation(
         num_assistant_msgs = len(assistant_messages[i])
 
         for j in range(num_user_msgs):
-            messages.append({"role": "user", "content": prompts[i][j]})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": build_user_content(prompts[i][j]),
+                }
+            )
             if j < num_assistant_msgs:
                 messages.append({"role": "assistant", "content": assistant_messages[i][j]})
 
