@@ -129,7 +129,7 @@ def test_generation_uses_plain_prompt_text_by_default(mock_questionnaires):
     system_message, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
         questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
         item_position=0,
-        inference_type="generation",
+        inference_mode="completion",
     )
 
     assert system_message is None
@@ -155,7 +155,7 @@ def test_get_prompt_for_questionnaire_type_generation_returns_exact_base_model_p
     system_message, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
         questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
         item_position=0,
-        inference_type="generation",
+        inference_mode="completion",
     )
 
     assert system_message is None
@@ -178,7 +178,7 @@ def test_base_model_prompt_template_allows_none_prefixes(mock_questionnaires):
     _, rendered_prompt = prompt.get_prompt_for_questionnaire_type(
         questionnaire_type=QuestionnairePresentation.SINGLE_ITEM,
         item_position=0,
-        inference_type="generation",
+        inference_mode="completion",
     )
 
     assert rendered_prompt.startswith("SYS\nASK")
@@ -430,8 +430,8 @@ def test_calculate_input_token_estimate_counts_none_system_prompt_as_zero(monkey
     estimate = prompt.calculate_input_token_estimate(
         model_id="hf-test",
         tokenizer_backend="transformers",
-        inference_type="generation",
+        inference_mode="completion",
     )
 
-    _, rendered_prompt = prompt.get_prompt_for_questionnaire_type(inference_type="generation")
+    _, rendered_prompt = prompt.get_prompt_for_questionnaire_type(inference_mode="completion")
     assert estimate == len(rendered_prompt)
