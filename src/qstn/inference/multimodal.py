@@ -11,15 +11,6 @@ from urllib.parse import urlparse
 
 from .utils import InferenceMode
 
-SUPPORTED_IMAGE_MIME_TYPES = frozenset(
-    {
-        "image/gif",
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-    }
-)
-
 
 @dataclass(frozen=True)
 class ImageInput:
@@ -51,7 +42,7 @@ class ImageInput:
         path = Path(self.source).expanduser()
         if not path.is_file():
             raise ValueError(f"Image path does not exist or is not a file: {path}")
-        _get_supported_mime_type(path)
+        _get_image_mime_type(path)
 
     def to_url(self) -> str:
         """Return a backend-compatible URL or base64 data URL."""
@@ -60,7 +51,7 @@ class ImageInput:
             return source
 
         path = Path(self.source).expanduser()
-        mime_type = _get_supported_mime_type(path)
+        mime_type = _get_image_mime_type(path)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
 
@@ -74,7 +65,7 @@ type ConversationPromptContent = Sequence[Sequence[PromptContent]]
 
 
 def coerce_image_input(image: ImageSource) -> ImageInput:
-    """Normalize a supported image value to ImageInput."""
+    """Normalize an image value to ImageInput."""
     if isinstance(image, ImageInput):
         return image
     if isinstance(image, (str, Path)):
@@ -104,22 +95,57 @@ def normalize_prompt_content(content: PromptContent) -> str | tuple[PromptConten
     return blocks
 
 
-def validate_prompt_content_inference_mode(
-    inference_mode: InferenceMode,
-    prompts: Sequence[PromptContent],
-) -> None:
-    """Reject structured prompt content for plain-text completion inference."""
-    if inference_mode == "completion" and any(not isinstance(prompt, str) for prompt in prompts):
-        raise ValueError("Structured prompt content is supported only when inference_mode='chat'.")
+def combine_prompt_content(
+    text: str,
+    images: Sequence[ImageInput],
+) -> PromptContent:
+    """Return plain text unchanged or append ordered image blocks."""
+    if not images:
+        return text
+    return (text, *images)
 
 
-def validate_conversation_prompt_content_inference_mode(
+def prompt_content_text(content: PromptContent) -> str:
+    """Return model-visible text while excluding image payloads."""
+    normalized = normalize_prompt_content(content)
+    if isinstance(normalized, str):
+        return normalized
+    return "".join(block if isinstance(block, str) else (block.label or "") for block in normalized)
+
+
+def format_prompt_content(content: PromptContent) -> str:
+    """Render prompt content as a readable text preview."""
+    normalized = normalize_prompt_content(content)
+    if isinstance(normalized, str):
+        return normalized
+
+    rendered: list[str] = []
+    for block in normalized:
+        if isinstance(block, str):
+            rendered.append(block)
+            continue
+
+        source = str(block.source)
+        if source.startswith("data:"):
+            source = f"{source.partition(',')[0]},..."
+        marker = f"[Image: {block.label or 'unlabelled'} | {source}]"
+        if rendered and rendered[-1] and not rendered[-1].endswith("\n"):
+            rendered.append("\n")
+        rendered.append(marker)
+        rendered.append("\n")
+
+    if rendered and rendered[-1] == "\n":
+        rendered.pop()
+    return "".join(rendered)
+
+
+def validate_text_only_completion_prompts(
     inference_mode: InferenceMode,
-    prompts: ConversationPromptContent,
+    *prompt_groups: Sequence[PromptContent],
 ) -> None:
-    """Reject structured conversation turns for plain-text completion inference."""
+    """Require every completion prompt to be plain text."""
     if inference_mode == "completion" and any(
-        not isinstance(prompt, str) for conversation in prompts for prompt in conversation
+        not isinstance(prompt, str) for prompts in prompt_groups for prompt in prompts
     ):
         raise ValueError("Structured prompt content is supported only when inference_mode='chat'.")
 
@@ -161,11 +187,8 @@ def _validate_image_data_url(source: str) -> None:
 
     metadata = header.removeprefix("data:").split(";")
     media_type = metadata[0].lower()
-    if media_type not in SUPPORTED_IMAGE_MIME_TYPES:
-        raise ValueError(
-            f"Unsupported image MIME type '{media_type}'. Supported types are: "
-            f"{', '.join(sorted(SUPPORTED_IMAGE_MIME_TYPES))}."
-        )
+    if not media_type.startswith("image/"):
+        raise ValueError("Image data URLs must use an image MIME type (`image/*`).")
     if "base64" not in metadata[1:]:
         raise ValueError("Image data URLs must contain base64-encoded data.")
     try:
@@ -174,11 +197,8 @@ def _validate_image_data_url(source: str) -> None:
         raise ValueError("Image data URLs must contain valid base64 data.") from exc
 
 
-def _get_supported_mime_type(path: Path) -> str:
+def _get_image_mime_type(path: Path) -> str:
     mime_type, _ = mimetypes.guess_type(path.name)
-    if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
-        raise ValueError(
-            f"Unsupported image file type for '{path}'. Supported MIME types are: "
-            f"{', '.join(sorted(SUPPORTED_IMAGE_MIME_TYPES))}."
-        )
+    if mime_type is None or not mime_type.startswith("image/"):
+        raise ValueError(f"Could not determine an image MIME type for '{path}'.")
     return mime_type

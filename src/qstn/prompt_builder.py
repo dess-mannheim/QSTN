@@ -19,7 +19,16 @@ from ._questionnaire_loader import (
     optional_template,
     row_has_value,
 )
-from .inference.multimodal import ImageInput, ImageSource, normalize_images
+from .inference.multimodal import (
+    ImageInput,
+    ImageSource,
+    PromptContent,
+    PromptContentBlock,
+    combine_prompt_content,
+    format_prompt_content,
+    normalize_images,
+    prompt_content_text,
+)
 from .inference.response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -696,6 +705,156 @@ class LLMPrompt:
 
         return messages_to_base_model_prompt(messages, self.base_model_prompt_template)
 
+    def _resolve_prompt_question(
+        self,
+        item_id: str | int | None,
+        item_position: int | None,
+    ) -> tuple[QuestionnaireItem, int]:
+        """Resolve the reference question and its position."""
+        question_map = {question.item_id: question for question in self._questions}
+        if item_id is not None:
+            if item_id not in question_map:
+                raise ValueError("item_id does not exist.")
+            question_item = question_map[item_id]
+            position = next(
+                index
+                for index, question in enumerate(self._questions)
+                if question.item_id == item_id
+            )
+            return question_item, position
+
+        if item_position is None or item_position >= len(self._questions):
+            raise ValueError("item_order_id is bigger than the number of questions")
+        return self._questions[item_position], item_position
+
+    def _build_item_prompt_format(
+        self,
+        question_item: QuestionnaireItem,
+    ) -> dict[str, str]:
+        """Build placeholder values for single-item and sequential prompts."""
+        question = self.generate_question_prompt(question_item)
+        if question_item.answer_options is None:
+            options = ""
+            automatic_output_instructions = ""
+        else:
+            options = question_item.answer_options.create_options_str()
+            response_method = question_item.answer_options.response_generation_method
+            automatic_output_instructions = (
+                response_method.get_automatic_prompt() if response_method is not None else ""
+            )
+
+        return {
+            placeholder.PROMPT_QUESTIONS: question,
+            placeholder.PROMPT_OPTIONS: options,
+            placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
+        }
+
+    def _build_battery_prompt_format(
+        self,
+        reference_item_position: int,
+        item_separator: str,
+    ) -> tuple[dict[str, str], list[str]]:
+        """Build placeholder values and rendered questions for battery prompts."""
+        rendered_questions: list[str] = []
+        for question in self._questions:
+            question_prompt = self.generate_question_prompt(question)
+            options = (
+                question.answer_options.create_options_str()
+                if question.answer_options is not None
+                else ""
+            )
+            rendered_questions.append(
+                safe_format_with_regex(
+                    question_prompt,
+                    {placeholder.PROMPT_OPTIONS: options},
+                )
+            )
+
+        reference_question = self._questions[reference_item_position]
+        options = (
+            reference_question.answer_options.create_options_str()
+            if reference_question.answer_options is not None
+            else ""
+        )
+        response_method = resolve_battery_response_generation_method(
+            questions=list(self._questions),
+            item_position=reference_item_position,
+        )
+        automatic_output_instructions = (
+            response_method.get_automatic_prompt() if response_method is not None else ""
+        )
+
+        return (
+            {
+                placeholder.PROMPT_QUESTIONS: item_separator.join(rendered_questions),
+                placeholder.PROMPT_OPTIONS: options,
+                placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
+            },
+            rendered_questions,
+        )
+
+    def _render_prompt_templates(
+        self,
+        format_dict: dict[str, str],
+    ) -> tuple[str | None, str]:
+        """Render the configured system and user prompt templates."""
+        system_prompt = (
+            None
+            if self.system_prompt is None
+            else safe_format_with_regex(self.system_prompt, format_dict)
+        )
+        return system_prompt, safe_format_with_regex(self.prompt, format_dict)
+
+    def _build_battery_prompt_content(
+        self,
+        prompt: str,
+        rendered_questions: list[str],
+        item_separator: str,
+    ) -> PromptContent:
+        """Interleave the exact rendered questions with their assigned images."""
+        global_images = self.get_images()
+        item_images = [
+            self.get_images(item_id=question.item_id, include_global=False)
+            for question in self._questions
+        ]
+        if not global_images and not any(item_images):
+            return prompt
+
+        rendered_questionnaire = item_separator.join(rendered_questions)
+        if prompt.count(rendered_questionnaire) != 1:
+            raise ValueError(
+                "Image-bearing battery prompts must contain the rendered questionnaire "
+                "items exactly once via the question placeholder."
+            )
+        prefix, suffix = prompt.split(rendered_questionnaire, maxsplit=1)
+
+        blocks: list[PromptContentBlock] = []
+        if prefix:
+            blocks.append(prefix)
+        blocks.extend(global_images)
+        for index, (question_text, images) in enumerate(zip(rendered_questions, item_images)):
+            separator = item_separator if index else ""
+            blocks.append(f"{separator}{question_text}")
+            blocks.extend(images)
+        if suffix:
+            blocks.append(suffix)
+        return tuple(blocks)
+
+    def _finalize_rendered_prompt(
+        self,
+        system_prompt: str | None,
+        prompt_content: PromptContent,
+        inference_mode: InferenceMode,
+    ) -> tuple[str | None, PromptContent]:
+        """Finalize chat or completion output after prompt construction."""
+        if inference_mode == "completion":
+            if not isinstance(prompt_content, str):
+                raise ValueError("Image-bearing prompts are supported only in chat mode.")
+            return None, self.render_base_model_prompt(system_prompt, [prompt_content])
+        if inference_mode != "chat":
+            raise ValueError("`inference_mode` must be either 'chat' or 'completion'.")
+        return system_prompt, prompt_content
+
     def get_prompt_for_questionnaire_type(
         self,
         questionnaire_type: QuestionnairePresentation = QuestionnairePresentation.SINGLE_ITEM,
@@ -703,119 +862,63 @@ class LLMPrompt:
         item_position: int | None = 0,
         item_separator: str = "\n",
         inference_mode: InferenceMode = "chat",
-    ) -> tuple[str | None, str]:
-        """
-        Generate the full prompt for a given questionnaire presentation.
+    ) -> tuple[str | None, PromptContent]:
+        """Generate the full prompt for a questionnaire presentation.
 
         Args:
-            quesitonnaire_type (QuestionnairePresentation):
-                The type of questionnaire prompt to generate.
-            item_id (str):
-                The id of the questionnaire_item that should be shown.
-                If both item_id and item_position are provided, only item_id is considered.
-            item_position (int): The question at that position will be shown.
-                If both item_id and item_position are provided, only item_id is considered.
-                Defaults to the first question.
-            item_separator (str): For QuestionnairePresentation.BATTERY decides the str
-                that seperates each question.
-            inference_mode (str): If "chat", return system and user messages.
-                If "completion", return the exact rendered base-model prompt.
+            questionnaire_type: Presentation mode used to render the questionnaire.
+            item_id: Questionnaire item ID used for item-specific presentations.
+                If supplied, it takes precedence over item_position.
+            item_position: Questionnaire position used when item_id is omitted.
+            item_separator: Text separating rendered questions in battery mode.
+            inference_mode: Return chat content or a rendered completion prompt.
+
         Returns:
-            Tuple(str | None, str): The first element corresponds to the system_prompt,
-                the second element to the prompt.
+            The system prompt and user content. Image-free user content remains a
+            string; image-bearing chat content is returned as ordered text and
+            ImageInput blocks.
+
+        Raises:
+            ValueError: If the requested item, presentation, or inference mode is
+                invalid, or images are used with completion mode.
         """
-        options = ""
-        automatic_output_instructions = ""
+        question_item, reference_item_position = self._resolve_prompt_question(
+            item_id,
+            item_position,
+        )
 
-        question_map = {question.item_id: question for question in self._questions}
-        reference_item_position = item_position
-        if item_id:
-            question_item = question_map[item_id]
-            reference_item_position = next(
-                i for i, question in enumerate(self._questions) if question.item_id == item_id
-            )
-        elif item_id and item_id not in question_map.keys():
-            raise ValueError("item_id does not exist.")
-        elif item_position >= len(self._questions):
-            raise ValueError("item_order_id is bigger than the number of questions")
-        else:
-            question_item = self._questions[item_position]
-
-        if (
-            questionnaire_type == QuestionnairePresentation.SINGLE_ITEM
-            or questionnaire_type == QuestionnairePresentation.SEQUENTIAL
-        ):
-
-            question = self.generate_question_prompt(question_item)
-
-            if question_item.answer_options:
-                options = question_item.answer_options.create_options_str()
-
-                rgm = question_item.answer_options.response_generation_method
-                if rgm is None:  # by default, no response generation method is required
-                    automatic_output_instructions = ""
-                else:
-                    automatic_output_instructions: str = rgm.get_automatic_prompt()
-            else:
-                options = ""
-                automatic_output_instructions = ""
-
-            format_dict = {
-                placeholder.PROMPT_QUESTIONS: question,
-                placeholder.PROMPT_OPTIONS: options,
-                placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
-            }
-
+        rendered_questions: list[str] = []
+        if questionnaire_type in {
+            QuestionnairePresentation.SINGLE_ITEM,
+            QuestionnairePresentation.SEQUENTIAL,
+        }:
+            format_dict = self._build_item_prompt_format(question_item)
         elif questionnaire_type == QuestionnairePresentation.BATTERY:
-            all_questions: list[str] = []
-            for question in self._questions:
-                current_question_prompt = self.generate_question_prompt(question)
-
-                if question.answer_options:
-                    options = question.answer_options.create_options_str()
-                else:
-                    options = ""
-                format_dict = {
-                    placeholder.PROMPT_OPTIONS: options,
-                }
-                current_question_prompt = safe_format_with_regex(
-                    current_question_prompt, format_dict
-                )
-                all_questions.append(current_question_prompt)
-
-            all_questions_str = item_separator.join(all_questions)
-            if question_item.answer_options:
-                options = question_item.answer_options.create_options_str()
-            else:
-                options = ""
-
-            rgm = resolve_battery_response_generation_method(
-                questions=list(self._questions),
-                item_position=reference_item_position,
+            format_dict, rendered_questions = self._build_battery_prompt_format(
+                reference_item_position,
+                item_separator,
             )
-            if rgm is None:  # by default, no response generation method is required
-                automatic_output_instructions = ""
-            else:
-                automatic_output_instructions = rgm.get_automatic_prompt()
-
-            format_dict = {
-                placeholder.PROMPT_QUESTIONS: all_questions_str,
-                placeholder.PROMPT_OPTIONS: options,
-                placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
-            }
-
-        if self.system_prompt is None:
-            system_prompt = None
         else:
-            system_prompt = safe_format_with_regex(self.system_prompt, format_dict)
-        prompt = safe_format_with_regex(self.prompt, format_dict)
+            raise ValueError(f"Unsupported questionnaire_type: {questionnaire_type}.")
 
-        if inference_mode == "completion":
-            return None, self.render_base_model_prompt(system_prompt, [prompt])
-        if inference_mode != "chat":
-            raise ValueError("`inference_mode` must be either 'chat' or 'completion'.")
+        system_prompt, prompt = self._render_prompt_templates(format_dict)
+        if questionnaire_type == QuestionnairePresentation.BATTERY:
+            prompt_content = self._build_battery_prompt_content(
+                prompt,
+                rendered_questions,
+                item_separator,
+            )
+        else:
+            prompt_content = combine_prompt_content(
+                prompt,
+                self.get_images(item_id=question_item.item_id),
+            )
 
-        return system_prompt, prompt
+        return self._finalize_rendered_prompt(
+            system_prompt,
+            prompt_content,
+            inference_mode,
+        )
 
     def _get_token_counter(
         self,
@@ -857,13 +960,13 @@ class LLMPrompt:
     @staticmethod
     def _count_chat_input_tokens(
         system_prompt: str | None,
-        prompt: str,
+        prompt: PromptContent,
         count_tokens,
         tokenizer_backend: Literal["tiktoken", "transformers"],
     ) -> int:
         """Count chat message content with a small OpenAI chat wrapper estimate."""
         message_count = 1 + (1 if system_prompt is not None else 0)
-        content_tokens = count_tokens(system_prompt) + count_tokens(prompt)
+        content_tokens = count_tokens(system_prompt) + count_tokens(prompt_content_text(prompt))
         if tokenizer_backend == "tiktoken":
             # OpenAI chat APIs add structural tokens around each message plus a reply cue.
             return content_tokens + message_count * 3 + 3
@@ -900,9 +1003,10 @@ class LLMPrompt:
 
         count_tokens = self._get_token_counter(model_id, tokenizer_backend)
 
-        def count_prompt(system_prompt: str | None, prompt: str) -> int:
+        def count_prompt(system_prompt: str | None, prompt: PromptContent) -> int:
+            prompt_text = prompt_content_text(prompt)
             if inference_mode == "completion":
-                return count_tokens(prompt)
+                return count_tokens(prompt_text)
             return self._count_chat_input_tokens(
                 system_prompt,
                 prompt,
@@ -933,7 +1037,7 @@ class LLMPrompt:
             )
 
         if questionnaire_type == QuestionnairePresentation.SEQUENTIAL:
-            prompts: list[str] = []
+            prompts: list[PromptContent] = []
             answer_count = max(len(self._questions) - 1, 0)
             system_prompt: str | None = None
             for item_position in range(len(self._questions)):
@@ -945,13 +1049,16 @@ class LLMPrompt:
                 prompts.append(current_prompt)
 
             if inference_mode == "completion":
-                rendered_prompt = self.render_base_model_prompt(system_prompt, prompts)
+                rendered_prompt = self.render_base_model_prompt(
+                    system_prompt,
+                    [prompt_content_text(prompt) for prompt in prompts],
+                )
                 return count_tokens(rendered_prompt) + (
                     answer_count * previous_response_token_estimate
                 )
 
             content_tokens = count_tokens(system_prompt) + sum(
-                count_tokens(prompt) for prompt in prompts
+                count_tokens(prompt_content_text(prompt)) for prompt in prompts
             )
             previous_answer_tokens = answer_count * previous_response_token_estimate
             if tokenizer_backend == "tiktoken":
@@ -1206,7 +1313,9 @@ class LLMPrompt:
             questionnaire_type=QuestionnairePresentation.BATTERY
         )
         sys_str: str = f"=== SYSTEM_PROMPT ===\n{sys_prompt}"
-        prompt_str: str = f"=== USER_PROMPT_WITH_ALL_QUESTIONS ===\n{prompt}"
+        prompt_str: str = (
+            "=== USER_PROMPT_WITH_ALL_QUESTIONS ===\n" f"{format_prompt_content(prompt)}"
+        )
 
         full_str: str = f"{name_str}\n{sys_str}\n{prompt_str}"
         return full_str

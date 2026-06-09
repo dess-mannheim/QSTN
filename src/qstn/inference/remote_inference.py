@@ -15,8 +15,7 @@ from .multimodal import (
     BatchPromptContent,
     ConversationPromptContent,
     build_user_content,
-    validate_conversation_prompt_content_inference_mode,
-    validate_prompt_content_inference_mode,
+    validate_text_only_completion_prompts,
 )
 from .reasoning_parser import parse_reasoning
 from .response_generation import (
@@ -130,7 +129,7 @@ def run_openai_batch(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
-    validate_prompt_content_inference_mode(inference_mode, prompts)
+    validate_text_only_completion_prompts(inference_mode, prompts)
 
     # Prepare batch of messages
     batch_messages: list[list[dict[str, Any]]] = []
@@ -184,7 +183,7 @@ def run_openai_batch_conversation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
-    validate_conversation_prompt_content_inference_mode(inference_mode, prompts)
+    validate_text_only_completion_prompts(inference_mode, *prompts)
 
     batch_messages = []
     batch_size = len(normalized_system_messages)

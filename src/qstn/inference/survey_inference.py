@@ -5,8 +5,7 @@ from ..logger import get_logger, tqdm_write
 from .multimodal import (
     BatchPromptContent,
     ConversationPromptContent,
-    validate_conversation_prompt_content_inference_mode,
-    validate_prompt_content_inference_mode,
+    validate_text_only_completion_prompts,
 )
 from .response_generation import (
     LogprobResponseGenerationMethod,
@@ -203,7 +202,7 @@ def batch_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
-    validate_prompt_content_inference_mode(inference_mode, prompts)
+    validate_text_only_completion_prompts(inference_mode, prompts)
     logger.debug("Generating %s responses with %s backend.", len(prompts), model_type)
 
     # Inference
@@ -336,7 +335,7 @@ def batch_turn_by_turn_generation(
         system_messages=system_messages,
         batch_size=len(prompts),
     )
-    validate_conversation_prompt_content_inference_mode(inference_mode, prompts)
+    validate_text_only_completion_prompts(inference_mode, *prompts)
     logger.debug("Generating %s conversations with %s backend.", len(prompts), model_type)
 
     # Inference
