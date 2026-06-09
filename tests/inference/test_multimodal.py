@@ -9,6 +9,7 @@ from qstn.inference.multimodal import (
     ImageInput,
     build_user_content,
     normalize_prompt_content,
+    validate_text_only_completion_prompts,
 )
 
 
@@ -42,7 +43,7 @@ def test_image_input_supports_urls_data_urls_and_local_files(tmp_path):
     "source, match",
     [
         ("", "must not be empty"),
-        ("data:text/plain;base64,aGVsbG8=", "Unsupported image MIME"),
+        ("data:text/plain;base64,aGVsbG8=", "must use an image MIME type"),
         ("data:image/png;base64,", "non-empty payload"),
         ("data:image/png,aGVsbG8=", "base64-encoded"),
         ("data:image/png;base64,not-base64", "valid base64"),
@@ -54,11 +55,22 @@ def test_image_input_rejects_invalid_sources(source, match):
         ImageInput(source)
 
 
-def test_image_input_rejects_unsupported_local_type(tmp_path):
+def test_image_input_accepts_backend_specific_image_types(tmp_path):
     path = tmp_path / "image.svg"
     path.write_text("<svg />")
 
-    with pytest.raises(ValueError, match="Unsupported image file type"):
+    image = ImageInput(path)
+
+    assert image.to_url() == (
+        "data:image/svg+xml;base64," + base64.b64encode(b"<svg />").decode("ascii")
+    )
+
+
+def test_image_input_rejects_non_image_local_type(tmp_path):
+    path = tmp_path / "image.txt"
+    path.write_text("not an image")
+
+    with pytest.raises(ValueError, match="determine an image MIME type"):
         ImageInput(path)
 
 
@@ -126,6 +138,24 @@ def test_completion_mode_rejects_structured_content():
             system_messages=[None],
             prompts=[["Question"]],
             inference_mode="completion",
+        )
+
+
+def test_completion_validation_accepts_flat_and_conversation_text_groups():
+    validate_text_only_completion_prompts("completion", ["first", "second"])
+    validate_text_only_completion_prompts(
+        "completion",
+        ["first turn", "second turn"],
+        ["another conversation"],
+    )
+
+
+def test_completion_validation_rejects_structured_content_in_any_group():
+    with pytest.raises(ValueError, match="Structured prompt content.*supported only"):
+        validate_text_only_completion_prompts(
+            "completion",
+            ["plain conversation"],
+            [["Question"]],
         )
 
 

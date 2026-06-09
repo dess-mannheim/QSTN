@@ -73,9 +73,9 @@ def test_battery_interleaves_each_question_with_its_images(
         (
             "PREFIX\n",
             global_image,
-            "Questionnaire item 1\nHow do you feel about Red?",
+            "How do you feel about Red?",
             first_image,
-            "\n--\nQuestionnaire item 2\nHow do you feel about Blue?",
+            "\n--\nHow do you feel about Blue?",
             second_image,
             "\nSUFFIX",
         )
