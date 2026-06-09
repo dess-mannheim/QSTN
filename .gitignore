@@ -185,3 +185,4 @@ AGENTS.md
 # version file
 src/qstn/_version.py
 scripts/easy_test_runs.ipynb
+scripts/easy_multimodal_check.ipynb
