@@ -134,18 +134,16 @@ def test_answeroptions_list_and_scale_and_response_methods():
     assert isinstance(all_second_item, JSONItem)
     assert all_second_item.explanation == "probability for 2: b Scale: 1: a to 2: b"
 
-    rc = ChoiceResponseGenerationMethod(allowed_choices_template="{options}")
+    rc = ChoiceResponseGenerationMethod()
     ao5 = survey_objects.AnswerOptions(answer_texts=at, response_generation_method=rc)
-    assert ao5.response_generation_method.allowed_choices in (
-        ao.answer_texts.full_answers,
-        ao.answer_texts.indices,
-    )
-    assert rc.allowed_choices is None
+    assert ao5.response_generation_method.resolved_choices == ao.answer_texts.full_answers
+    assert rc.resolved_choices is None
 
-    rl = LogprobResponseGenerationMethod(allowed_choices_template="{options}")
+    rl = LogprobResponseGenerationMethod(constrain_answer_options=False)
     ao6 = survey_objects.AnswerOptions(answer_texts=at, response_generation_method=rl)
-    assert ao6.response_generation_method.allowed_choices is not None
-    assert rl.allowed_choices is None
+    assert ao6.response_generation_method.resolved_choices == ao.answer_texts.full_answers
+    assert ao6.response_generation_method.constrain_answer_options is False
+    assert rl.resolved_choices is None
 
 
 def test_answeroptions_constrains_json_single_answer_options():
@@ -183,15 +181,14 @@ def test_answeroptions_prepares_choice_method_assigned_after_init():
     """Choice-style methods assigned later should receive materialized choices."""
     at = survey_objects.AnswerTexts(answer_texts=["a", "b"], indices=["1", "2"])
     method = ChoiceResponseGenerationMethod(
-        allowed_choices_template="{options}",
         output_index_only=True,
     )
     ao = survey_objects.AnswerOptions(answer_texts=at)
 
     ao.response_generation_method = method
 
-    assert ao.response_generation_method.allowed_choices == ["1", "2"]
-    assert method.allowed_choices is None
+    assert ao.response_generation_method.resolved_choices == ["1", "2"]
+    assert method.resolved_choices is None
 
 
 def test_answeroptions_constrains_json_single_answer_indices():

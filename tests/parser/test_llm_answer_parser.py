@@ -12,6 +12,7 @@ from qstn.inference.response_generation import (
     JSONReasoningResponseGenerationMethod,
     JSONResponseGenerationMethod,
     JSONVerbalizedDistribution,
+    LogprobResponseGenerationMethod,
 )
 from qstn.parser.llm_answer_parser import (
     SOURCE_LLM_RESPONSE_COLUMN,
@@ -208,9 +209,7 @@ def test_parse_json_battery_nested_distribution_maps_columns_per_question():
         results={
             -1: QuestionLLMResponseTuple(
                 question="battery",
-                llm_response=(
-                    '{"Red?":{"1: GAR KEIN VERTRAUEN":"0.1"},' '"Blue?":{"2: GUT":"0.9"}}'
-                ),
+                llm_response=('{"Red?":{"1: GAR KEIN VERTRAUEN":"0.1"},"Blue?":{"2: GUT":"0.9"}}'),
                 logprobs=None,
                 reasoning=None,
             )
@@ -919,10 +918,7 @@ def test_parse_with_llm_battery_reasoning_json_parses_nested_question_objects():
         survey_results=[source_result],
         response_generation_method=JSONReasoningResponseGenerationMethod(),
         generation_fn=lambda **_kwargs: (
-            [
-                '{"Red?":{"reasoning":"r1","answer":"a1"},'
-                '"Blue?":{"reasoning":"r2","answer":"a2"}}'
-            ],
+            ['{"Red?":{"reasoning":"r1","answer":"a1"},"Blue?":{"reasoning":"r2","answer":"a2"}}'],
             None,
             None,
         ),
@@ -968,26 +964,72 @@ def test_logprobs_filter_normalizes_and_warns_for_missing_choice():
     assert math.isnan(filtered["invalid"])
 
 
-def test_parse_logprobs_handles_list_choices():
-    prompt = _make_prompt()
+def test_logprobs_filter_sums_multiple_aliases_for_one_choice():
+    filtered = _logprobs_filter(
+        {"Y": -0.4, "Yes": -0.8, "Yeah": -1.2, "N": -0.6},
+        {"Yes": ["Y", "Yes", "Yeah"], "No": ["N"]},
+    )
+
+    expected_yes = sum(math.exp(value) for value in (-0.4, -0.8, -1.2))
+    expected_no = math.exp(-0.6)
+
+    assert filtered["Yes"] == pytest.approx(expected_yes / (expected_yes + expected_no))
+    assert filtered["No"] == pytest.approx(expected_no / (expected_yes + expected_no))
+
+
+def test_parse_logprobs_returns_all_tokens_by_default():
+    prompt = _make_prompt_with_answer_options(
+        ["Y", "N"],
+        ["Y", "N"],
+        response_generation_method=LogprobResponseGenerationMethod(),
+    )
     result = InferenceResult(
         questionnaire=prompt,
         results={
-            1: QuestionLLMResponseTuple("Q1", "A1", {"Y": -0.1, "N": -0.2}, None),
+            1: QuestionLLMResponseTuple(
+                "Q1", "A1", {"Y": -0.1, "N": -0.2, "unexpected": -0.3}, None
+            ),
             2: QuestionLLMResponseTuple("Q2", "A2", {"Y": -0.3, "N": -0.4}, None),
         },
     )
 
-    parsed = parse_logprobs([result], allowed_choices=["Y", "N"])[prompt]
+    parsed = parse_logprobs([result])[prompt]
 
     assert constants.QUESTIONNAIRE_ITEM_ID in parsed.columns
     assert parsed.shape[0] == 2
-    assert "Y" in parsed.columns and "N" in parsed.columns
+    assert "Y" in parsed.columns and "N" in parsed.columns and "unexpected" in parsed.columns
+    assert pytest.approx(parsed.loc[0, ["Y", "N", "unexpected"]].sum(), abs=1e-9) == 1.0
     assert "error_col" not in parsed.columns
 
 
+def test_parse_logprobs_can_filter_to_answer_options():
+    prompt = _make_prompt_with_answer_options(
+        ["Yes", "No"],
+        ["Yes", "No"],
+        response_generation_method=LogprobResponseGenerationMethod(),
+    )
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple(
+                "Q1", "Yes", {"Y": -0.1, "N": -0.2, "unexpected": -0.3}, None
+            ),
+        },
+    )
+
+    parsed = parse_logprobs([result], filter_to_answer_options=True)[prompt]
+
+    assert "Yes" in parsed.columns and "No" in parsed.columns
+    assert "unexpected" not in parsed.columns
+    assert pytest.approx(parsed.loc[0, "Yes"] + parsed.loc[0, "No"], abs=1e-9) == 1.0
+
+
 def test_parse_logprobs_mixed_logprob_and_none_marks_missing_rows():
-    prompt = _make_prompt()
+    prompt = _make_prompt_with_answer_options(
+        ["Y", "N"],
+        ["Y", "N"],
+        response_generation_method=LogprobResponseGenerationMethod(),
+    )
     result = InferenceResult(
         questionnaire=prompt,
         results={
@@ -997,10 +1039,83 @@ def test_parse_logprobs_mixed_logprob_and_none_marks_missing_rows():
     )
 
     with pytest.warns(UserWarning, match="No logprobs found"):
-        parsed = parse_logprobs([result], allowed_choices=["Y", "N"])[prompt]
+        parsed = parse_logprobs([result])[prompt]
 
     assert "error_col" in parsed.columns
     assert parsed.loc[0, "error_col"] != "MISSING_LOGPROBS"
     assert parsed.loc[1, "error_col"] == "MISSING_LOGPROBS"
     assert math.isnan(parsed.loc[1, "Y"])
     assert math.isnan(parsed.loc[1, "N"])
+
+
+def test_parse_logprobs_choice_aliases_override_answer_options():
+    prompt = _make_prompt_with_answer_options(
+        ["Yes", "No"],
+        ["Yes", "No"],
+        indices_q1=["1", "2"],
+        indices_q2=["1", "2"],
+        response_generation_method=LogprobResponseGenerationMethod(output_index_only=True),
+    )
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "1", {"A": -0.1, "B": -0.2}, None),
+        },
+    )
+
+    parsed = parse_logprobs(
+        [result],
+        filter_to_answer_options=True,
+        choice_aliases={"Yes": ["A"], "No": ["B"]},
+    )[prompt]
+
+    assert "Yes" in parsed.columns and "No" in parsed.columns
+    assert "1" not in parsed.columns and "2" not in parsed.columns
+    assert pytest.approx(parsed.loc[0, "Yes"] + parsed.loc[0, "No"], abs=1e-9) == 1.0
+
+
+def test_parse_logprobs_supports_different_choices_per_item():
+    prompt = _make_prompt_with_answer_options(
+        ["Warm", "Cold"],
+        ["Blue", "Green"],
+        response_generation_method=LogprobResponseGenerationMethod(constrain_answer_options=False),
+    )
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "Warm", {"W": -0.1, "C": -0.2}, None),
+            2: QuestionLLMResponseTuple("Q2", "Blue", {"B": -0.3, "G": -0.4}, None),
+        },
+    )
+
+    parsed = parse_logprobs([result], filter_to_answer_options=True)[prompt]
+
+    assert ["Warm", "Cold", "Blue", "Green"] == [
+        column
+        for column in parsed.columns
+        if column not in {constants.QUESTIONNAIRE_ITEM_ID, constants.QUESTION}
+    ]
+    assert math.isnan(parsed.loc[0, "Blue"])
+    assert math.isnan(parsed.loc[1, "Warm"])
+
+
+def test_parse_logprobs_only_requires_choices_when_filtering():
+    prompt = _make_prompt()
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "Y", {"Y": -0.1}, None)},
+    )
+
+    parsed_all = parse_logprobs([result])[prompt]
+    assert parsed_all.loc[0, "Y"] == 1.0
+
+    with pytest.raises(ValueError, match="no answer options were found"):
+        parse_logprobs([result], filter_to_answer_options=True)
+
+    parsed = parse_logprobs([result], {"Yes": ["Y"]})[prompt]
+    assert parsed.loc[0, "Yes"] == 1.0
+
+
+def test_parse_logprobs_rejects_empty_choice_aliases():
+    with pytest.raises(ValueError, match="at least one output label"):
+        parse_logprobs([], choice_aliases={})

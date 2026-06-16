@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from qstn.inference import local_inference, survey_inference
 from qstn.inference.response_generation import (
     ChoiceResponseGenerationMethod,
@@ -10,6 +12,7 @@ from qstn.inference.response_generation import (
     JSONResponseGenerationMethod,
     LogprobResponseGenerationMethod,
 )
+from qstn.utilities.survey_objects import AnswerOptions, AnswerTexts
 
 
 def test_get_sampling_field_names_and_split(monkeypatch):
@@ -67,12 +70,38 @@ def test_structured_sampling_params_and_cache(monkeypatch):
     )
     assert outputs2[0].structured_outputs is outputs2[1].structured_outputs
 
-    # choice method with allowed choices
-    choice = ChoiceResponseGenerationMethod(allowed_choices=["x", "y"])
+    # choice method with choices resolved from AnswerOptions
+    choice = AnswerOptions(
+        answer_texts=AnswerTexts(answer_texts=["x", "y"]),
+        response_generation_method=ChoiceResponseGenerationMethod(),
+    ).response_generation_method
     outputs3 = local_inference._structured_sampling_params(
         batch_size=1, seeds=[5], response_generation_method=choice
     )
     assert outputs3[0].structured_outputs == {"choice": ["x", "y"]}
+
+
+def test_structured_sampling_params_requires_attached_options_for_constraints():
+    method = ChoiceResponseGenerationMethod()
+
+    with pytest.raises(ValueError, match="Attach the method to `AnswerOptions`"):
+        local_inference._structured_sampling_params(
+            batch_size=1,
+            seeds=[1],
+            response_generation_method=method,
+        )
+
+
+def test_structured_sampling_params_allows_unconstrained_standalone_logprobs():
+    method = LogprobResponseGenerationMethod(constrain_answer_options=False)
+
+    params = local_inference._structured_sampling_params(
+        batch_size=1,
+        seeds=[1],
+        response_generation_method=method,
+    )
+
+    assert not hasattr(params[0], "structured_outputs")
 
 
 def test_create_sampling_params():

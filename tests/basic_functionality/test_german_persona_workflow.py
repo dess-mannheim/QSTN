@@ -71,7 +71,6 @@ def _create_llm_prompt_for_persona(persona_row, questionnaire, all_cleaned_answe
     answer_options = {}
     for answer_bundle in all_cleaned_answers:
         rgm = response_generation.ChoiceResponseGenerationMethod(
-            answer_bundle["answer"],
             output_template="Antworte nur mit der exakten Antwort.",
         )
 

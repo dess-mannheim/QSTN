@@ -56,11 +56,29 @@ def test_create_structured_output_and_params():
         batch_size=2, response_generation_method=rgm_list
     )
     assert params[0] == params[1]
-    choice = ChoiceResponseGenerationMethod(allowed_choices=["x"])
+    choice = survey_objects.AnswerOptions(
+        answer_texts=survey_objects.AnswerTexts(answer_texts=["x"]),
+        response_generation_method=ChoiceResponseGenerationMethod(),
+    ).response_generation_method
     params2 = remote_inference._create_structured_params(
         batch_size=1, response_generation_method=choice
     )
     assert params2 == [["x"]]
+
+
+def test_create_structured_params_validates_and_can_disable_choice_constraints():
+    with pytest.raises(ValueError, match="Attach the method to `AnswerOptions`"):
+        remote_inference._create_structured_params(
+            batch_size=1,
+            response_generation_method=ChoiceResponseGenerationMethod(),
+        )
+
+    params = remote_inference._create_structured_params(
+        batch_size=1,
+        response_generation_method=ChoiceResponseGenerationMethod(constrain_answer_options=False),
+    )
+
+    assert params == []
 
 
 def test_create_structured_params_includes_auto_answer_enum():
