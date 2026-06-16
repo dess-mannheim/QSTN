@@ -1,12 +1,11 @@
 import copy
 import random
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from pathlib import Path
 from string import ascii_lowercase, ascii_uppercase
-from typing import Any, Literal, Self, TextIO, overload
+from typing import Any, Literal, Self, overload
 
 import pandas as pd
 
@@ -415,153 +414,6 @@ class LLMPrompt:
             LLMQuestionnaire: A deep copy of the current object.
         """
         return copy.deepcopy(self)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize this prompt to a validated persistence dictionary.
-
-        Returns:
-            dict[str, Any]: Versioned JSON-compatible prompt state.
-
-        Raises:
-            TypeError: If the prompt contains an unsupported object type.
-            ValueError: If the prompt contains invalid or incomplete state.
-        """
-        from ._llm_prompt_persistence import prompt_to_dict
-
-        return prompt_to_dict(self)
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Self:
-        """Restore a prompt from a validated persistence dictionary.
-
-        Args:
-            data: Versioned JSON-compatible prompt state.
-
-        Returns:
-            LLMPrompt: Restored prompt with equivalent supported behavior.
-
-        Raises:
-            TypeError: If the input is not a mapping or this class is subclassed.
-            ValueError: If the schema is invalid or unsupported.
-        """
-        from ._llm_prompt_persistence import prompt_from_dict
-
-        if cls is not LLMPrompt:
-            raise TypeError("LLMPrompt persistence does not support subclasses.")
-        return prompt_from_dict(data)
-
-    def to_json(
-        self,
-        path_or_buf: str | Path | TextIO | None = None,
-        *,
-        indent: int | None = 2,
-    ) -> str | None:
-        """Serialize this prompt to JSON or write it to a text destination.
-
-        Args:
-            path_or_buf: Optional path or writable text file. If omitted, JSON is returned.
-            indent: JSON indentation level. Use None for compact output.
-
-        Returns:
-            str | None: JSON text when no destination is supplied, otherwise None.
-
-        Raises:
-            TypeError: If the prompt contains an unsupported object type.
-            ValueError: If the prompt contains invalid or incomplete state.
-        """
-        from ._llm_prompt_persistence import prompt_to_json
-
-        return prompt_to_json(self, path_or_buf, indent=indent)
-
-    @classmethod
-    def from_json(cls, path_or_buf: str | Path | TextIO) -> Self:
-        """Restore a prompt from JSON text, a path, or a readable text file.
-
-        Args:
-            path_or_buf: JSON object text, path, or readable text file.
-
-        Returns:
-            LLMPrompt: Restored prompt with equivalent supported behavior.
-
-        Raises:
-            TypeError: If this class is subclassed.
-            ValueError: If the JSON or persistence schema is invalid or unsupported.
-        """
-        from ._llm_prompt_persistence import prompt_from_json
-
-        if cls is not LLMPrompt:
-            raise TypeError("LLMPrompt persistence does not support subclasses.")
-        return prompt_from_json(path_or_buf)
-
-    def to_dataframe(self) -> pd.DataFrame:
-        """Serialize this prompt to versioned prompt and question records.
-
-        Returns:
-            pd.DataFrame: One prompt record followed by ordered question records.
-
-        Raises:
-            TypeError: If the prompt contains an unsupported object type.
-            ValueError: If the prompt contains invalid or incomplete state.
-        """
-        from ._llm_prompt_persistence import prompt_to_dataframe
-
-        return prompt_to_dataframe(self)
-
-    @classmethod
-    def from_dataframe(cls, dataframe: pd.DataFrame) -> Self:
-        """Restore a prompt from versioned prompt and question records.
-
-        Args:
-            dataframe: Persistence records produced by to_dataframe.
-
-        Returns:
-            LLMPrompt: Restored prompt with equivalent supported behavior.
-
-        Raises:
-            TypeError: If the input is not a DataFrame or this class is subclassed.
-            ValueError: If records are malformed, unordered, or unsupported.
-        """
-        from ._llm_prompt_persistence import prompt_from_dataframe
-
-        if cls is not LLMPrompt:
-            raise TypeError("LLMPrompt persistence does not support subclasses.")
-        return prompt_from_dataframe(dataframe)
-
-    def to_csv(self, path_or_buf: Any, **kwargs: Any) -> None:
-        """Write versioned prompt and question records to CSV.
-
-        Args:
-            path_or_buf: Destination accepted by pandas.DataFrame.to_csv.
-            **kwargs: Additional pandas CSV writing arguments. index defaults to False.
-
-        Raises:
-            TypeError: If the prompt contains an unsupported object type.
-            ValueError: If the prompt contains invalid or incomplete state.
-        """
-        from ._llm_prompt_persistence import prompt_to_csv
-
-        prompt_to_csv(self, path_or_buf, **kwargs)
-
-    @classmethod
-    def from_csv(cls, path_or_buf: Any, **kwargs: Any) -> Self:
-        """Restore a prompt from a versioned persistence CSV.
-
-        Args:
-            path_or_buf: Source accepted by pandas.read_csv.
-            **kwargs: Additional pandas CSV reading arguments.
-
-        Returns:
-            LLMPrompt: Restored prompt with equivalent supported behavior.
-
-        Raises:
-            TypeError: If this class is subclassed.
-            ValueError: If records are malformed, unordered, or unsupported.
-        """
-        from ._llm_prompt_persistence import prompt_from_csv
-
-        if cls is not LLMPrompt:
-            raise TypeError("LLMPrompt persistence does not support subclasses.")
-        return prompt_from_csv(path_or_buf, **kwargs)
 
     def add_image(self, image: ImageSource, *, item_id: Any = None) -> Self:
         """Add an image globally or to one questionnaire item.

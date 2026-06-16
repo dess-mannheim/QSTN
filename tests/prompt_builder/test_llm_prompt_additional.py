@@ -217,33 +217,6 @@ def test_load_questionnaire_format_can_disable_answer_option_constraints(preset)
     assert method.constrain_answer_options is False
 
 
-def test_choice_response_method_persistence_rebuilds_resolved_choices():
-    prompt = LLMPrompt(
-        questionnaire_source=pd.DataFrame(
-            [
-                {
-                    "questionnaire_item_id": 1,
-                    "question_content": "Q1",
-                    "answer_texts": ["No", "Yes"],
-                    "answer_codes": ["0", "1"],
-                    "response_generation_method": "choice",
-                    "output_index_only": True,
-                    "constrain_answer_options": False,
-                }
-            ]
-        )
-    )
-
-    payload = prompt.to_dict()
-    restored = LLMPrompt.from_dict(payload)
-    method = restored.get_question(0).answer_options.response_generation_method
-
-    assert payload["schema_version"] == 2
-    assert isinstance(method, ChoiceResponseGenerationMethod)
-    assert method.constrain_answer_options is False
-    assert method.resolved_choices == ["0", "1"]
-
-
 def test_load_questionnaire_format_rejects_invalid_python_list_string():
     df = pd.DataFrame(
         [
