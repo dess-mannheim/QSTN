@@ -22,6 +22,7 @@ from .response_generation import (
     JSONResponseGenerationMethod,
     LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
+    get_constrained_choices,
 )
 from .utils import InferenceMode, normalize_system_messages, validate_inference_mode
 
@@ -383,19 +384,15 @@ def _structured_sampling_params(
             # remote inference
             # else:
             #     structured_output = [json_schema] * batch_size
-        elif (
-            isinstance(
-                response_generation_method,
-                (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
-            )
-            and response_generation_method.allowed_choices is not None
+        elif isinstance(
+            response_generation_method,
+            (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
         ):
-            _allowed_choices = [str(c) for c in response_generation_method.allowed_choices]
-            global_structured_output = StructuredOutputsParams(choice=_allowed_choices)
-            structured_output = [global_structured_output] * batch_size
-            # Remote Inference
-            # else:
-            # structured_output = [_allowed_choices] * batch_size
+            choices = get_constrained_choices(response_generation_method)
+            if choices is not None:
+                resolved_choices = [str(choice) for choice in choices]
+                global_structured_output = StructuredOutputsParams(choice=resolved_choices)
+                structured_output = [global_structured_output] * batch_size
 
     # Different response generation methods for each question
     else:
@@ -418,21 +415,19 @@ def _structured_sampling_params(
                     #     cache[key] = json_schema
 
                 structured_output.append(cache[key])
-            elif (
-                isinstance(
-                    current_method,
-                    (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
-                )
-                and current_method.allowed_choices is not None
+            elif isinstance(
+                current_method,
+                (ChoiceResponseGenerationMethod, LogprobResponseGenerationMethod),
             ):
-                _allowed_choices = [str(c) for c in current_method.allowed_choices]
+                choices = get_constrained_choices(current_method)
+                if choices is None:
+                    structured_output.append(None)
+                    continue
 
-                key = _make_cache_key(_allowed_choices, None)
+                resolved_choices = [str(choice) for choice in choices]
+                key = _make_cache_key(resolved_choices, None)
                 if key not in cache:
-                    cache[key] = StructuredOutputsParams(choice=_allowed_choices)
-                    # Remote Inference
-                    # else:
-                    #     cache[key] = _allowed_choices
+                    cache[key] = StructuredOutputsParams(choice=resolved_choices)
                 structured_output.append(cache[key])
             else:
                 structured_output.append(None)

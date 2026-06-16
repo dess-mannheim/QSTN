@@ -138,6 +138,16 @@ class JSONObject:
 class ResponseGenerationMethod(ABC):
     """Abstract base class for constraining model output for closed-ended questions."""
 
+    def prepare_for_answer_options(
+        self,
+        options: list[str],
+        options_text: str,
+        prompt_formatter: dict[str, str],
+    ) -> ResponseGenerationMethod:
+        """Prepare a copied method for one question's materialized answer options."""
+        del options, options_text, prompt_formatter
+        return self
+
     @abstractmethod
     def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         pass
@@ -177,6 +187,24 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         }
         return utils.safe_format_with_regex(self.battery_question_key_template, formatter)
 
+    def prepare_for_answer_options(
+        self,
+        options: list[str],
+        options_text: str,
+        prompt_formatter: dict[str, str],
+    ) -> JSONResponseGenerationMethod:
+        self.json_object = self.json_object.copy_with_formatted_strings(
+            prompt_formatter=prompt_formatter,
+            options=options_text,
+        )
+        if self.constrain_answer_options:
+            self.json_object = constrain_json_response_options(
+                json_object=self.json_object,
+                response_field=self.response_field,
+                options=options,
+            )
+        return self
+
 
 def copy_json_response_generation_method(
     response_generation_method: JSONResponseGenerationMethod,
@@ -184,25 +212,19 @@ def copy_json_response_generation_method(
     prompt_formatter: dict[str, str] | None = None,
     **format_kwargs: Any,
 ) -> JSONResponseGenerationMethod:
+    """Copy a JSON response method while optionally replacing or formatting its schema."""
     if json_object is not None and len(format_kwargs) > 0:
         raise ValueError("Provide either `json_object` or formatting kwargs, not both.")
 
-    if json_object is None:
-        json_object = response_generation_method.json_object
-        if len(format_kwargs) > 0 or prompt_formatter is not None:
-            json_object = json_object.copy_with_formatted_strings(
-                prompt_formatter=prompt_formatter,
-                **format_kwargs,
-            )
-
-    return JSONResponseGenerationMethod(
-        json_object=json_object,
-        output_template=response_generation_method.output_template,
-        output_index_only=response_generation_method.output_index_only,
-        battery_question_key_template=response_generation_method.battery_question_key_template,
-        constrain_answer_options=response_generation_method.constrain_answer_options,
-        response_field=response_generation_method.response_field,
-    )
+    copied_method = deepcopy(response_generation_method)
+    if json_object is not None:
+        copied_method.json_object = json_object
+    elif len(format_kwargs) > 0 or prompt_formatter is not None:
+        copied_method.json_object = copied_method.json_object.copy_with_formatted_strings(
+            prompt_formatter=prompt_formatter,
+            **format_kwargs,
+        )
+    return copied_method
 
 
 def _set_json_item_enum(
@@ -244,29 +266,36 @@ def constrain_json_response_options(
 
 
 class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
-    """
-    Base class for constraining the model output using a Choice between answer options
-
-    Attributes:
-        allowed_choices: List of allowed choices for choice output
-        system_prompt_template: Template used for formatting the system prompt,
-            e.g., from `..utilities.prompt_templates`
-        output_index_only: If True, constrain output to answer option index
-            rather than the full text of each answer option
-    """
+    """Constrain model output to one of a question's answer options."""
 
     def __init__(
         self,
-        allowed_choices: list[str] | None = None,
-        allowed_choices_template: str | None = None,
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
+        constrain_answer_options: bool = True,
     ):
         super().__init__()
-        self.allowed_choices = allowed_choices
-        self.allowed_choices_template = allowed_choices_template
         self.output_template = output_template
-        self.output_index_only = output_index_only  # TODO: implement
+        self.output_index_only = output_index_only
+        self.constrain_answer_options = constrain_answer_options
+        self._resolved_choices: list[str] | None = None
+
+    @property
+    def resolved_choices(self) -> list[str] | None:
+        """Choices materialized when this method is attached to `AnswerOptions`."""
+        if self._resolved_choices is None:
+            return None
+        return list(self._resolved_choices)
+
+    def prepare_for_answer_options(
+        self,
+        options: list[str],
+        options_text: str,
+        prompt_formatter: dict[str, str],
+    ) -> ChoiceResponseGenerationMethod:
+        del options_text, prompt_formatter
+        self._resolved_choices = list(options)
+        return self
 
     def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         return self.output_template
@@ -282,7 +311,7 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         token_limit: Number of output tokens to generate; e.g., use `1` for
             first-token probabilities (default)
         top_logprobs: How many of the logprobs to consider, OpenAI supports at most 20
-        allowed_choices: If not None, restrict output additionally with `guided_choice`
+        constrain_answer_options: If True, restrict output to the attached answer options
         ignore_reasoning: If True, only consider tokens after the reasoning
             output, i.e., after </think>
         system_prompt_template: Template used for formatting the system prompt,
@@ -297,24 +326,58 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         token_limit: int = 1,
         # OpenAI API default; local vLLM deployments might provide more.
         top_logprobs: int = 20,
-        allowed_choices: list[str] | None = None,
-        allowed_choices_template: str | None = None,
         ignore_reasoning: bool = True,
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
+        constrain_answer_options: bool = True,
     ):
         super().__init__()
         self.token_position = token_position
         self.token_limit = token_limit
         self.top_logprobs = top_logprobs
-        self.allowed_choices = allowed_choices
-        self.allowed_choices_template = allowed_choices_template
         self.ignore_reasoning = ignore_reasoning
         self.output_template = output_template
         self.output_index_only = output_index_only
+        self.constrain_answer_options = constrain_answer_options
+        self._resolved_choices: list[str] | None = None
+
+    @property
+    def resolved_choices(self) -> list[str] | None:
+        """Choices materialized when this method is attached to `AnswerOptions`."""
+        if self._resolved_choices is None:
+            return None
+        return list(self._resolved_choices)
+
+    def prepare_for_answer_options(
+        self,
+        options: list[str],
+        options_text: str,
+        prompt_formatter: dict[str, str],
+    ) -> LogprobResponseGenerationMethod:
+        del options_text, prompt_formatter
+        self._resolved_choices = list(options)
+        return self
 
     def get_automatic_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
         return self.output_template
+
+
+def get_constrained_choices(
+    response_generation_method: ChoiceResponseGenerationMethod | LogprobResponseGenerationMethod,
+) -> list[str] | None:
+    """Return prepared guided choices or validate a missing questionnaire attachment."""
+    if not response_generation_method.constrain_answer_options:
+        return None
+
+    choices = response_generation_method.resolved_choices
+    if choices is None:
+        raise ValueError(
+            f"{type(response_generation_method).__name__} has "
+            "`constrain_answer_options=True`, but no answer options were resolved. "
+            "Attach the method to `AnswerOptions` or set "
+            "`constrain_answer_options=False` for standalone inference."
+        )
+    return choices
 
 
 # --- Specific Answer Production Methods ---
@@ -455,6 +518,16 @@ class JSONVerbalizedDistribution(JSONResponseGenerationMethod):
                 )
             )
         self.json_object = JSONObject(children=children)
+
+    def prepare_for_answer_options(
+        self,
+        options: list[str],
+        options_text: str,
+        prompt_formatter: dict[str, str],
+    ) -> JSONVerbalizedDistribution:
+        del options_text
+        self.set_verbalized_options(options, prompt_formatter=prompt_formatter)
+        return self
 
 
 def resolve_battery_response_generation_method(

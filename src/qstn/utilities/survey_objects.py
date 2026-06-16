@@ -5,13 +5,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import pandas as pd
 
 from ..inference.response_generation import (
-    ChoiceResponseGenerationMethod,
-    JSONResponseGenerationMethod,
-    JSONVerbalizedDistribution,
-    LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
-    constrain_json_response_options,
-    copy_json_response_generation_method,
 )
 from ..utilities import placeholder, prompt_templates
 
@@ -223,37 +217,12 @@ class AnswerOptions:
     ) -> ResponseGenerationMethod | None:
         prepared_method = copy.deepcopy(response_generation_method)
 
-        if prepared_method:
-            if isinstance(prepared_method, JSONVerbalizedDistribution):
-                prepared_method.set_verbalized_options(
-                    self._response_generation_options(prepared_method),
-                    prompt_formatter=self._response_generation_prompt_formatter(prepared_method),
-                )
-
-            elif isinstance(prepared_method, JSONResponseGenerationMethod):
-                prepared_method = copy_json_response_generation_method(
-                    prepared_method,
-                    prompt_formatter=self._response_generation_prompt_formatter(prepared_method),
-                    options=self._response_generation_options_text(prepared_method),
-                )
-                if prepared_method.constrain_answer_options:
-                    prepared_method.json_object = constrain_json_response_options(
-                        json_object=prepared_method.json_object,
-                        response_field=prepared_method.response_field,
-                        options=self._response_generation_options(prepared_method),
-                    )
-
-            elif isinstance(prepared_method, ChoiceResponseGenerationMethod) or isinstance(
-                prepared_method, LogprobResponseGenerationMethod
-            ):
-                if prepared_method.allowed_choices_template is not None:
-                    if prepared_method.allowed_choices_template != "{options}":
-                        raise ValueError(
-                            "`allowed_choices_template` currently only supports '{options}'."
-                        )
-                    prepared_method.allowed_choices = self._response_generation_options(
-                        prepared_method
-                    )
+        if prepared_method is not None:
+            prepared_method = prepared_method.prepare_for_answer_options(
+                options=self._response_generation_options(prepared_method),
+                options_text=self._response_generation_options_text(prepared_method),
+                prompt_formatter=self._response_generation_prompt_formatter(prepared_method),
+            )
 
         return prepared_method
 

@@ -15,6 +15,7 @@ from ..inference.response_generation import (
     JSONObject,
     JSONResponseGenerationMethod,
     JSONSingleResponseGenerationMethod,
+    LogprobResponseGenerationMethod,
     ResponseGenerationMethod,
     copy_json_response_generation_method,
     resolve_battery_response_generation_method,
@@ -26,6 +27,7 @@ from ..utilities.survey_objects import (
     AnswerOptions,
     InferenceResult,
     QuestionLLMResponseTuple,
+    QuestionnaireItem,
 )
 
 if TYPE_CHECKING:
@@ -1179,7 +1181,7 @@ def _filter_logprobs_by_choices(logprob_df: pd.DataFrame, choices: pd.Series) ->
         boolean_index = choices.str.startswith(token)
         # if len(choices[boolean_index]) > 1:
         #    warnings.warn(
-        #        "Multiple allowed_choices "
+        #        "Multiple choices "
         #        f"({list(choices[boolean_index])}) match "
         #        f"the same output token: {token}",
         #        stacklevel=2
@@ -1190,7 +1192,7 @@ def _filter_logprobs_by_choices(logprob_df: pd.DataFrame, choices: pd.Series) ->
 
 
 def _logprobs_filter(
-    logprobs: dict[str, float], allowed_choices: dict[str, list[str]]
+    logprobs: dict[str, float], choice_outputs: dict[str, list[str]]
 ) -> dict[str, float]:
 
     # normalize logprobs
@@ -1201,12 +1203,12 @@ def _logprobs_filter(
     # flatten to check for collisions between answer options
     # TODO: implement this properly.
     # Only collisions between answer options matter, not, e.g., TRUMP vs. trump!
-    # all_valid_outputs = [output for choices in allowed_choices.values() for output in choices]
+    # all_valid_outputs = [output for choices in choice_outputs.values() for output in choices]
     # _ = _filter_logprobs_by_choices(logprob_df, pd.Series(all_valid_outputs))
 
     # filter the individual survey answers
     choice_results = {}
-    for choice, valid_outputs in allowed_choices.items():
+    for choice, valid_outputs in choice_outputs.items():
         valid_logprobs = _filter_logprobs_by_choices(logprob_df, pd.Series(valid_outputs))
         if len(valid_logprobs) == 0:
             warnings.warn(
@@ -1230,64 +1232,158 @@ def _logprobs_filter(
     return choice_results
 
 
+def _normalize_all_logprobs(logprobs: dict[str, float]) -> dict[str, float]:
+    """Convert every returned token logprob to a normalized probability."""
+    probabilities: dict[str, float] = {}
+    for token, logprob in logprobs.items():
+        probability = float(np.exp(logprob))
+        if probability > 0:
+            probabilities[token] = probability
+    overall_sum = sum(probabilities.values())
+    if overall_sum > 0:
+        return {token: probability / overall_sum for token, probability in probabilities.items()}
+    return probabilities
+
+
+def _find_question_by_item_id(
+    questionnaire: LLMPrompt,
+    item_id: Any,
+) -> QuestionnaireItem | None:
+    exact_matches = [
+        question for question in questionnaire.get_questions() if question.item_id == item_id
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+
+    string_matches = [
+        question
+        for question in questionnaire.get_questions()
+        if str(question.item_id) == str(item_id)
+    ]
+    if len(string_matches) == 1:
+        return string_matches[0]
+    return None
+
+
+def _infer_logprob_choices(questionnaire: LLMPrompt, item_id: Any) -> list[str]:
+    question = _find_question_by_item_id(questionnaire, item_id)
+    if question is None or question.answer_options is None:
+        return []
+
+    answer_options = question.answer_options
+    method = answer_options.response_generation_method
+    if isinstance(method, LogprobResponseGenerationMethod):
+        resolved_choices = method.resolved_choices
+        if resolved_choices is not None:
+            return resolved_choices
+
+    if (
+        answer_options.answer_texts.indices is not None
+        and method is not None
+        and method.output_index_only
+    ):
+        return list(answer_options.answer_texts.indices)
+    return list(answer_options.answer_texts.full_answers)
+
+
 def parse_logprobs(
     survey_results: list[InferenceResult],
-    allowed_choices: list[str] | dict[str, list[str]],
+    choice_aliases: dict[str, list[str]] | None = None,
+    filter_to_answer_options: bool = False,
 ) -> dict[LLMPrompt, pd.DataFrame]:
     """
-    Filter and aggregate logprobs returned by Logprob_AnswerProductionMethod.
+    Parse returned token logprobs, optionally aggregating them into answer choices.
 
     Args:
-        survey_results: List of InterviewResult that is returned from running a survey
-        allowed_choices: List of possible answer options OR dictionary mapping
-            options to multiple tokens that encode each option
+        survey_results: Survey inference results containing token logprobs.
+        choice_aliases: Optional complete mapping from output labels to token spellings.
+            Each key becomes one dataframe column. The probabilities of all matching
+            spellings are added together for that column. When provided, this mapping
+            overrides `filter_to_answer_options` and questionnaire answer options.
+        filter_to_answer_options: If True, retain only choices from each item's
+            attached answer options. Defaults to False, which returns every token.
 
     Returns:
-        Dict[LLMInterview, pd.Dataframe]: A dictionary where the keys are the
-            LLMInterviews and the values are a Dataframe with questions/answers.
-    """
-    final_result = {}
+        Mapping from questionnaires to per-item probability dataframes. Rows share
+        the union of returned tokens or configured output labels.
 
-    # if each choice only maps to one token
-    if isinstance(allowed_choices, list):
-        allowed_choices = {c: [c] for c in allowed_choices}
-    answer_format = list(allowed_choices.keys())
+    Raises:
+        ValueError: If answer-option filtering is requested for an item without
+            answer options, or if an empty alias mapping is provided.
+
+    Examples:
+        Aggregate several possible model tokens into one canonical answer:
+
+        >>> aliases = {
+        ...     "Yes": ["Y", "Yes", "Yeah"],
+        ...     "No": ["N", "No", "Nope"],
+        ... }
+        >>> parsed = parse_logprobs(results, choice_aliases=aliases)
+
+        For the `Yes` column, probabilities found for `Y`, `Yes`, and `Yeah` are
+        summed. The alias columns are then normalized to sum to one. This normalization
+        only covers tokens present in the returned top-logprob payload, not the model's
+        complete vocabulary distribution.
+    """
+    final_result: dict[LLMPrompt, pd.DataFrame] = {}
+    if choice_aliases is not None and len(choice_aliases) == 0:
+        raise ValueError("`choice_aliases` must contain at least one output label.")
 
     for survey_result in survey_results:
-        answers = []
+        answers: list[dict[str, Any]] = []
+        answer_columns: list[str] = []
         missing_logprobs = False
         for item_id, qa_tuple in survey_result.results.items():
+            choice_outputs: dict[str, list[str]] | None = None
+            if choice_aliases is not None:
+                choice_outputs = choice_aliases
+            elif filter_to_answer_options:
+                choices = _infer_logprob_choices(survey_result.questionnaire, item_id)
+                if len(choices) == 0:
+                    raise ValueError(
+                        "Cannot filter logprobs to answer options for questionnaire item "
+                        f"'{item_id}' because no answer options were found."
+                    )
+                choice_outputs = {choice: [choice] for choice in choices}
+
+            output_labels = (
+                list(choice_outputs)
+                if choice_outputs is not None
+                else list(qa_tuple.logprobs or {})
+            )
+
+            for output_label in output_labels:
+                if output_label not in answer_columns:
+                    answer_columns.append(output_label)
+
+            row: dict[str, Any] = {
+                constants.QUESTIONNAIRE_ITEM_ID: item_id,
+                constants.QUESTION: qa_tuple.question,
+            }
             if qa_tuple.logprobs is None:
                 warnings.warn(
-                    "No logprobs found in InterviewResult. "
-                    + "Make sure to use Logprob_AnswerProductionMethod to generate logprobs.",
+                    "No logprobs found in InferenceResult. Make sure to use "
+                    "LogprobResponseGenerationMethod to generate logprobs.",
                     stacklevel=2,
                 )
                 missing_logprobs = True
-                answers.append((item_id, qa_tuple.question, *([np.nan] * len(answer_format))))
+                row.update({output_label: np.nan for output_label in output_labels})
+                row["error_col"] = "MISSING_LOGPROBS"
+            elif choice_outputs is None:
+                row.update(_normalize_all_logprobs(qa_tuple.logprobs))
             else:
-                filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, allowed_choices)
-                answers.append(
-                    (
-                        item_id,
-                        qa_tuple.question,
-                        *[filtered_logprobs.get(choice, np.nan) for choice in answer_format],
-                    )
-                )
+                filtered_logprobs = _logprobs_filter(qa_tuple.logprobs, choice_outputs)
+                row.update(filtered_logprobs)
+            answers.append(row)
 
-        df = pd.DataFrame(
-            answers,
-            columns=[
-                constants.QUESTIONNAIRE_ITEM_ID,
-                constants.QUESTION,
-                *answer_format,
-            ],
-        )
+        columns = [
+            constants.QUESTIONNAIRE_ITEM_ID,
+            constants.QUESTION,
+            *answer_columns,
+        ]
         if missing_logprobs:
-            missing_mask = df[answer_format].isna().all(axis=1)
-            df["error_col"] = [
-                "MISSING_LOGPROBS" if is_missing else None for is_missing in missing_mask
-            ]
+            columns.append("error_col")
+        df = pd.DataFrame(answers).reindex(columns=columns)
 
         final_result[survey_result.questionnaire] = df
 

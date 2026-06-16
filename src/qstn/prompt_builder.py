@@ -137,13 +137,13 @@ def _build_response_generation_method(
 
     if preset == ResponseGenerationPreset.CHOICE:
         return ChoiceResponseGenerationMethod(
-            allowed_choices_template="{options}",
             output_index_only=output_index_only,
+            constrain_answer_options=constrain_answer_options,
         )
     if preset == ResponseGenerationPreset.LOGPROB:
         return LogprobResponseGenerationMethod(
-            allowed_choices_template="{options}",
             output_index_only=output_index_only,
+            constrain_answer_options=constrain_answer_options,
         )
     if preset == ResponseGenerationPreset.JSON_SINGLE:
         return JSONSingleResponseGenerationMethod(
