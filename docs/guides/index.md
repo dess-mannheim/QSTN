@@ -12,7 +12,7 @@ For core building blocks and placeholder mechanics, start with the [Foundations 
 ```{toctree}
 :maxdepth: 1
 base_models
-
+image_models
 tutorial1
 tutorial2
 ```
