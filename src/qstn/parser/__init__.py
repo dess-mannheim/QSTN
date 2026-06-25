@@ -12,6 +12,7 @@ from .llm_answer_parser import (
     parse_with_llm,
     parse_with_llm_battery,
     raw_responses,
+    to_dataframe,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "parse_with_llm_battery",
     "raw_responses",
     "parse_logprobs",
+    "to_dataframe",
 ]

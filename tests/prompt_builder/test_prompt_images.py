@@ -3,7 +3,12 @@
 import pandas as pd
 import pytest
 
-from qstn.prompt_builder import ImageInput, LLMPrompt, QuestionnairePresentation
+from qstn.prompt_builder import (
+    ImageInput,
+    LLMPrompt,
+    QuestionnairePresentation,
+    generate_likert_options,
+)
 from qstn.utilities.survey_objects import QuestionnaireItem
 
 
@@ -117,6 +122,34 @@ How do you feel about Blue?""",
 SUFFIX""",
     )
     assert "Questionnaire item" not in "".join(block for block in content if isinstance(block, str))
+
+
+def test_renderer_keeps_aggregated_battery_options_with_item_images(mock_questionnaires):
+    prompt = LLMPrompt(
+        questionnaire_source=mock_questionnaires,
+        prompt=("PREFIX\n{{QUESTION_PLACEHOLDER}}\n" "OPTIONS\n{{OPTIONS_PLACEHOLDER}}\nSUFFIX"),
+    )
+    first_options = generate_likert_options(n=2, answer_texts=["A1", "A2"])
+    second_options = generate_likert_options(n=2, answer_texts=["B1", "B2"])
+    prompt.prepare_prompt(answer_options={1: first_options, 2: second_options})
+    first_image = ImageInput("https://example.com/one.png")
+    second_image = ImageInput("https://example.com/two.png")
+    prompt.add_image(first_image, item_id=1)
+    prompt.add_image(second_image, item_id=2)
+
+    _, content = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator="\n--\n",
+    )
+
+    assert content == (
+        "PREFIX\n",
+        "How do you feel about Red?",
+        first_image,
+        "\n--\nHow do you feel about Blue?",
+        second_image,
+        ("\nOPTIONS\nOptions are: 1: A1, 2: A2\n--\n" "Options are: 1: B1, 2: B2\nSUFFIX"),
+    )
 
 
 def test_image_free_renderer_and_str_remain_text_only(mock_questionnaires):

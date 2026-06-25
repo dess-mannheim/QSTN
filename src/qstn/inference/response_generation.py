@@ -391,7 +391,7 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
         output_template=prompt_templates.SYSTEM_JSON_SINGLE_ANSWER,
         output_index_only: bool = False,
         answer_field: str = "answer",
-        answer_explanation: str = "choose one of: {options}",
+        answer_explanation: str = "{options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
         constrain_answer_options: bool = True,
     ):
@@ -423,7 +423,7 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
         reasoning_field: str = "reasoning",
         reasoning_explanation: str = "your reasoning about the answer options",
         answer_field: str = "answer",
-        answer_explanation: str = "choose one of: {options}",
+        answer_explanation: str = "{options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
         constrain_answer_options: bool = True,
     ):

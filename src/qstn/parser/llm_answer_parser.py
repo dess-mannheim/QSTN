@@ -22,7 +22,7 @@ from ..inference.response_generation import (
 )
 from ..inference.survey_inference import batch_generation
 from ..prompt_builder import LLMPrompt
-from ..utilities import constants, placeholder
+from ..utilities import constants, placeholder, utils
 from ..utilities.survey_objects import (
     AnswerOptions,
     InferenceResult,
@@ -338,6 +338,116 @@ def raw_responses(
     for survey_result in survey_results:
         all_results[survey_result.questionnaire] = survey_result.to_dataframe()
     return all_results
+
+
+def _resolve_result_item_response_generation_method(
+    survey_result: InferenceResult,
+    item_id: Any,
+) -> ResponseGenerationMethod | None:
+    """Return the response-generation method associated with one result item."""
+    if _is_battery_like_result(survey_result) and item_id == -1:
+        return resolve_battery_response_generation_method(
+            questions=list(survey_result.questionnaire.get_questions()),
+            item_position=0,
+        )
+
+    question = _find_question_by_item_id(survey_result.questionnaire, item_id)
+    if question is None or question.answer_options is None:
+        return None
+    return question.answer_options.response_generation_method
+
+
+def _parse_result_item_for_dataframe(
+    survey_result: InferenceResult,
+    choice_aliases: dict[str, list[str]] | None,
+    filter_to_answer_options: bool,
+) -> dict[LLMPrompt, pd.DataFrame]:
+    """Parse a single-item result with the parser implied by questionnaire metadata."""
+    item_id = next(iter(survey_result.results))
+    response_generation_method = _resolve_result_item_response_generation_method(
+        survey_result=survey_result,
+        item_id=item_id,
+    )
+
+    if isinstance(response_generation_method, JSONResponseGenerationMethod):
+        return parse_json([survey_result])
+
+    if isinstance(response_generation_method, LogprobResponseGenerationMethod):
+        return parse_logprobs(
+            [survey_result],
+            choice_aliases=choice_aliases,
+            filter_to_answer_options=filter_to_answer_options,
+        )
+
+    return raw_responses([survey_result])
+
+
+def _append_parsed_frames(
+    parsed_frames: dict[LLMPrompt, list[pd.DataFrame]],
+    parsed_results: dict[LLMPrompt, pd.DataFrame],
+) -> None:
+    """Append parser output frames to the dataframe assembly buffer."""
+    for questionnaire, dataframe in parsed_results.items():
+        parsed_frames[questionnaire].append(dataframe)
+
+
+def to_dataframe(
+    survey_results: list[InferenceResult],
+    *,
+    choice_aliases: dict[str, list[str]] | None = None,
+    filter_to_answer_options: bool = False,
+) -> pd.DataFrame:
+    """
+    Convert survey results to one dataframe using response-generation metadata.
+
+    Each result item is routed through the parser implied by its questionnaire
+    metadata: JSON response methods use `parse_json`, logprob response methods
+    use `parse_logprobs`, and all other responses use `raw_responses`. The
+    parsed per-questionnaire frames are then combined with
+    `qstn.utilities.create_one_dataframe`.
+
+    Args:
+        survey_results: Survey results returned by survey conduction methods.
+        choice_aliases: Optional alias mapping forwarded to `parse_logprobs`.
+        filter_to_answer_options: If True, logprob rows are filtered to each
+            item attached answer options.
+
+    Returns:
+        One dataframe containing all parsed survey rows. An empty dataframe is
+        returned when no results are provided.
+    """
+    parsed_frames: dict[LLMPrompt, list[pd.DataFrame]] = defaultdict(list)
+
+    for survey_result in survey_results:
+        if len(survey_result.results) == 0:
+            continue
+
+        if _is_battery_like_result(survey_result):
+            parsed_results = _parse_result_item_for_dataframe(
+                survey_result=survey_result,
+                choice_aliases=choice_aliases,
+                filter_to_answer_options=filter_to_answer_options,
+            )
+            _append_parsed_frames(parsed_frames, parsed_results)
+            continue
+
+        for item_id, qa_tuple in survey_result.results.items():
+            item_result = InferenceResult(
+                questionnaire=survey_result.questionnaire,
+                results={item_id: qa_tuple},
+            )
+            parsed_results = _parse_result_item_for_dataframe(
+                survey_result=item_result,
+                choice_aliases=choice_aliases,
+                filter_to_answer_options=filter_to_answer_options,
+            )
+            _append_parsed_frames(parsed_frames, parsed_results)
+
+    parsed_dataframes = {
+        questionnaire: pd.concat(dataframes, ignore_index=True)
+        for questionnaire, dataframes in parsed_frames.items()
+    }
+    return utils.create_one_dataframe(parsed_dataframes)
 
 
 def _validate_generation_output_lengths(

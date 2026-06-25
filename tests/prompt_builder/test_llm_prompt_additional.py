@@ -362,6 +362,117 @@ def test_get_prompt_for_questionnaire_type_error_and_battery_auto_instructions()
     assert "Blue?" in user_prompt
 
 
+@pytest.mark.parametrize(
+    "prompt_template, expected",
+    [
+        (
+            (
+                f"QUESTIONS\n{placeholder.PROMPT_QUESTIONS}\n"
+                f"OPTIONS\n{placeholder.PROMPT_OPTIONS}"
+            ),
+            (
+                "QUESTIONS\nQ1 || Q2\nOPTIONS\n"
+                "Options are: 1: A1, 2: A2 || Options are: 1: B1, 2: B2"
+            ),
+        ),
+        (
+            (
+                f"OPTIONS\n{placeholder.PROMPT_OPTIONS}\n"
+                f"QUESTIONS\n{placeholder.PROMPT_QUESTIONS}"
+            ),
+            (
+                "OPTIONS\nOptions are: 1: A1, 2: A2 || "
+                "Options are: 1: B1, 2: B2\nQUESTIONS\nQ1 || Q2"
+            ),
+        ),
+    ],
+)
+def test_battery_main_prompt_aggregates_all_options_in_placeholder_order(prompt_template, expected):
+    df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    options_1 = generate_likert_options(n=2, answer_texts=["A1", "A2"])
+    options_2 = generate_likert_options(n=2, answer_texts=["B1", "B2"])
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=None,
+        prompt=prompt_template,
+    ).prepare_prompt(answer_options={1: options_1, 2: options_2})
+
+    system_prompt, user_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator=" || ",
+    )
+    _, completion_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator=" || ",
+        inference_mode="completion",
+    )
+
+    assert system_prompt is None
+    assert user_prompt == expected
+    assert completion_prompt == expected
+    rendered = str(prompt)
+    assert rendered.count("Options are:") == 2
+    assert rendered.index("1: A1") < rendered.index("1: B1")
+
+
+def test_battery_question_stem_renders_each_questions_own_options():
+    df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    options_1 = generate_likert_options(n=2, answer_texts=["A1", "A2"])
+    options_2 = generate_likert_options(n=2, answer_texts=["B1", "B2"])
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=None,
+        prompt=placeholder.PROMPT_QUESTIONS,
+    ).prepare_prompt(
+        question_stem=f"{placeholder.QUESTION_CONTENT}\n{placeholder.PROMPT_OPTIONS}",
+        answer_options={1: options_1, 2: options_2},
+    )
+
+    _, user_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator="\n--\n",
+    )
+
+    assert user_prompt == ("Q1\nOptions are: 1: A1, 2: A2\n--\n" "Q2\nOptions are: 1: B1, 2: B2")
+
+
+def test_battery_populates_main_and_question_stem_option_placeholders():
+    df = pd.DataFrame(
+        [
+            {"questionnaire_item_id": 1, "question_content": "Q1"},
+            {"questionnaire_item_id": 2, "question_content": "Q2"},
+        ]
+    )
+    options = generate_likert_options(n=2, answer_texts=["A1", "A2"])
+    prompt = LLMPrompt(
+        questionnaire_source=df,
+        system_prompt=None,
+        prompt=(f"{placeholder.PROMPT_QUESTIONS}\nALL OPTIONS\n" f"{placeholder.PROMPT_OPTIONS}"),
+    ).prepare_prompt(
+        question_stem=f"{placeholder.QUESTION_CONTENT}: {placeholder.PROMPT_OPTIONS}",
+        answer_options={1: options},
+    )
+
+    _, user_prompt = prompt.get_prompt_for_questionnaire_type(
+        questionnaire_type=QuestionnairePresentation.BATTERY,
+        item_separator=" || ",
+    )
+
+    assert user_prompt == (
+        "Q1: Options are: 1: A1, 2: A2 || Q2: \n" "ALL OPTIONS\nOptions are: 1: A1, 2: A2"
+    )
+
+
 def test_battery_mixed_scales_use_per_question_distribution_schema():
     df = pd.DataFrame(
         [

@@ -6,11 +6,13 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
+from qstn import parser as parser_module
 from qstn.inference.response_generation import (
     JSONItem,
     JSONObject,
     JSONReasoningResponseGenerationMethod,
     JSONResponseGenerationMethod,
+    JSONSingleResponseGenerationMethod,
     JSONVerbalizedDistribution,
     LogprobResponseGenerationMethod,
 )
@@ -25,6 +27,7 @@ from qstn.parser.llm_answer_parser import (
     parse_with_llm,
     parse_with_llm_battery,
     raw_responses,
+    to_dataframe,
 )
 from qstn.prompt_builder import LLMPrompt
 from qstn.utilities import constants
@@ -309,6 +312,123 @@ def test_parse_json_mixed_input_handles_battery_and_non_battery():
     assert set(parsed.keys()) == {prompt_non_battery, prompt_battery}
     assert parsed[prompt_non_battery].shape[0] == 1
     assert sorted(parsed[prompt_battery][constants.QUESTIONNAIRE_ITEM_ID].tolist()) == [1, 2]
+
+
+def test_to_dataframe_empty_input_returns_empty_dataframe():
+    assert to_dataframe([]).empty
+    assert parser_module.to_dataframe([]).empty
+
+
+def test_to_dataframe_routes_json_response_method():
+    prompt = _make_prompt_with_answer_options(
+        ["Yes", "No"],
+        ["Yes", "No"],
+        response_generation_method=JSONSingleResponseGenerationMethod(),
+    )
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", '{"answer":"Yes"}', None, None),
+        },
+    )
+
+    dataframe = to_dataframe([result])
+
+    assert dataframe.loc[0, constants.QUESTIONNAIRE_ITEM_ID] == 1
+    assert dataframe.loc[0, "answer"] == "Yes"
+    assert "questionnaire_name" in dataframe.columns
+
+
+def test_to_dataframe_routes_raw_response_method():
+    prompt = _make_prompt()
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "plain answer", None, None),
+        },
+    )
+
+    dataframe = to_dataframe([result])
+
+    assert dataframe.loc[0, constants.QUESTIONNAIRE_ITEM_ID] == 1
+    assert dataframe.loc[0, constants.LLM_RESPONSE] == "plain answer"
+
+
+def test_to_dataframe_routes_mixed_json_and_raw_items_per_item():
+    prompt = _make_prompt()
+    prepared_prompt = prompt.prepare_prompt(
+        answer_options={
+            1: AnswerOptions(
+                answer_texts=AnswerTexts(answer_texts=["Yes", "No"]),
+                response_generation_method=JSONSingleResponseGenerationMethod(),
+            ),
+            2: AnswerOptions(answer_texts=AnswerTexts(answer_texts=["Yes", "No"])),
+        }
+    )
+    result = InferenceResult(
+        questionnaire=prepared_prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", '{"answer":"Yes"}', None, None),
+            2: QuestionLLMResponseTuple("Q2", "plain answer", None, None),
+        },
+    )
+
+    dataframe = to_dataframe([result])
+
+    assert dataframe[constants.QUESTIONNAIRE_ITEM_ID].tolist() == [1, 2]
+    assert dataframe.loc[0, "answer"] == "Yes"
+    assert pd.isna(dataframe.loc[0, constants.LLM_RESPONSE])
+    assert dataframe.loc[1, constants.LLM_RESPONSE] == "plain answer"
+    assert pd.isna(dataframe.loc[1, "answer"])
+
+
+def test_to_dataframe_routes_logprob_response_method_with_filtering():
+    prompt = _make_prompt_with_answer_options(
+        ["Yes", "No"],
+        ["Yes", "No"],
+        response_generation_method=LogprobResponseGenerationMethod(),
+    )
+    result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple(
+                "Q1",
+                "Yes",
+                {"Yes": -0.1, "No": -0.2, "unexpected": -0.3},
+                None,
+            ),
+        },
+    )
+
+    dataframe = to_dataframe([result], filter_to_answer_options=True)
+
+    assert "Yes" in dataframe.columns and "No" in dataframe.columns
+    assert "unexpected" not in dataframe.columns
+    assert dataframe.loc[0, "Yes"] + dataframe.loc[0, "No"] == pytest.approx(1.0)
+
+
+def test_to_dataframe_routes_json_battery_result_to_expanded_rows():
+    prompt = _make_prompt_with_answer_options(
+        ["Yes", "No"],
+        ["Yes", "No"],
+        response_generation_method=JSONSingleResponseGenerationMethod(),
+    )
+    battery_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            -1: QuestionLLMResponseTuple(
+                question="battery",
+                llm_response='{"Red?":{"answer":"Yes"},"Blue?":{"answer":"No"}}',
+                logprobs=None,
+                reasoning=None,
+            )
+        },
+    )
+
+    dataframe = to_dataframe([battery_result])
+
+    assert dataframe[constants.QUESTIONNAIRE_ITEM_ID].tolist() == [1, 2]
+    assert dataframe["answer"].tolist() == ["Yes", "No"]
 
 
 def test_parse_with_llm_returns_parse_json_shape_and_source_trace():

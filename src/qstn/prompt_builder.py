@@ -608,6 +608,7 @@ class LLMPrompt:
     ) -> tuple[dict[str, str], list[str]]:
         """Build placeholder values and rendered questions for battery prompts."""
         rendered_questions: list[str] = []
+        rendered_options: list[str] = []
         for question in self._questions:
             question_prompt = self.generate_question_prompt(question)
             options = (
@@ -615,6 +616,8 @@ class LLMPrompt:
                 if question.answer_options is not None
                 else ""
             )
+            if options:
+                rendered_options.append(options)
             rendered_questions.append(
                 safe_format_with_regex(
                     question_prompt,
@@ -622,12 +625,6 @@ class LLMPrompt:
                 )
             )
 
-        reference_question = self._questions[reference_item_position]
-        options = (
-            reference_question.answer_options.create_options_str()
-            if reference_question.answer_options is not None
-            else ""
-        )
         response_method = resolve_battery_response_generation_method(
             questions=list(self._questions),
             item_position=reference_item_position,
@@ -639,7 +636,7 @@ class LLMPrompt:
         return (
             {
                 placeholder.PROMPT_QUESTIONS: item_separator.join(rendered_questions),
-                placeholder.PROMPT_OPTIONS: options,
+                placeholder.PROMPT_OPTIONS: item_separator.join(rendered_options),
                 placeholder.PROMPT_AUTOMATIC_OUTPUT_INSTRUCTIONS: automatic_output_instructions,
             },
             rendered_questions,
