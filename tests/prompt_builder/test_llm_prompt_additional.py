@@ -528,10 +528,7 @@ def test_json_single_answer_reuses_scale_prompt_format_in_explanations():
     )
 
     assert '"Q1": {' in system_prompt
-    assert (
-        '"answer": "choose one of: Antwortmöglichkeiten: 1: UNWICHTIG bis 7: SEHR WICHTIG"'
-        in system_prompt
-    )
+    assert '"answer": "Antwortmöglichkeiten: 1: UNWICHTIG bis 7: SEHR WICHTIG"' in system_prompt
 
 
 def test_verbalized_distribution_uses_plain_middle_scale_indices():

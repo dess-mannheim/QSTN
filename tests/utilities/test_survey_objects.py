@@ -235,7 +235,7 @@ def test_answeroptions_can_disable_json_answer_constraints():
     answer_item = ao.response_generation_method.json_object.children[0]
 
     assert isinstance(answer_item, JSONItem)
-    assert answer_item.explanation == "choose one of: Options are: 1: a, 2: b"
+    assert answer_item.explanation == "Options are: 1: a, 2: b"
     assert answer_item.constraints.enum is None
 
 
