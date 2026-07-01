@@ -680,7 +680,7 @@ def test_parse_with_llm_battery_parses_to_expanded_rows_with_source_trace():
     assert set(parsed[SOURCE_LLM_RESPONSE_COLUMN]) == {"raw-battery"}
 
 
-def test_parse_with_llm_battery_use_parser_false_returns_aggregated_row():
+def test_parse_with_llm_battery_none_rgm_returns_aggregated_row():
     prompt = _make_prompt()
     source_result = InferenceResult(
         questionnaire=prompt,
@@ -690,7 +690,6 @@ def test_parse_with_llm_battery_use_parser_false_returns_aggregated_row():
     parsed = parse_with_llm_battery(
         model=object(),
         survey_results=[source_result],
-        use_parser=False,
         response_generation_method=None,
         generation_fn=lambda **_kwargs: (["open battery answer"], None, None),
         print_progress=False,
@@ -808,7 +807,6 @@ def test_parse_with_llm_allows_unconstrained_open_answers_without_parser():
     parsed = parse_with_llm(
         model=object(),
         survey_results=[source_result],
-        use_parser=False,
         response_generation_method=None,
         generation_fn=fake_generation_fn,
         print_progress=False,
@@ -1239,3 +1237,129 @@ def test_parse_logprobs_only_requires_choices_when_filtering():
 def test_parse_logprobs_rejects_empty_choice_aliases():
     with pytest.raises(ValueError, match="at least one output label"):
         parse_logprobs([], choice_aliases={})
+
+
+def test_parse_with_llm_shared_index_rgm_uses_each_questions_indices():
+    prompt = _make_prompt_with_answer_options(
+        ["Warm", "Cold"],
+        ["Blue", "Green"],
+        indices_q1=["1", "2"],
+        indices_q2=["A", "B"],
+    )
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "Warm", None, None),
+            2: QuestionLLMResponseTuple("Q2", "Green", None, None),
+        },
+    )
+    captured = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        return ['{"answer":"1"}', '{"answer":"B"}'], None, None
+
+    parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=JSONSingleResponseGenerationMethod(output_index_only=True),
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    methods = captured["methods"]
+    assert methods[0].json_object.children[0].constraints.enum == ["1", "2"]
+    assert methods[1].json_object.children[0].constraints.enum == ["A", "B"]
+
+
+def test_parse_with_llm_accepts_one_rgm_per_question():
+    prompt = _make_prompt_with_answer_options(
+        ["Warm", "Cold"],
+        ["Blue", "Green"],
+        indices_q1=["1", "2"],
+        indices_q2=["A", "B"],
+    )
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={
+            1: QuestionLLMResponseTuple("Q1", "Warm", None, None),
+            2: QuestionLLMResponseTuple("Q2", "Green", None, None),
+        },
+    )
+    captured = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["methods"] = kwargs["response_generation_method"]
+        return ['{"answer":"1"}', '{"answer":"Green"}'], None, None
+
+    parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=[
+            JSONSingleResponseGenerationMethod(output_index_only=True),
+            JSONSingleResponseGenerationMethod(),
+        ],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    methods = captured["methods"]
+    assert methods[0].json_object.children[0].constraints.enum == ["1", "2"]
+    assert methods[1].json_object.children[0].constraints.enum == ["A: Blue", "B: Green"]
+
+
+def test_parse_with_llm_accepts_custom_no_answer_option_instruction():
+    prompt = _make_prompt()
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={1: QuestionLLMResponseTuple("Q1", "unknown", None, None)},
+    )
+    captured = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["prompt"] = kwargs["prompts"][0]
+        return ['{"answer":"MISSING"}'], None, None
+
+    parse_with_llm(
+        model=object(),
+        survey_results=[source_result],
+        no_answer_option="MISSING",
+        no_answer_option_instruction="Use {no_answer_option} when uncertain.\n",
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    assert "Use MISSING when uncertain." in captured["prompt"]
+
+
+def test_parse_with_llm_battery_accepts_one_rgm_per_question():
+    prompt = _make_prompt_with_answer_options(
+        ["Warm", "Cold"],
+        ["Blue", "Green"],
+        indices_q1=["1", "2"],
+        indices_q2=["A", "B"],
+    )
+    source_result = InferenceResult(
+        questionnaire=prompt,
+        results={-1: QuestionLLMResponseTuple("battery", "raw", None, None)},
+    )
+    captured = {}
+
+    def fake_generation_fn(**kwargs):
+        captured["method"] = kwargs["response_generation_method"][0]
+        return ['{"Red?":{"answer":"1"},"Blue?":{"answer":"Green"}}'], None, None
+
+    parse_with_llm_battery(
+        model=object(),
+        survey_results=[source_result],
+        response_generation_method=[
+            JSONSingleResponseGenerationMethod(output_index_only=True),
+            JSONSingleResponseGenerationMethod(),
+        ],
+        generation_fn=fake_generation_fn,
+        print_progress=False,
+    )
+
+    question_objects = captured["method"].json_object.children
+    assert question_objects[0].children[0].constraints.enum == ["1", "2"]
+    assert question_objects[1].children[0].constraints.enum == ["A: Blue", "B: Green"]

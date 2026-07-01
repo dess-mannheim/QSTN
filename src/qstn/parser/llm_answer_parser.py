@@ -56,6 +56,10 @@ DEFAULT_LLM_AS_A_JUDGE_BATTERY_PROMPT: str = (
     + "Aggregated response by LLM: {llm_response}"
 )
 SOURCE_LLM_RESPONSE_COLUMN: str = "source_llm_response"
+DEFAULT_NO_ANSWER_OPTION_INSTRUCTION: str = (
+    'If no valid answer can be extracted, return exactly "{no_answer_option}" for that question.\n'
+)
+DEFAULT_LLM_AS_A_JUDGE_RESPONSE_GENERATION_METHOD = JSONSingleResponseGenerationMethod()
 
 
 def parse_json_str(answer: str) -> dict[str, str] | None:
@@ -606,13 +610,13 @@ def _contains_options_placeholder(value: Any) -> bool:
     return isinstance(value, str) and "{options}" in value
 
 
-def _build_no_answer_option_instruction(no_answer_option: str | None) -> str:
+def _build_no_answer_option_instruction(
+    no_answer_option: str | None,
+    no_answer_option_instruction: str,
+) -> str:
     if no_answer_option is None:
         return ""
-    return (
-        f'If no valid answer can be extracted, return exactly "{no_answer_option}" '
-        + "for that question.\n"
-    )
+    return no_answer_option_instruction.format(no_answer_option=no_answer_option)
 
 
 def _materialize_json_items_for_choices(
@@ -647,6 +651,30 @@ def _materialize_json_items_for_choices(
         explanation=json_object.explanation,
         children=children,
     )
+
+
+def _answer_choices_for_method(
+    questionnaire: LLMPrompt,
+    item_id: Any,
+    response_generation_method: ResponseGenerationMethod | None,
+    answer_options: (
+        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
+    ) = None,
+) -> list[str]:
+    """Resolve one question's choices using the selected parser RGM."""
+    scoped_answer_options = _resolve_answer_options_override_for_questionnaire(
+        questionnaire=questionnaire,
+        answer_options=answer_options,
+    )
+    question = _find_question_by_item_id(questionnaire, item_id)
+    effective_answer_options = _resolve_answer_options_for_question(
+        item_id=item_id,
+        item_answer_options=question.answer_options if question is not None else None,
+        scoped_answer_options=scoped_answer_options,
+    )
+    if effective_answer_options is None:
+        return []
+    return effective_answer_options._response_generation_options(response_generation_method)
 
 
 def _materialize_single_question_response_generation_method(
@@ -684,10 +712,6 @@ def _materialize_battery_response_generation_method(
     if not isinstance(response_generation_method, JSONResponseGenerationMethod):
         return response_generation_method
 
-    answer_choices_lookup = _build_answer_choices_lookup(
-        questionnaire=questionnaire,
-        answer_options=answer_options,
-    )
     questions = list(questionnaire.get_questions())
     top_level_objects = [
         child
@@ -697,7 +721,12 @@ def _materialize_battery_response_generation_method(
     is_already_nested = len(top_level_objects) == len(questions)
     nested_children: list[JSONObject] = []
     for question in questions:
-        choices = answer_choices_lookup.get(question.item_id, [])
+        choices = _answer_choices_for_method(
+            questionnaire=questionnaire,
+            item_id=question.item_id,
+            response_generation_method=response_generation_method,
+            answer_options=answer_options,
+        )
         adjusted_choices = _with_optional_no_answer_choice(choices, no_answer_option)
         if is_already_nested:
             matching_object = next(
@@ -731,6 +760,57 @@ def _materialize_battery_response_generation_method(
 
     return copy_json_response_generation_method(
         response_generation_method,
+        json_object=JSONObject(children=nested_children),
+    )
+
+
+def _materialize_battery_question_response_generation_methods(
+    response_generation_methods: list[ResponseGenerationMethod],
+    questionnaire: LLMPrompt,
+    no_answer_option: str | None,
+    answer_options: (
+        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
+    ) = None,
+) -> JSONResponseGenerationMethod:
+    """Combine one JSON response-generation method per battery question."""
+    questions = list(questionnaire.get_questions())
+    if len(response_generation_methods) != len(questions):
+        raise ValueError(
+            "`response_generation_method` must contain one method per battery question."
+        )
+    if not all(
+        isinstance(method, JSONResponseGenerationMethod) for method in response_generation_methods
+    ):
+        raise TypeError(
+            "Per-question battery response-generation methods must all be JSON "
+            "response-generation methods."
+        )
+
+    materialized_methods: list[JSONResponseGenerationMethod] = []
+    nested_children: list[JSONObject] = []
+    for question, method in zip(questions, response_generation_methods):
+        materialized_method = _materialize_single_question_response_generation_method(
+            method,
+            answer_choices=_answer_choices_for_method(
+                questionnaire=questionnaire,
+                item_id=question.item_id,
+                response_generation_method=method,
+                answer_options=answer_options,
+            ),
+            no_answer_option=no_answer_option,
+        )
+        assert isinstance(materialized_method, JSONResponseGenerationMethod)
+        materialized_methods.append(materialized_method)
+        nested_children.append(
+            JSONObject(
+                json_field=materialized_method.render_battery_question_key(question),
+                children=deepcopy(materialized_method.json_object.children),
+            )
+        )
+
+    base_method = materialized_methods[0]
+    return copy_json_response_generation_method(
+        base_method,
         json_object=JSONObject(children=nested_children),
     )
 
@@ -897,7 +977,12 @@ def _parse_with_llm_non_battery(
     prompt: str = DEFAULT_LLM_AS_A_JUDGE_PROMPT,
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = DEFAULT_LLM_AS_A_JUDGE_RESPONSE_GENERATION_METHOD,
+    no_answer_option: str | None = None,
+    answer_options: (
+        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
     ) = None,
+    no_answer_option_instruction: str = DEFAULT_NO_ANSWER_OPTION_INSTRUCTION,
     generation_fn: Callable[..., tuple[list[str], list[Any] | None, list[Any] | None]] = (
         batch_generation
     ),
@@ -905,19 +990,13 @@ def _parse_with_llm_non_battery(
     api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
-    use_parser: bool = True,
-    no_answer_option: str | None = None,
     seed: int = 42,
-    answer_options: (
-        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
-    ) = None,
     **generation_kwargs: Any,
 ) -> dict[LLMPrompt, pd.DataFrame]:
     parser_jobs: list[dict[str, Any]] = []
     source_response_map: dict[LLMPrompt, dict[Any, str]] = defaultdict(dict)
     resolved_response_generation_methods: list[ResponseGenerationMethod | None] = []
     options_lookup_cache: dict[LLMPrompt, dict[Any, str]] = {}
-    answer_choices_lookup_cache: dict[LLMPrompt, dict[Any, list[str]]] = {}
 
     flat_items: list[tuple[LLMPrompt, Any, QuestionLLMResponseTuple]] = []
     for survey_result in survey_results:
@@ -931,8 +1010,6 @@ def _parse_with_llm_non_battery(
                 "of parser jobs."
             )
         source_methods: list[ResponseGenerationMethod | None] = list(response_generation_method)
-    elif response_generation_method is None and use_parser:
-        source_methods = [JSONSingleResponseGenerationMethod() for _ in flat_items]
     else:
         source_methods = [response_generation_method for _ in flat_items]
 
@@ -942,23 +1019,26 @@ def _parse_with_llm_non_battery(
                 questionnaire=questionnaire,
                 answer_options=answer_options,
             )
-            answer_choices_lookup_cache[questionnaire] = _build_answer_choices_lookup(
-                questionnaire=questionnaire,
-                answer_options=answer_options,
-            )
 
         options_lookup = options_lookup_cache[questionnaire]
-        answer_choices_lookup = answer_choices_lookup_cache[questionnaire]
         current_method = _materialize_single_question_response_generation_method(
             source_methods[i],
-            answer_choices=answer_choices_lookup.get(item_id, []),
+            answer_choices=_answer_choices_for_method(
+                questionnaire=questionnaire,
+                item_id=item_id,
+                response_generation_method=source_methods[i],
+                answer_options=answer_options,
+            ),
             no_answer_option=no_answer_option,
         )
         parser_prompt = prompt.format(
             question=qa_tuple.question,
             llm_response=qa_tuple.llm_response,
             answer_options=options_lookup.get(item_id, ""),
-            no_answer_option_instruction=_build_no_answer_option_instruction(no_answer_option),
+            no_answer_option_instruction=_build_no_answer_option_instruction(
+                no_answer_option,
+                no_answer_option_instruction,
+            ),
             automatic_output_instructions=_automatic_output_instructions(current_method),
         )
         parser_jobs.append(
@@ -988,7 +1068,7 @@ def _parse_with_llm_non_battery(
         **generation_kwargs,
     )
 
-    if use_parser:
+    if response_generation_method is not None:
         parsed_results = _parse_json_non_battery(parser_survey_results)
     else:
         parsed_results = raw_responses(parser_survey_results)
@@ -1006,7 +1086,12 @@ def parse_with_llm(
     battery_prompt: str = DEFAULT_LLM_AS_A_JUDGE_BATTERY_PROMPT,
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = DEFAULT_LLM_AS_A_JUDGE_RESPONSE_GENERATION_METHOD,
+    no_answer_option: str | None = None,
+    answer_options: (
+        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
     ) = None,
+    no_answer_option_instruction: str = DEFAULT_NO_ANSWER_OPTION_INSTRUCTION,
     generation_fn: Callable[..., tuple[list[str], list[Any] | None, list[Any] | None]] = (
         batch_generation
     ),
@@ -1014,12 +1099,7 @@ def parse_with_llm(
     api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
-    use_parser: bool = True,
-    no_answer_option: str | None = None,
     seed: int = 42,
-    answer_options: (
-        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
-    ) = None,
     **generation_kwargs: Any,
 ) -> dict[LLMPrompt, pd.DataFrame]:
     """
@@ -1043,9 +1123,11 @@ def parse_with_llm(
             `{no_answer_option_instruction}` placeholders.
         response_generation_method (
             ResponseGenerationMethod | List[ResponseGenerationMethod], optional
-        ): Constraint for parser output. If `use_parser=True` and this is `None`,
-            default JSON parser schemas are applied. If no answer options are
-            available for a question, the parser falls back to a free-text JSON
+        ): Constraint for parser output. One method is applied to all questions;
+            alternatively, provide one method per question. The default is
+            `JSONSingleResponseGenerationMethod()`. Passing `None` disables
+            structured parsing and returns raw judge-model outputs. If no answer
+            options are available for a question, the parser falls back to a free-text JSON
             value for that field instead of enforcing an enum.
         generation_fn (Callable): Generation function following the
             `batch_generation` output contract.
@@ -1053,17 +1135,17 @@ def parse_with_llm(
         api_concurrency (int): Max concurrent API requests for OpenAI calls.
         print_conversation (bool): Whether parser conversations are printed.
         print_progress (bool): Whether parser progress bars are shown.
-        use_parser (bool): If `True`, parser outputs are post-processed into
-            structured dataframes (`parse_json` / `parse_json_battery`). If
-            `False`, raw parser model outputs are returned.
         no_answer_option (str, optional): Optional additional answer label that
             allows parser output to mark unanswered/unparseable cases.
-        seed (int): Random seed for parser inference.
         answer_options (AnswerOptions | Dict[int, AnswerOptions] |
             Dict[LLMPrompt, AnswerOptions | Dict[int, AnswerOptions]], optional):
             Optional override for answer options used by parser prompts and
             parser JSON schemas. This is useful when original survey questions
             were run without embedded answer options.
+        no_answer_option_instruction (str): Instruction inserted through the
+            `{no_answer_option_instruction}` prompt placeholder when
+            `no_answer_option` is set. It may contain `{no_answer_option}`.
+        seed (int): Random seed for parser inference.
         generation_kwargs: Additional generation kwargs passed to `generation_fn`.
 
     Returns:
@@ -1072,6 +1154,36 @@ def parse_with_llm(
     """
     battery_results, non_battery_results = _split_battery_results(survey_results)
     all_results: dict[LLMPrompt, pd.DataFrame] = {}
+    non_battery_methods = response_generation_method
+    battery_methods = response_generation_method
+
+    if isinstance(response_generation_method, list) and battery_results and non_battery_results:
+        expected_method_count = sum(
+            (
+                len(list(result.questionnaire.get_questions()))
+                if _is_battery_like_result(result)
+                else len(result.results)
+            )
+            for result in survey_results
+        )
+        if len(response_generation_method) != expected_method_count:
+            raise ValueError("`response_generation_method` must contain one method per question.")
+
+        non_battery_methods = []
+        battery_methods = []
+        offset = 0
+        for result in survey_results:
+            method_count = (
+                len(list(result.questionnaire.get_questions()))
+                if _is_battery_like_result(result)
+                else len(result.results)
+            )
+            selected_methods = response_generation_method[offset : offset + method_count]
+            if _is_battery_like_result(result):
+                battery_methods.extend(selected_methods)
+            else:
+                non_battery_methods.extend(selected_methods)
+            offset += method_count
 
     if non_battery_results:
         all_results.update(
@@ -1080,16 +1192,16 @@ def parse_with_llm(
                 survey_results=non_battery_results,
                 system_prompt=system_prompt,
                 prompt=prompt,
-                response_generation_method=response_generation_method,
+                response_generation_method=non_battery_methods,
                 generation_fn=generation_fn,
                 client_model_name=client_model_name,
                 api_concurrency=api_concurrency,
                 print_conversation=print_conversation,
                 print_progress=print_progress,
-                use_parser=use_parser,
                 no_answer_option=no_answer_option,
-                seed=seed,
                 answer_options=answer_options,
+                no_answer_option_instruction=no_answer_option_instruction,
+                seed=seed,
                 **generation_kwargs,
             )
         )
@@ -1108,16 +1220,16 @@ def parse_with_llm(
                 survey_results=battery_results,
                 system_prompt=system_prompt,
                 prompt=selected_battery_prompt,
-                response_generation_method=response_generation_method,
+                response_generation_method=battery_methods,
                 generation_fn=generation_fn,
                 client_model_name=client_model_name,
                 api_concurrency=api_concurrency,
                 print_conversation=print_conversation,
                 print_progress=print_progress,
-                use_parser=use_parser,
                 no_answer_option=no_answer_option,
-                seed=seed,
                 answer_options=answer_options,
+                no_answer_option_instruction=no_answer_option_instruction,
+                seed=seed,
                 **generation_kwargs,
             )
         )
@@ -1132,7 +1244,12 @@ def parse_with_llm_battery(
     prompt: str = DEFAULT_LLM_AS_A_JUDGE_BATTERY_PROMPT,
     response_generation_method: (
         ResponseGenerationMethod | list[ResponseGenerationMethod] | None
+    ) = DEFAULT_LLM_AS_A_JUDGE_RESPONSE_GENERATION_METHOD,
+    no_answer_option: str | None = None,
+    answer_options: (
+        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
     ) = None,
+    no_answer_option_instruction: str = DEFAULT_NO_ANSWER_OPTION_INSTRUCTION,
     generation_fn: Callable[..., tuple[list[str], list[Any] | None, list[Any] | None]] = (
         batch_generation
     ),
@@ -1140,20 +1257,14 @@ def parse_with_llm_battery(
     api_concurrency: int = 10,
     print_conversation: bool = False,
     print_progress: bool = True,
-    use_parser: bool = True,
-    no_answer_option: str | None = None,
     seed: int = 42,
-    answer_options: (
-        AnswerOptions | dict[Any, AnswerOptions | dict[Any, AnswerOptions] | None] | None
-    ) = None,
     **generation_kwargs: Any,
 ) -> dict[LLMPrompt, pd.DataFrame]:
     """
     Parse battery-style aggregated survey answers using LLM-as-a-judge.
 
-    If `use_parser=True`, outputs are expanded to per-question rows via
-    `parse_json_battery`. If `use_parser=False`, the single aggregated row is
-    returned (raw parser output).
+    Structured outputs are expanded to per-question rows via `parse_json_battery`.
+    Passing `response_generation_method=None` returns one aggregated raw-output row.
 
     Args:
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client used for
@@ -1167,8 +1278,9 @@ def parse_with_llm_battery(
             `{no_answer_option_instruction}` placeholders.
         response_generation_method (
             ResponseGenerationMethod | List[ResponseGenerationMethod], optional
-        ): Constraint for parser output. If `use_parser=True` and this is `None`,
-            a default battery-aware JSON schema is created. If no answer
+        ): Constraint for parser output. The default single-answer JSON method
+            is expanded into a battery-aware schema. Passing `None` returns raw
+            judge-model output. If no answer
             options are available for a question, that question falls back to a
             free-text JSON value instead of enforcing an enum.
         generation_fn (Callable): Generation function following the
@@ -1177,9 +1289,6 @@ def parse_with_llm_battery(
         api_concurrency (int): Max concurrent API requests for OpenAI calls.
         print_conversation (bool): Whether parser conversations are printed.
         print_progress (bool): Whether parser progress bars are shown.
-        use_parser (bool): If `True`, parser outputs are expanded with
-            `parse_json_battery`. If `False`, raw aggregated parser output is
-            returned.
         no_answer_option (str, optional): Optional additional answer label that
             allows parser output to mark unanswered/unparseable cases.
         seed (int): Random seed for parser inference.
@@ -1188,6 +1297,10 @@ def parse_with_llm_battery(
             Optional override for answer options used by parser prompts and
             parser JSON schemas. This is useful when original survey questions
             were run without embedded answer options.
+        no_answer_option_instruction (str): Instruction inserted through the
+            `{no_answer_option_instruction}` prompt placeholder when
+            `no_answer_option` is set. It may contain `{no_answer_option}`.
+        seed (int): Random seed for parser inference.
         generation_kwargs: Additional generation kwargs passed to `generation_fn`.
 
     Returns:
@@ -1208,29 +1321,48 @@ def parse_with_llm_battery(
     resolved_response_generation_methods: list[ResponseGenerationMethod | None] = []
     resolved_methods_by_questionnaire: dict[LLMPrompt, ResponseGenerationMethod | None] = {}
 
+    methods_are_materialized = [False for _ in survey_results]
     if isinstance(response_generation_method, list):
-        if len(response_generation_method) != len(survey_results):
-            raise ValueError(
-                "`response_generation_method` must have the same length as battery parser jobs."
-            )
-        source_methods: list[ResponseGenerationMethod | None] = list(response_generation_method)
-    elif response_generation_method is None and use_parser:
-        source_methods = _build_default_battery_response_generation_methods(
-            survey_results,
-            no_answer_option=no_answer_option,
-            answer_options=answer_options,
+        total_question_count = sum(
+            len(list(result.questionnaire.get_questions())) for result in survey_results
         )
+        if len(response_generation_method) == len(survey_results):
+            source_methods: list[ResponseGenerationMethod | None] = list(response_generation_method)
+        elif len(response_generation_method) == total_question_count:
+            source_methods = []
+            offset = 0
+            for result in survey_results:
+                question_count = len(list(result.questionnaire.get_questions()))
+                question_methods = response_generation_method[offset : offset + question_count]
+                source_methods.append(
+                    _materialize_battery_question_response_generation_methods(
+                        response_generation_methods=question_methods,
+                        questionnaire=result.questionnaire,
+                        no_answer_option=no_answer_option,
+                        answer_options=answer_options,
+                    )
+                )
+                offset += question_count
+            methods_are_materialized = [True for _ in survey_results]
+        else:
+            raise ValueError(
+                "`response_generation_method` must contain one method per battery "
+                "parser job or one method per battery question."
+            )
     else:
         source_methods = [response_generation_method for _ in survey_results]
 
     for i, survey_result in enumerate(survey_results):
         qa_tuple = survey_result.results[-1]
-        current_method = _materialize_battery_response_generation_method(
-            source_methods[i],
-            questionnaire=survey_result.questionnaire,
-            no_answer_option=no_answer_option,
-            answer_options=answer_options,
-        )
+        if methods_are_materialized[i]:
+            current_method = source_methods[i]
+        else:
+            current_method = _materialize_battery_response_generation_method(
+                source_methods[i],
+                questionnaire=survey_result.questionnaire,
+                no_answer_option=no_answer_option,
+                answer_options=answer_options,
+            )
         parser_prompt = prompt.format(
             question=qa_tuple.question,
             llm_response=qa_tuple.llm_response,
@@ -1238,7 +1370,10 @@ def parse_with_llm_battery(
                 questionnaire=survey_result.questionnaire,
                 answer_options=answer_options,
             ),
-            no_answer_option_instruction=_build_no_answer_option_instruction(no_answer_option),
+            no_answer_option_instruction=_build_no_answer_option_instruction(
+                no_answer_option,
+                no_answer_option_instruction,
+            ),
             automatic_output_instructions=_automatic_output_instructions(current_method),
         )
         parser_jobs.append(
@@ -1269,7 +1404,7 @@ def parse_with_llm_battery(
         **generation_kwargs,
     )
 
-    if use_parser:
+    if response_generation_method is not None:
         parsed_results = _parse_json_battery_with_expected_methods(
             survey_results=parser_survey_results,
             expected_methods_by_questionnaire=resolved_methods_by_questionnaire,
