@@ -122,7 +122,9 @@ def _parse_json_non_battery(
                     row_data.append(logprobs)
                     row_columns.append("logprobs")
 
-                answers.append(pd.DataFrame(data=[row_data], columns=row_columns, index=[0]))
+                answers.append(
+                    pd.DataFrame(data=[row_data], columns=row_columns, index=[0], dtype=object)
+                )
             else:
                 answers.append(
                     pd.DataFrame(
