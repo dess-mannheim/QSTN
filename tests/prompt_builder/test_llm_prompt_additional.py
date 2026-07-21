@@ -817,3 +817,22 @@ def test_generate_likert_options_covers_index_and_order_variants():
 
     assert char_lower.answer_texts.indices == ["b", "c"]
     assert char_upper.answer_texts.indices == ["B", "C"]
+
+
+def test_questionnaire_response_generation_preset_reads_constrain_output():
+    df = pd.DataFrame(
+        [
+            {
+                "questionnaire_item_id": 1,
+                "question_content": "Q1",
+                "answer_texts": ["No", "Yes"],
+                "response_generation_method": "json_single",
+                "constrain_output": False,
+            }
+        ]
+    )
+
+    prompt = LLMPrompt(questionnaire_source=df)
+    method = prompt.get_question(0).answer_options.response_generation_method
+
+    assert method.constrain_output is False

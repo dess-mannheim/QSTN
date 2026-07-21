@@ -314,3 +314,30 @@ def test_api_completion_batch_uses_exact_prompts_and_parses_reasoning():
     assert output == ["answer"]
     assert logprobs == [None]
     assert reasoning == ["why"]
+
+
+def test_create_structured_params_respects_constrain_output():
+    disabled_json = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem("answer")]),
+        constrain_output=False,
+    )
+    assert remote_inference._create_structured_params(2, disabled_json) == []
+    assert remote_inference._create_structured_output(2, disabled_json) == [None, None]
+
+    enabled_json = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem("answer")])
+    )
+    params = remote_inference._create_structured_params(
+        2,
+        [disabled_json, enabled_json],
+    )
+    assert params[0] is None
+    assert isinstance(params[1], dict)
+
+
+def test_completion_allows_disabled_output_constraints():
+    method = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem("answer")]),
+        constrain_output=False,
+    )
+    remote_inference._validate_completion_response_generation_method(method)

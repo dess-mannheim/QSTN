@@ -307,7 +307,11 @@ def _validate_completion_response_generation_method(
     unsupported = [
         method
         for method in methods
-        if isinstance(method, (JSONResponseGenerationMethod, ChoiceResponseGenerationMethod))
+        if (
+            method is not None
+            and method.constrain_output
+            and isinstance(method, (JSONResponseGenerationMethod, ChoiceResponseGenerationMethod))
+        )
     ]
     if unsupported:
         raise ValueError(
@@ -409,7 +413,7 @@ async def _run_api_batch_async(
                 **generation_kwargs,
             }
 
-            if response_generation_method:
+            if response_generation_method and response_generation_method.constrain_output:
                 if isinstance(response_generation_method, JSONResponseGenerationMethod):
                     request_kwargs["response_format"] = {
                         "type": "json_schema",
@@ -562,9 +566,12 @@ def _create_structured_output(
     )
 
     if use_structured:
-        return _create_structured_params(
-            batch_size=batch_size,
-            response_generation_method=response_generation_method,
+        return (
+            _create_structured_params(
+                batch_size=batch_size,
+                response_generation_method=response_generation_method,
+            )
+            or [None] * batch_size
         )
 
     return None
@@ -579,7 +586,10 @@ def _create_structured_params(
 
     # Same for all calls
     if isinstance(response_generation_method, ResponseGenerationMethod):
-        if isinstance(response_generation_method, JSONResponseGenerationMethod):
+        if (
+            isinstance(response_generation_method, JSONResponseGenerationMethod)
+            and response_generation_method.constrain_output
+        ):
             pydantic_model = build_pydantic_model_from_json_object(
                 json_object=response_generation_method.json_object,
             )
@@ -600,7 +610,10 @@ def _create_structured_params(
         cache: dict[str, Any] = {}
         for i in range(batch_size):
             current_method = response_generation_method[i]
-            if isinstance(current_method, JSONResponseGenerationMethod):
+            if (
+                isinstance(current_method, JSONResponseGenerationMethod)
+                and current_method.constrain_output
+            ):
                 key = _make_cache_key(current_method.get_json_prompt(), None)
 
                 if key not in cache:

@@ -133,29 +133,42 @@ def _build_response_generation_method(
         item_id,
         default=True,
     )
+    constrain_output = optional_bool(
+        row,
+        QuestionnaireLoaderColumn.CONSTRAIN_OUTPUT,
+        item_id,
+        default=True,
+    )
 
     if preset == ResponseGenerationPreset.CHOICE:
         return ChoiceResponseGenerationMethod(
             output_index_only=output_index_only,
             constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
         )
     if preset == ResponseGenerationPreset.LOGPROB:
         return LogprobResponseGenerationMethod(
             output_index_only=output_index_only,
             constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
         )
     if preset == ResponseGenerationPreset.JSON_SINGLE:
         return JSONSingleResponseGenerationMethod(
             output_index_only=output_index_only,
             constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
         )
     if preset == ResponseGenerationPreset.JSON_REASONING:
         return JSONReasoningResponseGenerationMethod(
             output_index_only=output_index_only,
             constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
         )
     if preset == ResponseGenerationPreset.JSON_DISTRIBUTION:
-        return JSONVerbalizedDistribution(output_index_only=output_index_only)
+        return JSONVerbalizedDistribution(
+            output_index_only=output_index_only,
+            constrain_output=constrain_output,
+        )
 
     return None
 

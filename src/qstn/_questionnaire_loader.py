@@ -11,6 +11,7 @@ class QuestionnaireLoaderColumn(StrEnum):
     ANSWER_CODES = "answer_codes"
     ANSWER_TEXTS = "answer_texts"
     CONSTRAIN_ANSWER_OPTIONS = "constrain_answer_options"
+    CONSTRAIN_OUTPUT = "constrain_output"
     INDEX_ANSWER_SEPARATOR = "index_answer_separator"
     LIKERT_ADD_MIDDLE_CATEGORY = "likert_add_middle_category"
     LIKERT_ADD_REFUSAL = "likert_add_refusal"

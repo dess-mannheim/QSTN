@@ -301,3 +301,40 @@ def test_print_conversation_keeps_empty_system_message(monkeypatch):
         number_of_printed_conversations=1,
     )
     assert "-- System Message --" in written[0]
+
+
+def test_structured_sampling_params_respects_constrain_output():
+    disabled_json = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem("answer")]),
+        constrain_output=False,
+    )
+    params = local_inference._structured_sampling_params(
+        batch_size=1,
+        seeds=[1],
+        response_generation_method=disabled_json,
+    )
+    assert not hasattr(params[0], "structured_outputs")
+
+    enabled_json = JSONResponseGenerationMethod(
+        json_object=JSONObject(children=[JSONItem("answer")])
+    )
+    mixed_params = local_inference._structured_sampling_params(
+        batch_size=2,
+        seeds=[1, 2],
+        response_generation_method=[disabled_json, enabled_json],
+    )
+    assert mixed_params[0].structured_outputs is None
+    assert hasattr(mixed_params[1], "structured_outputs")
+
+    choice = ChoiceResponseGenerationMethod(constrain_output=False)
+    choice_params = local_inference._structured_sampling_params(
+        batch_size=1,
+        seeds=[1],
+        response_generation_method=choice,
+    )
+    assert not hasattr(choice_params[0], "structured_outputs")
+
+    logprob = LogprobResponseGenerationMethod(constrain_output=False)
+    generation_kwargs = {}
+    assert local_inference._update_logprob_kwargs(logprob, generation_kwargs) is logprob
+    assert generation_kwargs["logprobs"] == logprob.top_logprobs

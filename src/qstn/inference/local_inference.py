@@ -374,7 +374,10 @@ def _structured_sampling_params(
 
     # Same for all calls
     if isinstance(response_generation_method, ResponseGenerationMethod):
-        if isinstance(response_generation_method, JSONResponseGenerationMethod):
+        if (
+            isinstance(response_generation_method, JSONResponseGenerationMethod)
+            and response_generation_method.constrain_output
+        ):
             pydantic_model = build_pydantic_model_from_json_object(
                 json_object=response_generation_method.json_object,
             )
@@ -400,7 +403,10 @@ def _structured_sampling_params(
         cache: dict[str, StructuredOutputsParams] = {}
         for i in range(batch_size):
             current_method = response_generation_method[i]
-            if isinstance(current_method, JSONResponseGenerationMethod):
+            if (
+                isinstance(current_method, JSONResponseGenerationMethod)
+                and current_method.constrain_output
+            ):
                 key = _make_cache_key(current_method.get_json_prompt(), None)
 
                 if key not in cache:

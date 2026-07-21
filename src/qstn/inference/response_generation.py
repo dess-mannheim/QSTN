@@ -138,6 +138,14 @@ class JSONObject:
 class ResponseGenerationMethod(ABC):
     """Abstract base class for constraining model output for closed-ended questions."""
 
+    def __init__(
+        self,
+        constrain_answer_options: bool = True,
+        constrain_output: bool = True,
+    ) -> None:
+        self.constrain_answer_options = constrain_answer_options
+        self.constrain_output = constrain_output
+
     def prepare_for_answer_options(
         self,
         options: list[str],
@@ -164,13 +172,16 @@ class JSONResponseGenerationMethod(ResponseGenerationMethod):
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
         constrain_answer_options: bool = True,
         response_field: str | None = None,
+        constrain_output: bool = True,
     ):
-        super().__init__()
+        super().__init__(
+            constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
+        )
         self.json_object = json_object
         self.output_template = output_template
         self.output_index_only = output_index_only
         self.battery_question_key_template = battery_question_key_template
-        self.constrain_answer_options = constrain_answer_options
         self.response_field = response_field
 
     def get_json_prompt(self: Self, questions: list[QuestionnaireItem] = ()):
@@ -273,11 +284,14 @@ class ChoiceResponseGenerationMethod(ResponseGenerationMethod):
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
         constrain_answer_options: bool = True,
+        constrain_output: bool = True,
     ):
-        super().__init__()
+        super().__init__(
+            constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
+        )
         self.output_template = output_template
         self.output_index_only = output_index_only
-        self.constrain_answer_options = constrain_answer_options
         self._resolved_choices: list[str] | None = None
 
     @property
@@ -330,15 +344,18 @@ class LogprobResponseGenerationMethod(ResponseGenerationMethod):
         output_template: str = prompt_templates.SYSTEM_SINGLE_ANSWER,
         output_index_only: bool = False,
         constrain_answer_options: bool = True,
+        constrain_output: bool = True,
     ):
-        super().__init__()
+        super().__init__(
+            constrain_answer_options=constrain_answer_options,
+            constrain_output=constrain_output,
+        )
         self.token_position = token_position
         self.token_limit = token_limit
         self.top_logprobs = top_logprobs
         self.ignore_reasoning = ignore_reasoning
         self.output_template = output_template
         self.output_index_only = output_index_only
-        self.constrain_answer_options = constrain_answer_options
         self._resolved_choices: list[str] | None = None
 
     @property
@@ -366,7 +383,10 @@ def get_constrained_choices(
     response_generation_method: ChoiceResponseGenerationMethod | LogprobResponseGenerationMethod,
 ) -> list[str] | None:
     """Return prepared guided choices or validate a missing questionnaire attachment."""
-    if not response_generation_method.constrain_answer_options:
+    if (
+        not response_generation_method.constrain_output
+        or not response_generation_method.constrain_answer_options
+    ):
         return None
 
     choices = response_generation_method.resolved_choices
@@ -394,6 +414,7 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
         answer_explanation: str = "{options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
         constrain_answer_options: bool = True,
+        constrain_output: bool = True,
     ):
         super().__init__(
             json_object=JSONObject(
@@ -410,6 +431,7 @@ class JSONSingleResponseGenerationMethod(JSONResponseGenerationMethod):
             battery_question_key_template=battery_question_key_template,
             constrain_answer_options=constrain_answer_options,
             response_field=answer_field,
+            constrain_output=constrain_output,
         )
 
 
@@ -426,6 +448,7 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
         answer_explanation: str = "{options}",
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
         constrain_answer_options: bool = True,
+        constrain_output: bool = True,
     ):
         super().__init__(
             json_object=JSONObject(
@@ -446,6 +469,7 @@ class JSONReasoningResponseGenerationMethod(JSONResponseGenerationMethod):
             battery_question_key_template=battery_question_key_template,
             constrain_answer_options=constrain_answer_options,
             response_field=answer_field,
+            constrain_output=constrain_output,
         )
 
 
@@ -460,6 +484,7 @@ class JSONVerbalizedDistribution(JSONResponseGenerationMethod):
         option_explanation_template: str = "probability for: {option}",
         explanation_prompt_placeholders_first_option_only: bool = True,
         battery_question_key_template: str = qstn.utilities.placeholder.QUESTION_CONTENT,
+        constrain_output: bool = True,
     ):
         self.verbalized_options: list[str] = []
         self.option_field_template = option_field_template
@@ -473,6 +498,7 @@ class JSONVerbalizedDistribution(JSONResponseGenerationMethod):
             output_template=output_template,
             output_index_only=output_index_only,
             battery_question_key_template=battery_question_key_template,
+            constrain_output=constrain_output,
         )
 
     def set_verbalized_options(
@@ -594,5 +620,6 @@ def resolve_battery_response_generation_method(
         battery_question_key_template=base_method.battery_question_key_template,
         constrain_answer_options=base_method.constrain_answer_options,
         response_field=base_method.response_field,
+        constrain_output=base_method.constrain_output,
     )
     return merged_method
