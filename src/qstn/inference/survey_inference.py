@@ -162,7 +162,7 @@ def batch_generation(
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
         prompts: User prompts. Each request may be a string or an ordered sequence
-            of string and ImageInput blocks.
+            of string, ImageInput, AudioInput, and VideoInput blocks.
         response_generation_method (
             ResponseGenerationMethod or List(ResponseGenerationMethod), optional
         ): Configuration for structured output.
@@ -292,7 +292,7 @@ def batch_turn_by_turn_generation(
         model (LLM or AsyncOpenAI): vLLM model or AsyncOpenAI client.
         system_messages (List(str)): System prompts for each conversation.
         prompts: User prompts grouped by conversation. Each turn may be a string
-            or an ordered sequence of string and ImageInput blocks.
+            or an ordered sequence of string, ImageInput, AudioInput, and VideoInput blocks.
         assistant_messages (List(List(str)), optional): Prefilled assistant
             responses. For example, if the first list contains one entry, the
             first assistant turn is prefilled and not inferred.

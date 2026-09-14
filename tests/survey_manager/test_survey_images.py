@@ -3,19 +3,32 @@
 import pytest
 
 from qstn import survey_manager
+from qstn.inference import AudioInput, VideoInput
 from qstn.prompt_builder import ImageInput, LLMPrompt
 
 
 def _sources(images):
-    return [str(image.source) for image in images]
+    return [str(image.source) for image in images if hasattr(image, "source")]
 
 
+@pytest.mark.parametrize("mixed", [False, True])
 def test_single_item_routes_global_and_current_item_images(
-    mock_questionnaires, mock_openai_client, monkeypatch
+    mixed, mock_questionnaires, mock_openai_client, monkeypatch
 ):
     prompt = LLMPrompt(questionnaire_source=mock_questionnaires)
-    prompt.add_image("https://example.com/global.png")
-    prompt.add_image("https://example.com/one.png", item_id=1)
+    prompt.add_media(
+        AudioInput("https://example.com/global.png")
+        if mixed
+        else ImageInput("https://example.com/global.png")
+    )
+    prompt.add_media(
+        (
+            VideoInput("https://example.com/one.png")
+            if mixed
+            else ImageInput("https://example.com/one.png")
+        ),
+        item_id=1,
+    )
     prompt.add_image("https://example.com/two.png", item_id=2)
     captured = []
 
@@ -31,28 +44,35 @@ def test_single_item_routes_global_and_current_item_images(
         print_progress=False,
     )
 
-    assert _sources(captured[0][0][1:]) == [
-        "https://example.com/global.png",
-        "https://example.com/one.png",
-    ]
-    assert _sources(captured[1][0][1:]) == [
-        "https://example.com/global.png",
-        "https://example.com/two.png",
-    ]
+    assert _sources(captured[0][0]) == (
+        ["https://example.com/one.png", "https://example.com/global.png"]
+        if mixed
+        else ["https://example.com/global.png", "https://example.com/one.png"]
+    )
+    assert _sources(captured[1][0]) == (
+        ["https://example.com/two.png", "https://example.com/global.png"]
+        if mixed
+        else ["https://example.com/global.png", "https://example.com/two.png"]
+    )
 
 
+@pytest.mark.parametrize("mixed", [False, True])
 def test_battery_interleaves_each_question_with_its_images(
-    mock_questionnaires, mock_openai_client, monkeypatch
+    mixed, mock_questionnaires, mock_openai_client, monkeypatch
 ):
     prompt = LLMPrompt(
         questionnaire_source=mock_questionnaires,
         prompt="PREFIX\n{{QUESTION_PLACEHOLDER}}\nSUFFIX",
     )
-    global_image = ImageInput("https://example.com/global.png", label="Global")
-    first_image = ImageInput("https://example.com/one.png", label="First detail")
+    global_image = (AudioInput if mixed else ImageInput)(
+        "https://example.com/global.png", label="Global"
+    )
+    first_image = (VideoInput if mixed else ImageInput)(
+        "https://example.com/one.png", label="First detail"
+    )
     second_image = ImageInput("https://example.com/two.png", label="Second detail")
-    prompt.add_image(global_image)
-    prompt.add_image(first_image, item_id=1)
+    prompt.add_media(global_image)
+    prompt.add_media(first_image, item_id=1)
     prompt.add_image(second_image, item_id=2)
     captured = {}
 
@@ -114,14 +134,26 @@ def test_battery_without_images_keeps_original_text_prompt(
     assert "ordered_content" not in captured
 
 
+@pytest.mark.parametrize("mixed", [False, True])
 def test_sequential_preserves_image_history_across_prefilled_turns(
-    mock_questionnaires, mock_openai_client, monkeypatch
+    mixed, mock_questionnaires, mock_openai_client, monkeypatch
 ):
     prompt = LLMPrompt(questionnaire_source=mock_questionnaires).prepare_prompt(
         prefilled_responses={1: "prefilled"}
     )
-    prompt.add_image("https://example.com/global.png")
-    prompt.add_image("https://example.com/one.png", item_id=1)
+    prompt.add_media(
+        AudioInput("https://example.com/global.png")
+        if mixed
+        else ImageInput("https://example.com/global.png")
+    )
+    prompt.add_media(
+        (
+            VideoInput("https://example.com/one.png")
+            if mixed
+            else ImageInput("https://example.com/one.png")
+        ),
+        item_id=1,
+    )
     prompt.add_image("https://example.com/two.png", item_id=2)
     captured = {}
 
@@ -145,16 +177,26 @@ def test_sequential_preserves_image_history_across_prefilled_turns(
     )
 
     prompt_history = captured["prompts"][0]
-    assert [_sources(turn[1:]) for turn in prompt_history] == [
-        ["https://example.com/global.png", "https://example.com/one.png"],
-        ["https://example.com/two.png"],
-    ]
+    assert [_sources(turn) for turn in prompt_history] == (
+        [
+            ["https://example.com/one.png", "https://example.com/global.png"],
+            ["https://example.com/two.png"],
+        ]
+        if mixed
+        else [
+            ["https://example.com/global.png", "https://example.com/one.png"],
+            ["https://example.com/two.png"],
+        ]
+    )
     assert captured["assistant_messages"] == [["prefilled"]]
 
 
-def test_survey_completion_mode_rejects_attached_images(mock_questionnaires, mock_openai_client):
-    prompt = LLMPrompt(questionnaire_source=mock_questionnaires).add_image(
-        "https://example.com/image.png"
+@pytest.mark.parametrize("mixed", [False, True])
+def test_survey_completion_mode_rejects_attached_images(
+    mixed, mock_questionnaires, mock_openai_client
+):
+    prompt = LLMPrompt(questionnaire_source=mock_questionnaires).add_media(
+        (AudioInput if mixed else ImageInput)("https://example.com/image.png")
     )
 
     with pytest.raises(ValueError, match="supported only"):

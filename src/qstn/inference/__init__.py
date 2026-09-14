@@ -1,7 +1,7 @@
 """Public exports for inference helpers and response generation methods."""
 
 from . import dynamic_pydantic, multimodal, response_generation, survey_inference, utils
-from .multimodal import ImageInput
+from .multimodal import AudioInput, ImageInput, VideoInput
 from .response_generation import (
     ChoiceResponseGenerationMethod,
     JSONReasoningResponseGenerationMethod,
@@ -32,6 +32,8 @@ __all__ = [
     "HAS_VLLM",
     "InferenceMode",
     "ImageInput",
+    "AudioInput",
+    "VideoInput",
     "ResponseGenerationMethod",
     "JSONResponseGenerationMethod",
     "ChoiceResponseGenerationMethod",

@@ -13,6 +13,7 @@ For core building blocks and placeholder mechanics, start with the [Foundations 
 :maxdepth: 1
 base_models
 image_models
+video_audio_models
 tutorial1
 tutorial2
 ```

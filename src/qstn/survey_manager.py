@@ -708,11 +708,11 @@ def conduct_survey_sequential(
                 continue
 
             questionnaire = current_batch[survey_id]
-            images = questionnaire.get_images(
+            media = questionnaire.get_media(
                 item_id=questionnaire.get_question_item_id(i),
                 include_global=False,
             )
-            prompt_history[survey_id].append(combine_prompt_content(prompt, images))
+            prompt_history[survey_id].append(combine_prompt_content(prompt, media))
 
         prefilled_by_position: dict[int, str] = {}
         needed_survey_ids: list[int] = []

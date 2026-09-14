@@ -54,16 +54,16 @@ def test_llm_prompt_drops_stale_item_images_on_mutation_and_reload(mock_question
     prompt.add_image("https://example.com/two.png", item_id=2)
 
     prompt.replace_question(0, QuestionnaireItem(item_id=3, question_content="Q3"))
-    assert set(prompt._item_images) == {2}
+    assert set(prompt._item_media) == {2}
 
     prompt.remove_question(1)
-    assert prompt._item_images == {}
+    assert prompt._item_media == {}
 
     prompt.add_image("https://example.com/three.png", item_id=3)
     prompt.load_questionnaire_format(
         pd.DataFrame([{"questionnaire_item_id": 4, "question_content": "Q4"}])
     )
-    assert prompt._item_images == {}
+    assert prompt._item_media == {}
 
 
 def test_renderer_returns_structured_content_for_single_and_sequential(
@@ -200,7 +200,7 @@ def test_image_bearing_completion_rendering_is_rejected(mock_questionnaires):
         "https://example.com/image.png"
     )
 
-    with pytest.raises(ValueError, match="Image-bearing prompts.*chat"):
+    with pytest.raises(ValueError, match="Media-bearing prompts.*chat"):
         prompt.get_prompt_for_questionnaire_type(inference_mode="completion")
 
 

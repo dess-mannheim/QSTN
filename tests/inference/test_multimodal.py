@@ -6,9 +6,13 @@ import pytest
 
 from qstn.inference import local_inference, remote_inference
 from qstn.inference.multimodal import (
+    AudioInput,
     ImageInput,
+    VideoInput,
     build_user_content,
+    format_prompt_content,
     normalize_prompt_content,
+    prompt_content_text,
     validate_text_only_completion_prompts,
 )
 
@@ -105,8 +109,9 @@ def test_build_user_content_preserves_question_image_interleaving():
     ]
 
 
-def test_structured_content_is_optional_per_batch_entry():
-    image = ImageInput("https://example.com/image.png")
+@pytest.mark.parametrize("media_cls", [ImageInput, AudioInput, VideoInput])
+def test_structured_content_is_optional_per_batch_entry(media_cls):
+    image = media_cls("https://example.com/image.png")
     model = CaptureModel()
 
     local_inference.run_vllm_batch(
@@ -119,7 +124,10 @@ def test_structured_content_is_optional_per_batch_entry():
     assert model.batch_messages[0] == [{"role": "user", "content": "plain prompt"}]
     assert model.batch_messages[1][0]["content"] == [
         {"type": "text", "text": "Question"},
-        {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}},
+        {
+            "type": f"{media_cls._kind}_url",
+            f"{media_cls._kind}_url": {"url": "https://example.com/image.png"},
+        },
     ]
 
 
@@ -159,8 +167,9 @@ def test_completion_validation_rejects_structured_content_in_any_group():
         )
 
 
-def test_conversation_turns_accept_unified_prompt_content():
-    image = ImageInput("https://example.com/image.png")
+@pytest.mark.parametrize("media_cls", [ImageInput, AudioInput, VideoInput])
+def test_conversation_turns_accept_unified_prompt_content(media_cls):
+    image = media_cls("https://example.com/image.png")
     model = CaptureModel()
 
     local_inference.run_vllm_batch_conversation(
@@ -178,8 +187,8 @@ def test_conversation_turns_accept_unified_prompt_content():
                 "content": [
                     {"type": "text", "text": "First question"},
                     {
-                        "type": "image_url",
-                        "image_url": {"url": "https://example.com/image.png"},
+                        "type": f"{media_cls._kind}_url",
+                        f"{media_cls._kind}_url": {"url": "https://example.com/image.png"},
                     },
                 ],
             },
@@ -189,8 +198,9 @@ def test_conversation_turns_accept_unified_prompt_content():
     ]
 
 
-def test_local_and_remote_adapters_build_the_same_multimodal_content(monkeypatch):
-    image = ImageInput("https://example.com/image.png", label="Stimulus")
+@pytest.mark.parametrize("media_cls", [ImageInput, AudioInput, VideoInput])
+def test_local_and_remote_adapters_build_the_same_multimodal_content(media_cls, monkeypatch):
+    image = media_cls("https://example.com/image.png", label="Stimulus")
     local_model = CaptureModel()
     captured = {}
 
@@ -230,10 +240,113 @@ def test_local_and_remote_adapters_build_the_same_multimodal_content(monkeypatch
         ),
     ],
 )
-def test_completion_mode_rejects_images(runner, kwargs):
+@pytest.mark.parametrize("media_cls", [ImageInput, AudioInput, VideoInput])
+def test_completion_mode_rejects_images(media_cls, runner, kwargs):
     with pytest.raises(ValueError, match="supported only"):
         runner(
             **kwargs,
-            prompts=[["prompt", ImageInput("https://example.com/image.png")]],
+            prompts=[["prompt", media_cls("https://example.com/image.png")]],
             inference_mode="completion",
         )
+
+
+@pytest.mark.parametrize(
+    "media_cls, mime, suffix", [(AudioInput, "audio/wav", "wav"), (VideoInput, "video/mp4", "mp4")]
+)
+def test_native_media_sources_and_validation(media_cls, mime, suffix, tmp_path):
+    from dataclasses import FrozenInstanceError
+
+    path = tmp_path / f"media.{suffix}"
+    path.write_bytes(b"media")
+    local = media_cls(path, label="Stimulus")
+    assert local.to_url().endswith(";base64,bWVkaWE=")
+    assert local.to_url().startswith(f"data:{mime.split('/')[0]}/")
+    url = "https://example.com/opaque-resource"
+    assert media_cls(url).to_url() == url
+    data_url = f"data:{mime};base64,bWVkaWE="
+    assert media_cls(data_url).to_url() == data_url
+    with pytest.raises(FrozenInstanceError):
+        local.label = "Changed"
+    for source, match in [
+        ("", "must not be empty"),
+        ("   ", "must not be empty"),
+        (str(tmp_path / "missing"), "does not exist"),
+        (str(tmp_path), "not a file"),
+        ("data:image/png;base64,bWVkaWE=", "MIME type"),
+        (f"data:{mime};base64,", "non-empty payload"),
+        (f"data:{mime},bWVkaWE=", "base64-encoded"),
+        (f"data:{mime};base64,!invalid", "valid base64"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            media_cls(source)
+    bad_path = tmp_path / "file.txt"
+    bad_path.write_text("text")
+    with pytest.raises(ValueError, match="MIME type"):
+        media_cls(bad_path)
+    with pytest.raises(TypeError, match="source"):
+        media_cls(b"bytes")
+    with pytest.raises(TypeError, match="label"):
+        media_cls(url, label=123)
+
+
+def test_mixed_media_payload_preview_and_text():
+    audio = AudioInput("data:audio/wav;base64,bWVkaWE=", label="Listen")
+    image = ImageInput("https://example.com/image.png")
+    video = VideoInput("data:video/mp4;base64,bWVkaWE=", label="Watch")
+    blocks = ["First", audio, image, "Then", video]
+    assert normalize_prompt_content(blocks) == tuple(blocks)
+    assert build_user_content(blocks) == [
+        {"type": "text", "text": "First"},
+        {"type": "text", "text": "Listen"},
+        {"type": "audio_url", "audio_url": {"url": audio.source}},
+        {"type": "image_url", "image_url": {"url": image.source}},
+        {"type": "text", "text": "Then"},
+        {"type": "text", "text": "Watch"},
+        {"type": "video_url", "video_url": {"url": video.source}},
+    ]
+    preview = format_prompt_content(blocks)
+    assert "[Audio: Listen | data:audio/wav;base64,...]" in preview
+    assert "[Video: Watch | data:video/mp4;base64,...]" in preview
+    assert "bWVkaWE=" not in preview
+    assert prompt_content_text(blocks) == "FirstListenThenWatch"
+
+
+def test_mixed_conversation_adapters_preserve_history_and_local_payloads(tmp_path, monkeypatch):
+    audio_path = tmp_path / "audio.wav"
+    audio_path.write_bytes(b"audio")
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"video")
+    audio = AudioInput(audio_path, label="Listen")
+    video = VideoInput(video_path, label="Watch")
+    image = ImageInput("https://example.com/image.png")
+    prompts = [[["First", audio, image], ["Second", video]]]
+    captured = {}
+
+    def fake_remote_helper(**kwargs):
+        captured.update(kwargs)
+        return (["answer"], [None], [None])
+
+    monkeypatch.setattr(remote_inference, "_run_async_in_thread", fake_remote_helper)
+    model = CaptureModel()
+    local_inference.run_vllm_batch_conversation(
+        model,
+        system_messages=[None],
+        prompts=prompts,
+        assistant_messages=[["Prior answer"]],
+        print_progress=False,
+    )
+    remote_inference.run_openai_batch_conversation(
+        object(),
+        system_messages=[None],
+        prompts=prompts,
+        assistant_messages=[["Prior answer"]],
+        client_model_name="model",
+        print_progress=False,
+    )
+    assert captured["batch_messages"] == model.batch_messages
+    first, answer, second = model.batch_messages[0]
+    assert first["content"][2] == {"type": "audio_url", "audio_url": {"url": audio.to_url()}}
+    assert first["content"][2]["audio_url"]["url"].endswith(";base64,YXVkaW8=")
+    assert answer == {"role": "assistant", "content": "Prior answer"}
+    assert second["content"][2] == {"type": "video_url", "video_url": {"url": video.to_url()}}
+    assert second["content"][2]["video_url"]["url"].endswith(";base64,dmlkZW8=")

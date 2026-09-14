@@ -19,13 +19,21 @@ from ._questionnaire_loader import (
     row_has_value,
 )
 from .inference.multimodal import (
+    AudioInput,
+    AudioSource,
     ImageInput,
     ImageSource,
+    MediaInput,
     PromptContent,
     PromptContentBlock,
+    VideoInput,
+    VideoSource,
     combine_prompt_content,
     format_prompt_content,
+    normalize_audios,
     normalize_images,
+    normalize_media,
+    normalize_videos,
     prompt_content_text,
 )
 from .inference.response_generation import (
@@ -384,8 +392,8 @@ class LLMPrompt:
         random.seed(seed)
 
         self._questions: list[QuestionnaireItem] = []
-        self._images: tuple[ImageInput, ...] = ()
-        self._item_images: dict[Any, tuple[ImageInput, ...]] = {}
+        self._media: tuple[MediaInput, ...] = ()
+        self._item_media: dict[Any, tuple[MediaInput, ...]] = {}
 
         if self._check_valid_questionnaire(questionnaire_source):
             self.load_questionnaire_format(questionnaire_source=questionnaire_source)
@@ -429,85 +437,252 @@ class LLMPrompt:
         return copy.deepcopy(self)
 
     def add_image(self, image: ImageSource, *, item_id: Any = None) -> Self:
-        """Add an image globally or to one questionnaire item.
+        """Append image globally or to one questionnaire item in attachment order.
 
         Args:
-            image: Image input, URL, data URL, or local image path.
-            item_id: Questionnaire item receiving the image. If omitted, the image
-                applies to the full prompt.
+            image: Image input, URL, data URL, or local path.
+            item_id: Questionnaire item receiving the attachment, or None for global media.
 
         Returns:
             LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If the input type is invalid.
+            ValueError: If the source or questionnaire item is invalid.
         """
-        normalized_image = normalize_images([image])[0]
-        if item_id is None:
-            self._images = (*self._images, normalized_image)
-            return self
+        return self.add_media(normalize_images([image])[0], item_id=item_id)
 
-        self._validate_image_item_id(item_id)
-        self._item_images[item_id] = (*self._item_images.get(item_id, ()), normalized_image)
-        return self
+    def set_images(self, images: Sequence[ImageSource], *, item_id: Any = None) -> Self:
+        """Remove existing images and append replacements within the selected scope.
 
-    def set_images(
-        self,
-        images: Sequence[ImageSource],
-        *,
-        item_id: Any = None,
-    ) -> Self:
-        """Replace global images or the images for one questionnaire item.
+        Other media retain their relative order. An empty collection only removes images.
 
         Args:
-            images: Images, URLs, data URLs, or local image paths to store.
-            item_id: Questionnaire item receiving the images. If omitted, replaces
-                prompt-wide images.
+            images: Image inputs, URLs, data URLs, or local paths to store.
+            item_id: Questionnaire item to update, or None for global media.
 
         Returns:
             LLMPrompt: The current prompt object for fluent configuration.
-        """
-        normalized_image_inputs = normalize_images(images)
-        if item_id is None:
-            self._images = normalized_image_inputs
-            return self
 
-        self._validate_image_item_id(item_id)
-        if normalized_image_inputs:
-            self._item_images[item_id] = normalized_image_inputs
-        else:
-            self._item_images.pop(item_id, None)
-        return self
+        Raises:
+            TypeError: If an input type is invalid.
+            ValueError: If a source or questionnaire item is invalid.
+        """
+        replacements = normalize_images(images)
+        existing = self.get_media(item_id=item_id, include_global=item_id is None)
+        retained = tuple(block for block in existing if not isinstance(block, ImageInput))
+        return self.set_media((*retained, *replacements), item_id=item_id)
 
     def get_images(
-        self,
-        *,
-        item_id: Any = None,
-        include_global: bool = True,
+        self, *, item_id: Any = None, include_global: bool = True
     ) -> tuple[ImageInput, ...]:
-        """Return prompt-wide and optionally item-specific images.
+        """Return images in attachment order, with global images first.
 
         Args:
-            item_id: Questionnaire item whose images should be included.
-            include_global: Whether prompt-wide images should be returned first.
+            item_id: Questionnaire item whose attachments should be included.
+            include_global: Whether to include global attachments before item attachments.
 
         Returns:
-            tuple[ImageInput, ...]: Immutable image collection.
+            tuple[ImageInput, ...]: Immutable collection containing only images.
+
+        Raises:
+            ValueError: If the questionnaire item does not exist.
         """
-        global_images = self._images if include_global else ()
+        return tuple(
+            block
+            for block in self.get_media(item_id=item_id, include_global=include_global)
+            if isinstance(block, ImageInput)
+        )
+
+    def add_audio(self, audio: AudioSource, *, item_id: Any = None) -> Self:
+        """Append audio globally or to one questionnaire item in attachment order.
+
+        Args:
+            audio: Audio input, URL, data URL, or local path.
+            item_id: Questionnaire item receiving the attachment, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If the input type is invalid.
+            ValueError: If the source or questionnaire item is invalid.
+        """
+        return self.add_media(normalize_audios([audio])[0], item_id=item_id)
+
+    def set_audios(self, audios: Sequence[AudioSource], *, item_id: Any = None) -> Self:
+        """Remove existing audios and append replacements within the selected scope.
+
+        Other media retain their relative order. An empty collection only removes audios.
+
+        Args:
+            audios: Audio inputs, URLs, data URLs, or local paths to store.
+            item_id: Questionnaire item to update, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If an input type is invalid.
+            ValueError: If a source or questionnaire item is invalid.
+        """
+        replacements = normalize_audios(audios)
+        existing = self.get_media(item_id=item_id, include_global=item_id is None)
+        retained = tuple(block for block in existing if not isinstance(block, AudioInput))
+        return self.set_media((*retained, *replacements), item_id=item_id)
+
+    def get_audios(
+        self, *, item_id: Any = None, include_global: bool = True
+    ) -> tuple[AudioInput, ...]:
+        """Return audios in attachment order, with global audios first.
+
+        Args:
+            item_id: Questionnaire item whose attachments should be included.
+            include_global: Whether to include global attachments before item attachments.
+
+        Returns:
+            tuple[AudioInput, ...]: Immutable collection containing only audios.
+
+        Raises:
+            ValueError: If the questionnaire item does not exist.
+        """
+        return tuple(
+            block
+            for block in self.get_media(item_id=item_id, include_global=include_global)
+            if isinstance(block, AudioInput)
+        )
+
+    def add_video(self, video: VideoSource, *, item_id: Any = None) -> Self:
+        """Append video globally or to one questionnaire item in attachment order.
+
+        Args:
+            video: Video input, URL, data URL, or local path.
+            item_id: Questionnaire item receiving the attachment, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If the input type is invalid.
+            ValueError: If the source or questionnaire item is invalid.
+        """
+        return self.add_media(normalize_videos([video])[0], item_id=item_id)
+
+    def set_videos(self, videos: Sequence[VideoSource], *, item_id: Any = None) -> Self:
+        """Remove existing videos and append replacements within the selected scope.
+
+        Other media retain their relative order. An empty collection only removes videos.
+
+        Args:
+            videos: Video inputs, URLs, data URLs, or local paths to store.
+            item_id: Questionnaire item to update, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If an input type is invalid.
+            ValueError: If a source or questionnaire item is invalid.
+        """
+        replacements = normalize_videos(videos)
+        existing = self.get_media(item_id=item_id, include_global=item_id is None)
+        retained = tuple(block for block in existing if not isinstance(block, VideoInput))
+        return self.set_media((*retained, *replacements), item_id=item_id)
+
+    def get_videos(
+        self, *, item_id: Any = None, include_global: bool = True
+    ) -> tuple[VideoInput, ...]:
+        """Return videos in attachment order, with global videos first.
+
+        Args:
+            item_id: Questionnaire item whose attachments should be included.
+            include_global: Whether to include global attachments before item attachments.
+
+        Returns:
+            tuple[VideoInput, ...]: Immutable collection containing only videos.
+
+        Raises:
+            ValueError: If the questionnaire item does not exist.
+        """
+        return tuple(
+            block
+            for block in self.get_media(item_id=item_id, include_global=include_global)
+            if isinstance(block, VideoInput)
+        )
+
+    def add_media(self, media: MediaInput, *, item_id: Any = None) -> Self:
+        """Append an explicitly typed attachment globally or to one item.
+
+        Args:
+            media: ImageInput, AudioInput, or VideoInput object to append.
+            item_id: Questionnaire item to update, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If media is not an explicitly typed media object.
+            ValueError: If the questionnaire item does not exist.
+        """
+        normalized = normalize_media([media])
+        existing = self.get_media(item_id=item_id, include_global=item_id is None)
+        return self.set_media((*existing, *normalized), item_id=item_id)
+
+    def set_media(self, media: Sequence[MediaInput], *, item_id: Any = None) -> Self:
+        """Replace all attachments in the selected scope, preserving supplied order.
+
+        Args:
+            media: Explicitly typed media objects; an empty sequence clears the scope.
+            item_id: Questionnaire item to update, or None for global media.
+
+        Returns:
+            LLMPrompt: The current prompt object for fluent configuration.
+
+        Raises:
+            TypeError: If media contains anything other than typed media objects.
+            ValueError: If the questionnaire item does not exist.
+        """
+        normalized = normalize_media(media)
         if item_id is None:
-            return global_images
-        self._validate_image_item_id(item_id)
-        return (*global_images, *self._item_images.get(item_id, ()))
+            self._media = normalized
+            return self
+        self._validate_media_item_id(item_id)
+        if normalized:
+            self._item_media[item_id] = normalized
+        else:
+            self._item_media.pop(item_id, None)
+        return self
 
-    def _validate_image_item_id(self, item_id: Any) -> None:
+    def get_media(
+        self, *, item_id: Any = None, include_global: bool = True
+    ) -> tuple[MediaInput, ...]:
+        """Return ordered attachments, with global media before item media.
+
+        Args:
+            item_id: Questionnaire item whose attachments should be included.
+            include_global: Whether to include global attachments first.
+
+        Returns:
+            tuple[MediaInput, ...]: Immutable collection of mixed media objects.
+
+        Raises:
+            ValueError: If the questionnaire item does not exist.
+        """
+        global_media = self._media if include_global else ()
+        if item_id is None:
+            return global_media
+        self._validate_media_item_id(item_id)
+        return (*global_media, *self._item_media.get(item_id, ()))
+
+    def _validate_media_item_id(self, item_id: Any) -> None:
         if item_id not in {question.item_id for question in self._questions}:
-            raise ValueError(
-                f"Cannot attach images: questionnaire item '{item_id}' does not exist."
-            )
+            raise ValueError(f"Cannot attach media: questionnaire item '{item_id}' does not exist.")
 
-    def _drop_stale_item_images(self) -> None:
+    def _drop_stale_item_media(self) -> None:
         valid_item_ids = {question.item_id for question in self._questions}
-        self._item_images = {
-            item_id: images
-            for item_id, images in self._item_images.items()
+        self._item_media = {
+            item_id: media
+            for item_id, media in self._item_media.items()
             if item_id in valid_item_ids
         }
 
@@ -673,19 +848,19 @@ class LLMPrompt:
         rendered_questions: list[str],
         item_separator: str,
     ) -> PromptContent:
-        """Interleave the exact rendered questions with their assigned images."""
-        global_images = self.get_images()
-        item_images = [
-            self.get_images(item_id=question.item_id, include_global=False)
+        """Interleave the exact rendered questions with their assigned media."""
+        global_media = self.get_media()
+        item_media = [
+            self.get_media(item_id=question.item_id, include_global=False)
             for question in self._questions
         ]
-        if not global_images and not any(item_images):
+        if not global_media and not any(item_media):
             return prompt
 
         rendered_questionnaire = item_separator.join(rendered_questions)
         if prompt.count(rendered_questionnaire) != 1:
             raise ValueError(
-                "Image-bearing battery prompts must contain the rendered questionnaire "
+                "Media-bearing battery prompts must contain the rendered questionnaire "
                 "items exactly once via the question placeholder."
             )
         prefix, suffix = prompt.split(rendered_questionnaire, maxsplit=1)
@@ -693,11 +868,11 @@ class LLMPrompt:
         blocks: list[PromptContentBlock] = []
         if prefix:
             blocks.append(prefix)
-        blocks.extend(global_images)
-        for index, (question_text, images) in enumerate(zip(rendered_questions, item_images)):
+        blocks.extend(global_media)
+        for index, (question_text, media) in enumerate(zip(rendered_questions, item_media)):
             separator = item_separator if index else ""
             blocks.append(f"{separator}{question_text}")
-            blocks.extend(images)
+            blocks.extend(media)
         if suffix:
             blocks.append(suffix)
         return tuple(blocks)
@@ -711,7 +886,7 @@ class LLMPrompt:
         """Finalize chat or completion output after prompt construction."""
         if inference_mode == "completion":
             if not isinstance(prompt_content, str):
-                raise ValueError("Image-bearing prompts are supported only in chat mode.")
+                raise ValueError("Media-bearing prompts are supported only in chat mode.")
             return None, self.render_base_model_prompt(system_prompt, [prompt_content])
         if inference_mode != "chat":
             raise ValueError("`inference_mode` must be either 'chat' or 'completion'.")
@@ -736,13 +911,13 @@ class LLMPrompt:
             inference_mode: Return chat content or a rendered completion prompt.
 
         Returns:
-            The system prompt and user content. Image-free user content remains a
-            string; image-bearing chat content is returned as ordered text and
-            ImageInput blocks.
+            The system prompt and user content. Media-free user content remains a
+            string; media-bearing chat content is returned as ordered text and
+            ImageInput, AudioInput, and VideoInput blocks.
 
         Raises:
             ValueError: If the requested item, presentation, or inference mode is
-                invalid, or images are used with completion mode.
+                invalid, or media are used with completion mode.
         """
         question_item, reference_item_position = self._resolve_prompt_question(
             item_id,
@@ -773,7 +948,7 @@ class LLMPrompt:
         else:
             prompt_content = combine_prompt_content(
                 prompt,
-                self.get_images(item_id=question_item.item_id),
+                self.get_media(item_id=question_item.item_id),
             )
 
         return self._finalize_rendered_prompt(
@@ -953,12 +1128,12 @@ class LLMPrompt:
     def replace_question(self, position: int, questionnaire_item: QuestionnaireItem) -> None:
         """Replace the question at a given index."""
         self._questions[position] = questionnaire_item
-        self._drop_stale_item_images()
+        self._drop_stale_item_media()
 
     def remove_question(self, position: int) -> None:
         """Remove the question at a given index."""
         del self._questions[position]
-        self._drop_stale_item_images()
+        self._drop_stale_item_media()
 
     def get_question_item_id(self, position: int) -> Any:
         """Return the questionnaire item id at a given index."""
@@ -1013,7 +1188,7 @@ class LLMPrompt:
             questionnaire_questions.append(generated_questionnaire_question)
 
         self._questions = questionnaire_questions
-        self._drop_stale_item_images()
+        self._drop_stale_item_media()
         return self
 
     # TODO Item order could be given by ids
