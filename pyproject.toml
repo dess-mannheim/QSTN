@@ -18,6 +18,7 @@ dependencies = [
     "openai",
     "tiktoken",
     "json_repair",
+    "tqdm",
 ]
 
 classifiers = [
