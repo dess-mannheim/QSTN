@@ -44,7 +44,10 @@ def _latest_stable_tag() -> str | None:
     return None
 
 
-release = _latest_stable_tag() or qstn.__version__
+if os.environ.get("READTHEDOCS") == "True":
+    release = qstn.__version__
+else:
+    release = _latest_stable_tag() or qstn.__version__
 
 extensions = [
     "sphinx.ext.autodoc",  # Core library to pull documentation from docstrings
