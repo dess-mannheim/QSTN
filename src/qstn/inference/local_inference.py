@@ -30,6 +30,7 @@ logger = get_logger(__name__)
 
 
 def _prepare_vllm_generation(
+    model: LLM,
     batch_size: int,
     response_generation_method: ResponseGenerationMethod | list[ResponseGenerationMethod] | None,
     seed: int,
@@ -55,11 +56,13 @@ def _prepare_vllm_generation(
         generation_kwargs.pop("sampling_params")
 
     gen_kwargs, call_kwargs = _split_kwargs(generation_kwargs)
+    # Priority: user arguments > the model's generation config > vLLM's defaults.
+    sampling_kwargs = {**_get_model_default_sampling_kwargs(model), **gen_kwargs}
     sampling_params_list = _create_sampling_params(
         batch_size=batch_size,
         seeds=seeds,
         response_generation_method=response_generation_method,
-        **gen_kwargs,
+        **sampling_kwargs,
     )
     return sampling_params_list, print_progress, call_kwargs, logprob_config
 
@@ -107,6 +110,7 @@ def _run_vllm_chat_pipeline(
 ) -> tuple[list[str], list[str], list[str]]:
     """Run the shared vLLM chat pipeline for single and conversation batching."""
     sampling_params_list, print_progress, chat_kwargs, logprob_config = _prepare_vllm_generation(
+        model=model,
         batch_size=len(batch_messages),
         response_generation_method=response_generation_method,
         seed=seed,
@@ -146,6 +150,7 @@ def _run_vllm_completion_pipeline(
     """Run vLLM completion generation for base models."""
     sampling_params_list, print_progress, generate_kwargs, logprob_config = (
         _prepare_vllm_generation(
+            model=model,
             batch_size=len(batch_messages),
             response_generation_method=response_generation_method,
             seed=seed,
@@ -332,6 +337,19 @@ def default_model_init(model_id: str, seed: int = 42, **model_keywords) -> LLM:
         seed=seed,
         **model_keywords,
     )
+
+
+def _get_model_default_sampling_kwargs(model: LLM) -> dict[str, Any]:
+    """
+    Get the sampling parameters set by the model's generation config.
+
+    vLLM only applies these when no SamplingParams are passed, which is never the
+    case here because every prompt gets its own seed. The result only holds values
+    the model sets, so all other parameters keep vLLM's defaults.
+    """
+    # Fills model.default_sampling_params, so that the config is only loaded once.
+    model.get_default_sampling_params()
+    return dict(model.default_sampling_params or {})
 
 
 def _get_sampling_field_names() -> set[str]:

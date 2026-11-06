@@ -384,6 +384,9 @@ def conduct_survey_single_item(
             "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters that will be given to vllm,
             vllm.SamplingParams, or OpenAI-compatible generation calls.
+            With local vLLM models, sampling parameters not set here fall back to the
+            model's generation config. Create the LLM with generation_config="vllm"
+            to use vLLM's defaults instead.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and
@@ -555,6 +558,9 @@ def conduct_survey_battery(
             "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters that will be given
             to vllm, vllm.SamplingParams, or OpenAI-compatible generation calls.
+            With local vLLM models, sampling parameters not set here fall back to the
+            model's generation config. Create the LLM with generation_config="vllm"
+            to use vLLM's defaults instead.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and
@@ -661,6 +667,9 @@ def conduct_survey_sequential(
             "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters that will be given
             to vllm, vllm.SamplingParams, or OpenAI-compatible generation calls.
+            With local vLLM models, sampling parameters not set here fall back to the
+            model's generation config. Create the LLM with generation_config="vllm"
+            to use vLLM's defaults instead.
 
     Returns:
         List(InferenceResult): A list of results containing the survey data and

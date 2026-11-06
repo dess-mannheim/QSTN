@@ -182,7 +182,10 @@ def batch_generation(
             most byte-pair tokenizers).
         inference_mode (str): Use "chat" for message-based models or
             "completion" for base-model text generation. Defaults to "chat".
-        generation_kwargs: Additional generation parameters
+        generation_kwargs: Additional generation parameters.
+            With local vLLM models, sampling parameters not set here fall back to the
+            model's generation config. Create the LLM with generation_config="vllm"
+            to use vLLM's defaults instead.
 
     Returns:
         Tuple[List[str], List[str], List[str]]: Generated Response, Logprobs, Reasoning
@@ -316,6 +319,9 @@ def batch_turn_by_turn_generation(
         inference_mode (str): Use "chat" for message-based models or
             "completion" for base-model text generation. Defaults to "chat".
         generation_kwargs: Additional generation parameters.
+            With local vLLM models, sampling parameters not set here fall back to the
+            model's generation config. Create the LLM with generation_config="vllm"
+            to use vLLM's defaults instead.
 
     Returns:
         Tuple[List[str], List[str], List[str]]: Generated Response, Logprobs, Reasoning
