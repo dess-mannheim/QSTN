@@ -4,11 +4,14 @@ import pytest
 
 from qstn.inference import local_inference, survey_inference
 from qstn.inference.local_inference import run_vllm_batch, run_vllm_batch_conversation
+from qstn.inference.response_generation import LogprobResponseGenerationMethod
 
 
 class DummyModel:
-    def __init__(self, return_texts):
+    def __init__(self, return_texts, generation_config=None):
         self.return_texts = return_texts
+        self.generation_config = generation_config or {}
+        self.default_sampling_params = None
         self.last_chat = None
         self.last_generate = None
 
@@ -56,6 +59,12 @@ class DummyModel:
 
     def get_tokenizer(self):
         return self._tokenizer
+
+    def get_default_sampling_params(self):
+        # vLLM lazily caches the model's generation config on this attribute.
+        if self.default_sampling_params is None:
+            self.default_sampling_params = self.generation_config
+        return local_inference.SamplingParams(**self.default_sampling_params)
 
 
 def test_run_vllm_batch_basic(monkeypatch):
@@ -193,3 +202,67 @@ def test_run_vllm_batch_conversation_completion_mode_uses_final_prompt_text():
     )
 
     assert model.last_generate["prompts"] == ["p2"]
+
+
+@pytest.mark.parametrize(
+    ("inference_mode", "last_call"), [("chat", "last_chat"), ("completion", "last_generate")]
+)
+def test_run_vllm_batch_prefers_user_args_over_model_defaults(
+    monkeypatch, inference_mode, last_call
+):
+    """Sampling priority is user args, then the model's generation config."""
+    monkeypatch.setattr(
+        local_inference, "_get_sampling_field_names", lambda: {"temperature", "max_tokens"}
+    )
+    model = DummyModel(["hello"], generation_config={"temperature": 0.6, "top_p": 0.9})
+
+    run_vllm_batch(
+        model,
+        system_messages=[None],
+        prompts=["p"],
+        inference_mode=inference_mode,
+        temperature=0.1,
+        max_tokens=7,
+    )
+
+    params = getattr(model, last_call)["sampling_params"][0]
+    assert params.temperature == 0.1
+    assert params.top_p == 0.9
+    assert params.max_tokens == 7
+
+
+def test_run_vllm_batch_conversation_uses_model_defaults():
+    model = DummyModel(["a"], generation_config={"temperature": 0.6})
+
+    run_vllm_batch_conversation(
+        model,
+        system_messages=["s"],
+        prompts=[["p"]],
+        assistant_messages=[[]],
+    )
+
+    assert model.last_chat["sampling_params"][0].temperature == 0.6
+
+
+def test_run_vllm_batch_without_generation_config_keeps_vllm_defaults():
+    model = DummyModel(["hello"])
+
+    run_vllm_batch(model, system_messages=["s"], prompts=["p"], seed=123)
+
+    assert not hasattr(model.last_chat["sampling_params"][0], "temperature")
+
+
+def test_run_vllm_batch_logprob_token_limit_overrides_model_default(monkeypatch):
+    monkeypatch.setattr(local_inference, "_get_sampling_field_names", lambda: {"max_tokens"})
+    model = DummyModel(["hello"], generation_config={"max_tokens": 512})
+
+    run_vllm_batch(
+        model,
+        system_messages=["s"],
+        prompts=["p"],
+        response_generation_method=LogprobResponseGenerationMethod(
+            token_limit=1, constrain_answer_options=False
+        ),
+    )
+
+    assert model.last_chat["sampling_params"][0].max_tokens == 1

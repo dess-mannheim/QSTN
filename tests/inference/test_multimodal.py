@@ -20,6 +20,10 @@ from qstn.inference.multimodal import (
 class CaptureModel:
     def __init__(self):
         self.batch_messages = None
+        self.default_sampling_params = {}
+
+    def get_default_sampling_params(self):
+        return None
 
     def chat(self, batch_messages, **kwargs):
         del kwargs
